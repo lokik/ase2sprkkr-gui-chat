@@ -6,6 +6,7 @@ and licensed under GNU LGPL version 3 or later:
 - `labplot-xy-interpolation-curve.svg`
 - `run-build-clean.svg`
 - `system-run.svg`
+- `document-export.svg` (NeXus export action, KDE Breeze)
 
 See `COPYING-ICONS` and https://develop.kde.org/frameworks/breeze-icons/.
 

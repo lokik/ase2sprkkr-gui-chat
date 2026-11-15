@@ -20,6 +20,11 @@ dependencies = [
   "ase2sprkkr>=4.0.0b3,<5",
 ]
 
+[project.optional-dependencies]
+plot = ["ase2sprkkr[plot]>=4.0.0b5,<5"]
+nexus = ["ase2sprkkr[nexus]>=4.0.0b4,<5"]
+mendeleev = ["ase2sprkkr[mendeleev]>=4.0.0b5,<5"]
+
 [project.scripts]
 "ase2sprkkr-gui" = "ase2sprkkr_gui.main:main"
 

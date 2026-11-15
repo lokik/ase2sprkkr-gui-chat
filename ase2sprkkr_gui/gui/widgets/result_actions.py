@@ -42,6 +42,7 @@ _STANDARD_ICONS = {
 _ACTION_LABELS = {
     "data": "View data",
     "open_directory": "Open containing directory",
+    "export_nexus": "Export to NeXus",
 }
 _RESULT_ID_ROLE = int(Qt.ItemDataRole.UserRole)
 _STRUCTURE_ID_ROLE = _RESULT_ID_ROLE + 1
@@ -50,6 +51,8 @@ _STRUCTURE_ID_ROLE = _RESULT_ID_ROLE + 1
 def result_action_icon(style: QStyle, action: str) -> QIcon:
     if action == "plot":
         return QIcon(str(_PLOT_ICON))
+    if action == "export_nexus":
+        return QIcon(str(icon_path("document-export.svg")))
     return style.standardIcon(
         _STANDARD_ICONS.get(action, QStyle.StandardPixmap.SP_FileIcon)
     )
