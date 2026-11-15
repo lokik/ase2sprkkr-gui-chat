@@ -14,6 +14,7 @@ from ase2sprkkr_gui.gui.widgets.settings.ase2sprkkr import (
     Ase2sprkkrSettingsPage,
     output_filter_value,
     output_filter_selection,
+    selected_output_filter_value,
 )
 
 
@@ -63,32 +64,102 @@ def test_output_filter_value_translates_modes_and_validates_regex():
 
 
 @pytest.mark.parametrize(
-    ("stored", "mode", "regex"),
+    ("stored", "all_output", "info", "matching", "regex"),
     [
-        (True, "all", ""),
-        (False, "none", ""),
-        ("info", "info_regex", ""),
-        (("info",), "info_regex", ""),
-        (("info", "info"), "info_regex", ""),
-        (("ERROR", "WARNING"), "regex", '"ERROR"|"WARNING"'),
-        (("info", "ERROR", "WARNING"), "info_regex",
+        (True, True, False, False, ""),
+        (False, False, False, False, ""),
+        ("info", False, True, False, ""),
+        (("info",), False, True, False, ""),
+        (("info", "info"), False, True, False, ""),
+        (("ERROR", "WARNING"), False, False, True, '"ERROR"|"WARNING"'),
+        (("info", "ERROR", "WARNING"), False, True, True,
          '"ERROR"|"WARNING"'),
-        ((False, "info", "WARN"), "info_regex", "WARN"),
-        ((True, "info", "WARN"), "all", ""),
-        ((False, False), "none", ""),
-        ((), "none", ""),
-        (("", "ERROR"), "regex", '""|"ERROR"'),
+        ((False, "info", "WARN"), False, True, True, "WARN"),
+        ((True, "info", "WARN"), True, False, False, ""),
+        ((False, False), False, False, False, ""),
+        ((), False, False, False, ""),
+        (("", "ERROR"), False, False, True, '""|"ERROR"'),
+        ("('info')", False, True, False, ""),
+        ('("info",)', False, True, False, ""),
+        ("('info', 'WARN')", False, True, True, "WARN"),
+        ("('info' | 'ERROR')", False, True, True, "ERROR"),
+        ('("info" | "ERROR")', False, True, True, "ERROR"),
+        ("('ERROR' | 'info')", False, True, True, "ERROR"),
+        ("('info' | 'ERROR' | 'WARNING')", False, True, True,
+         '"ERROR"|"WARNING"'),
+        ("('info' | 'ERROR|WARNING')", False, True, True,
+         "ERROR|WARNING"),
+        ("('info' | '(?i)ERROR')", False, True, True, "(?i)ERROR"),
     ],
 )
-def test_existing_filter_combinations_map_to_gui(stored, mode, regex):
-    assert output_filter_selection(stored) == (mode, regex)
+def test_existing_filter_combinations_map_to_checkboxes(
+    stored, all_output, info, matching, regex
+):
+    assert output_filter_selection(stored) == (
+        all_output, info, matching, regex
+    )
+
+
+def test_checkbox_state_converts_to_core_filter():
+    assert selected_output_filter_value(True, True, True, "[") is True
+    assert selected_output_filter_value(False, True, False, "[") == "info"
+    assert selected_output_filter_value(False, False, False, "ERROR") is False
+    assert selected_output_filter_value(False, True, True, "ERROR") == (
+        "info", "ERROR"
+    )
+    assert selected_output_filter_value(
+        False, False, True, '"ERROR"|"WARNING"'
+    ) == ("ERROR", "WARNING")
+    with pytest.raises(ValueError, match="Enter a regular expression"):
+        selected_output_filter_value(False, False, True, "")
+    with pytest.raises(ValueError, match="Invalid output regular expression"):
+        selected_output_filter_value(False, True, True, "[")
+
+
+def test_legacy_info_regex_alternation_migrates_on_save(monkeypatch):
+    _application = _app()
+    configuration = _configuration()
+    configuration.running.print_output.set("('info' | 'ERROR')")
+    saves = _capture_saves(monkeypatch, configuration)
+
+    page = Ase2sprkkrSettingsPage(configuration=configuration)
+    assert page.print_info.isChecked()
+    assert page.print_regex.isChecked()
+    assert not page.print_all.isChecked()
+    assert page.output_filter.text() == "ERROR"
+    assert page.changes() == [
+        (configuration.running.print_output, ("info", "ERROR"))
+    ]
+
+    page.save()
+    assert tuple(configuration.running.print_output()) == ("info", "ERROR")
+    assert len(saves) == 1
+    page.close()
+
+    reloaded = Ase2sprkkrSettingsPage(configuration=configuration)
+    assert reloaded.print_info.isChecked()
+    assert reloaded.print_regex.isChecked()
+    assert reloaded.output_filter.text() == "ERROR"
+    assert reloaded.changes() == []
+    reloaded.close()
+
+
+def test_ordinary_regex_with_info_text_is_not_reinterpreted():
+    # A quoted legacy alternation is recognizable, but a normal regex is not
+    # a serialized tuple of print_output options.
+    regex = "(?:info|ERROR)"
+    assert output_filter_selection(regex) == (False, False, True, regex)
+    quoted_without_info = "('ERROR' | 'WARNING')"
+    assert output_filter_selection(quoted_without_info) == (
+        False, False, True, quoted_without_info
+    )
 
 
 def test_regex_combination_preserves_inline_flags():
-    mode, regex = output_filter_selection(
+    all_output, info, matching, regex = output_filter_selection(
         ("(?i)error", "(?m)^warning")
     )
-    assert mode == "regex"
+    assert (all_output, info, matching) == (False, False, True)
     assert regex == '"(?i)error"|"(?m)^warning"'
     from ase2sprkkr.common.output_printing import parse_output_regexes
 
@@ -110,7 +181,8 @@ def test_shared_settings_page_stages_changes_until_save(monkeypatch):
 
     assert "ase2sprkkr library settings" in page.scope_notice.text()
     page.empty_spheres.setCurrentIndex(page.empty_spheres.findData(True))
-    page.output_mode.setCurrentIndex(page.output_mode.findData("info_regex"))
+    assert page.print_info.isChecked()
+    page.print_regex.setChecked(True)
     page.output_filter.setText("ERROR")
     page.nomad_token.setText("new-secret")
 
@@ -208,53 +280,73 @@ def test_cancelling_settings_dialog_never_saves_shared_values(tmp_path, monkeypa
     dialog.close()
 
 
-def test_output_mode_combobox_and_regex_field_visibility():
+def test_output_checkboxes_and_regex_field_enablement():
     _application = _app()
     page = Ase2sprkkrSettingsPage(configuration=_configuration())
-    assert [
-        page.output_mode.itemText(i) for i in range(page.output_mode.count())
-    ] == ["All", "Info+Regex", "Regex", "None"]
-    assert page.output_mode.currentData() == "info_regex"
+    assert page.print_all.text() == "Print all output"
+    assert page.print_info.text() == "Print summary info"
+    assert page.print_regex.text() == "Print lines matching regex"
+    assert not page.print_all.isChecked()
+    assert page.print_info.isChecked()
+    assert not page.print_regex.isChecked()
     assert page.output_filter.text() == ""
     assert not page.output_filter.isHidden()
     assert not page.regex_label.isHidden()
-    assert "summary alone" in page.regex_hint.text()
+    assert not page.output_filter.isEnabled()
 
-    page.output_mode.setCurrentIndex(page.output_mode.findData("all"))
-    assert page.output_filter.isHidden()
-    assert page.regex_label.isHidden()
-    assert page.regex_hint.isHidden()
-
-    page.output_mode.setCurrentIndex(page.output_mode.findData("regex"))
-    assert not page.output_filter.isHidden()
-    assert not page.regex_label.isHidden()
-    assert "Only matching lines" in page.regex_hint.text()
+    page.print_regex.setChecked(True)
+    assert page.output_filter.isEnabled()
     page.output_filter.setText("WARNING")
-    assert page.changes() == [(page._config.running.print_output, "WARNING")]
+    assert page.changes() == [
+        (page._config.running.print_output, ("info", "WARNING"))
+    ]
 
-    page.output_mode.setCurrentIndex(page.output_mode.findData("none"))
-    assert page.output_filter.isHidden()
-    assert page.regex_label.isHidden()
-    assert page.changes() == [(page._config.running.print_output, False)]
+    page.print_info.setChecked(False)
+    assert page.changes() == [
+        (page._config.running.print_output, "WARNING")
+    ]
+
+    page.print_all.setChecked(True)
+    assert page.print_all.isChecked()
+    assert not page.print_info.isChecked()
+    assert not page.print_regex.isChecked()
+    assert not page.print_info.isEnabled()
+    assert not page.print_regex.isEnabled()
+    assert not page.output_filter.isEnabled()
+    assert not page.output_filter.isHidden()
+    assert page.changes() == [
+        (page._config.running.print_output, True)
+    ]
+
+    page.print_all.setChecked(False)
+    assert page.print_info.isEnabled()
+    assert page.print_regex.isEnabled()
+    assert page.changes() == [
+        (page._config.running.print_output, False)
+    ]
     page.close()
 
 
 @pytest.mark.parametrize(
-    ("stored", "mode", "regex"),
+    ("stored", "all_output", "info", "matching", "regex"),
     [
-        (True, "all", ""),
-        (False, "none", ""),
-        ("info", "info_regex", ""),
-        ("ERROR|WARNING", "regex", "ERROR|WARNING"),
-        (("info", "ERROR|WARNING"), "info_regex", "ERROR|WARNING"),
+        (True, True, False, False, ""),
+        (False, False, False, False, ""),
+        ("info", False, True, False, ""),
+        ("ERROR|WARNING", False, False, True, "ERROR|WARNING"),
+        (("info", "ERROR|WARNING"), False, True, True, "ERROR|WARNING"),
     ],
 )
-def test_output_mode_roundtrip_existing_values(stored, mode, regex):
+def test_output_checkboxes_roundtrip_existing_values(
+    stored, all_output, info, matching, regex
+):
     _application = _app()
     configuration = _configuration()
     configuration.running.print_output.set(stored)
     page = Ase2sprkkrSettingsPage(configuration=configuration)
-    assert page.output_mode.currentData() == mode
+    assert page.print_all.isChecked() is all_output
+    assert page.print_info.isChecked() is info
+    assert page.print_regex.isChecked() is matching
     assert page.output_filter.text() == regex
     assert page.changes() == []
     page.close()
@@ -263,12 +355,15 @@ def test_output_mode_roundtrip_existing_values(stored, mode, regex):
 def test_custom_regex_requires_valid_pattern_before_save():
     _application = _app()
     page = Ase2sprkkrSettingsPage(configuration=_configuration())
-    page.output_mode.setCurrentIndex(page.output_mode.findData("regex"))
+    page.print_info.setChecked(False)
+    page.print_regex.setChecked(True)
     with pytest.raises(ValueError, match="Enter a regular expression"):
         page.changes()
     page.output_filter.setText("[")
     with pytest.raises(ValueError, match="Invalid output regular expression"):
         page.changes()
+    page.print_regex.setChecked(False)
+    assert page.changes() == [(page._config.running.print_output, False)]
     page.close()
 
 
@@ -378,7 +473,9 @@ def test_loading_multiple_regexes_does_not_rewrite_them_on_other_changes(monkeyp
     saves = _capture_saves(monkeypatch, configuration)
 
     page = Ase2sprkkrSettingsPage(configuration=configuration)
-    assert page.output_mode.currentData() == "info_regex"
+    assert page.print_info.isChecked()
+    assert page.print_regex.isChecked()
+    assert not page.print_all.isChecked()
     assert page.output_filter.text() == '"ERROR"|"WARNING"'
     assert page.changes() == []
 
@@ -400,8 +497,57 @@ def test_all_combination_maps_to_all_and_preserves_existing_until_changed(monkey
     configuration = _configuration()
     configuration.running.print_output.set(("info", "ERROR", "WARNING"))
     page = Ase2sprkkrSettingsPage(configuration=configuration)
-    assert page.output_mode.currentData() == "info_regex"
+    assert page.print_info.isChecked()
+    assert page.print_regex.isChecked()
     assert page.changes() == []
-    page.output_mode.setCurrentIndex(page.output_mode.findData("all"))
+    page.print_all.setChecked(True)
+    assert not page.print_info.isChecked()
+    assert not page.print_regex.isChecked()
     assert page.changes() == [(configuration.running.print_output, True)]
+    page.close()
+
+
+@pytest.mark.parametrize("stored", [
+    "info",
+    ("info",),
+    "('info')",
+    '("info",)',
+])
+def test_info_is_a_checkbox_not_a_regex(stored, monkeypatch):
+    _application = _app()
+    configuration = _configuration()
+    configuration.running.print_output.set(stored)
+    saved = _capture_saves(monkeypatch, configuration)
+    page = Ase2sprkkrSettingsPage(configuration=configuration)
+    assert page.print_info.isChecked()
+    assert not page.print_regex.isChecked()
+    assert not page.print_all.isChecked()
+    assert page.output_filter.text() == ""
+    if isinstance(stored, str) and stored != "info":
+        assert page.changes() == [(configuration.running.print_output, "info")]
+        page.save()
+        assert configuration.running.print_output() == "info"
+        assert len(saved) == 1
+    else:
+        assert page.changes() == []
+    page.close()
+
+
+def test_regex_text_is_preserved_when_checkbox_disabled(monkeypatch):
+    _application = _app()
+    configuration = _configuration()
+    configuration.running.print_output.set(("info", "ERROR"))
+    saved = _capture_saves(monkeypatch, configuration)
+    page = Ase2sprkkrSettingsPage(configuration=configuration)
+    assert page.print_regex.isChecked()
+    page.print_regex.setChecked(False)
+    assert not page.output_filter.isEnabled()
+    assert page.output_filter.text() == "ERROR"
+    page.save()
+    assert configuration.running.print_output() == "info"
+    assert len(saved) == 1
+    page.print_regex.setChecked(True)
+    page.save()
+    assert tuple(configuration.running.print_output()) == ("info", "ERROR")
+    assert len(saved) == 2
     page.close()

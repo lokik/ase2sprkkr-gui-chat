@@ -1,6 +1,7 @@
 """Editor for ase2sprkkr's shared (non-GUI) user configuration."""
 from __future__ import annotations
 
+import ast
 import re
 from typing import Any
 
@@ -24,15 +25,70 @@ from ase2sprkkr.common.output_printing import (
 )
 
 
-def output_filter_selection(value: Any) -> tuple[str, str] | None:
-    """Project core ase2sprkkr output normalization onto the four GUI modes."""
+def _legacy_info_value(value: Any) -> Any:
+    """Migrate legacy quoted alternatives containing the special info mode.
+
+    Some older settings contain regex strings such as ('info' | 'ERROR'),
+    rather than the tuple ('info', 'ERROR'). Interpret only a complete
+    parenthesized expression made of quoted string literals, separated
+    by | or commas, and containing 'info'. Other regexes are untouched.
+    """
+    if not isinstance(value, str):
+        return value
+    source = value.strip()
+    if not (source.startswith("(") and source.endswith(")")):
+        return value
     try:
-        normalized = normalize_output_filter(value)
+        expression = ast.parse(source, mode="eval").body
+    except SyntaxError:
+        return value
+
+    def string_items(node: ast.AST) -> tuple[str, ...] | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return (node.value,)
+        if isinstance(node, (ast.Tuple, ast.List)):
+            items = [string_items(item) for item in node.elts]
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            items = [string_items(node.left), string_items(node.right)]
+        else:
+            return None
+        if any(item is None for item in items):
+            return None
+        return tuple(part for item in items for part in item)
+
+    items = string_items(expression)
+    if not items or "info" not in items:
+        return value
+    return items if len(items) > 1 else "info"
+
+
+def output_filter_selection(value: Any) -> tuple[bool, bool, bool, str] | None:
+    """Project core normalization onto three checkboxes and a regex field."""
+    try:
+        normalized = normalize_output_filter(_legacy_info_value(value))
         if normalized.listeners:
             return None
-        return normalized.mode, normalized.regex_text
+        return (
+            normalized.all_output,
+            normalized.info,
+            bool(normalized.regexes),
+            normalized.regex_text,
+        )
     except (TypeError, ValueError, re.error):
         return None
+
+
+def selected_output_filter_value(
+    print_all: bool, print_info: bool, print_regex: bool, regex: str
+) -> Any:
+    """Build a canonical core configuration value from checkbox state."""
+    if print_all:
+        return output_filter_value("all", "")
+    if print_regex:
+        return output_filter_value("info_regex" if print_info else "regex", regex)
+    if print_info:
+        return output_filter_value("info_regex", "")
+    return output_filter_value("none", "")
 
 
 class Ase2sprkkrSettingsPage(QFrame):
@@ -86,50 +142,72 @@ class Ase2sprkkrSettingsPage(QFrame):
         )
         running_form.addRow("Empty spheres:", self.empty_spheres)
 
-        self.output_mode = QComboBox(running_group)
-        self.output_mode.addItem("All", "all")
-        self.output_mode.addItem("Info+Regex", "info_regex")
-        self.output_mode.addItem("Regex", "regex")
-        self.output_mode.addItem("None", "none")
+        self.print_all = QCheckBox("Print all output", running_group)
+        self.print_info = QCheckBox("Print summary info", running_group)
+        self.print_regex = QCheckBox("Print lines matching regex", running_group)
+        self.print_all.setToolTip(
+            "Print the complete SPR-KKR output. This overrides the other filters."
+        )
+        self.print_info.setToolTip(
+            "Print the processed SCF iteration and convergence summary."
+        )
+        self.print_regex.setToolTip(
+            "Print complete output lines matching the regular expression below."
+        )
+        output_controls = QWidget(running_group)
+        output_layout = QVBoxLayout(output_controls)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.setSpacing(4)
+        for option in (self.print_all, self.print_info, self.print_regex):
+            output_layout.addWidget(option)
+        running_form.addRow("Program output:", output_controls)
 
         self.output_filter = QLineEdit(running_group)
         self.output_filter.setPlaceholderText("e.g. ERROR|WARNING")
         self.output_filter.setToolTip(
-            'One regex (ERROR|WARNING) or multiple separate regexes '
+            'One regex (ERROR|WARNING), or separate regexes '
             '("ERROR"|"WARNING"). Double quotes inside quoted patterns.'
         )
         self.regex_label = QLabel("Regex:", running_group)
         self.regex_hint = QLabel(
-            "Info+Regex also displays the SCF iteration summary. "
-            "Leave the regex empty for the summary alone.",
+            'One regex: ERROR|WARNING. Separate regexes: "ERROR"|"WARNING".',
             running_group,
         )
         self.regex_hint.setWordWrap(True)
 
         selected = output_filter_selection(self._original_output)
         if selected is None:
-            # The editor deliberately supports four common modes only. Do
-            # not rewrite an unsupported configuration on an unrelated Save.
-            mode, regex = "none", ""
+            # Keep unrepresentable settings unchanged until explicitly edited.
+            all_output, info, regex_enabled, regex = False, False, False, ""
         else:
-            mode, regex = selected
+            all_output, info, regex_enabled, regex = selected
+        self.print_all.setChecked(all_output)
+        self.print_info.setChecked(info)
+        self.print_regex.setChecked(regex_enabled)
         self.output_filter.setText(regex)
-        self._output_edited = False
-        self.output_mode.setCurrentIndex(self.output_mode.findData(mode))
-        running_form.addRow("Program output:", self.output_mode)
+        # Migrate accidentally stringified info tuples on the next Save.
+        self._output_edited = (
+            selected is not None
+            and _legacy_info_value(self._original_output) != self._original_output
+        )
+
         running_form.addRow(self.regex_label, self.output_filter)
         running_form.addRow("", self.regex_hint)
-        self.output_mode.currentIndexChanged.connect(self._output_mode_changed)
-        self.output_filter.textChanged.connect(self._regex_edited)
-        self._update_output_mode()
+
         self.output_compatibility_note = QLabel(running_group)
         self.output_compatibility_note.setWordWrap(True)
         self.output_compatibility_note.setText(
-            "The existing output configuration cannot be represented by the "
-            "four modes. It will be preserved unless you choose a new mode."
+            "The existing output configuration cannot be represented by "
+            "these controls. It will be preserved unless you edit the output filters."
         )
-        self.output_compatibility_note.setVisible(selected is None)
         running_form.addRow("", self.output_compatibility_note)
+        self.output_compatibility_note.setVisible(selected is None)
+
+        self.print_all.toggled.connect(self._all_output_changed)
+        self.print_info.toggled.connect(self._output_checkbox_changed)
+        self.print_regex.toggled.connect(self._output_checkbox_changed)
+        self.output_filter.textChanged.connect(self._regex_edited)
+        self._update_output_controls()
 
         layout.addWidget(running_group)
 
@@ -155,32 +233,30 @@ class Ase2sprkkrSettingsPage(QFrame):
         layout.addWidget(nomad_group)
         layout.addStretch(1)
 
-    def _output_mode_changed(self, _index: int) -> None:
+    def _all_output_changed(self, checked: bool) -> None:
+        if checked:
+            # All already includes every raw line, so extra filters are
+            # redundant. Keep the controls aligned with core normalization.
+            self.print_info.setChecked(False)
+            self.print_regex.setChecked(False)
+        self._output_checkbox_changed()
+
+    def _output_checkbox_changed(self, _checked: bool = False) -> None:
         self._output_edited = True
         self.output_compatibility_note.setVisible(False)
-        self._update_output_mode()
+        self._update_output_controls()
 
     def _regex_edited(self, _text: str) -> None:
         self._output_edited = True
         self.output_compatibility_note.setVisible(False)
 
-    def _update_output_mode(self) -> None:
-        mode = self.output_mode.currentData()
-        needs_regex = mode in ("info_regex", "regex")
-        self.regex_label.setVisible(needs_regex)
-        self.output_filter.setVisible(needs_regex)
-        self.regex_hint.setVisible(needs_regex)
-        if mode == "regex":
-            self.regex_hint.setText(
-                'Only matching lines are displayed. Multiple separate '
-                'regexes: "ERROR"|"WARNING".'
-            )
-        elif mode == "info_regex":
-            self.regex_hint.setText(
-                "Show SCF iteration summaries plus matching lines. "
-                'Leave empty for the summary alone; multiple regexes: '
-                '"ERROR"|"WARNING".'
-            )
+    def _update_output_controls(self) -> None:
+        selective = not self.print_all.isChecked()
+        self.print_info.setEnabled(selective)
+        self.print_regex.setEnabled(selective)
+        self.output_filter.setEnabled(
+            selective and self.print_regex.isChecked()
+        )
 
     def changes(self) -> list[tuple[Any, Any]]:
         """Validate the draft and return only actual changes."""
@@ -193,8 +269,11 @@ class Ase2sprkkrSettingsPage(QFrame):
         # Preserve the original representation until the user edits the mode
         # or regex text.
         if self._output_edited:
-            output = output_filter_value(
-                self.output_mode.currentData(), self.output_filter.text()
+            output = selected_output_filter_value(
+                self.print_all.isChecked(),
+                self.print_info.isChecked(),
+                self.print_regex.isChecked(),
+                self.output_filter.text(),
             )
             if output != self._original_output:
                 out.append((self._config.running.print_output, output))
