@@ -14,6 +14,7 @@ from ase2sprkkr_gui.gui.application.execution_profiles import ExecutionProfileSt
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
 from ase2sprkkr_gui.gui.widgets.settings.run_configurations import RunConfigurationsPage
 from ase2sprkkr_gui.gui.widgets.settings.general import GeneralSettingsPage
+from ase2sprkkr_gui.gui.widgets.settings.optional_dependencies import OptionalDependenciesPage
 
 
 class SettingsDialog(QDialog):
@@ -41,6 +42,8 @@ class SettingsDialog(QDialog):
         )
         self.tabs.addTab(self.general_page, "General")
         self.tabs.addTab(self.run_configurations_page, "Run configurations")
+        self.optional_dependencies_page = OptionalDependenciesPage(self.tabs)
+        self.tabs.addTab(self.optional_dependencies_page, "Optional dependencies")
 
         self.viewer = self.general_page.viewer
         self.viewer_warning = self.general_page.viewer_warning
