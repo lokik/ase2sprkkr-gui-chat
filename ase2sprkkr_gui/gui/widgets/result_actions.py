@@ -4,8 +4,9 @@ from collections.abc import Callable
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QMouseEvent, QResizeEvent
+from PyQt6.QtGui import QIcon, QMouseEvent, QResizeEvent, QPalette
 from PyQt6.QtWidgets import (
+    QApplication,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -52,7 +53,12 @@ def result_action_icon(style: QStyle, action: str) -> QIcon:
     if action == "plot":
         return QIcon(str(_PLOT_ICON))
     if action == "export_nexus":
-        return QIcon(str(icon_path("document-export.svg")))
+        # Use official NeXus small-format branding, not a generic export mark.
+        application = QApplication.instance()
+        palette = application.palette() if application is not None else style.standardPalette()
+        dark_background = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        name = "NeXus_Logo_dark_square.svg" if dark_background else "NeXus_Logo_square.svg"
+        return QIcon(str(icon_path(name)))
     return style.standardIcon(
         _STANDARD_ICONS.get(action, QStyle.StandardPixmap.SP_FileIcon)
     )
