@@ -114,11 +114,13 @@ def test_settings_has_independent_frame_tabs(tmp_path):
         profile_store=_FakeProfileStore(),
     )
     assert [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())] == [
-        "General", "Run configurations"
+        "General", "Run configurations", "Optional dependencies"
     ]
-    assert all(isinstance(dialog.tabs.widget(i), QFrame) for i in range(2))
+    assert all(isinstance(dialog.tabs.widget(i), QFrame) for i in range(3))
     assert isinstance(dialog.general_page, GeneralSettingsPage)
     assert isinstance(dialog.run_configurations_page, RunConfigurationsPage)
+    from ase2sprkkr_gui.gui.widgets.settings.optional_dependencies import OptionalDependenciesPage
+    assert isinstance(dialog.optional_dependencies_page, OptionalDependenciesPage)
     assert dialog.general_page.visualization_group.title() == "Visualization"
     assert dialog.general_page.sprkkr_group.title() == "SPR-KKR"
     assert dialog.general_page.python_shell_group.title() == "Python shell"
