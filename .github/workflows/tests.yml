@@ -52,7 +52,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lokik/kkrunner-chat
-          ref: master
+          ref: chatgpt-kkrunner-backend-name
           path: .ci/kkrunner
 
       # The frontend tests target the new historical-result API.
@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lokik/ase2sprkkr-chat
-          ref: develop
+          ref: chatgpt-docs-4.0-audit
           path: .ci/ase2sprkkr
 
       - name: Install package and test dependencies
