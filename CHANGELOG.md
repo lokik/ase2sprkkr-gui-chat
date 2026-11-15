@@ -13,12 +13,15 @@
 - Added a dedicated Ase2sprkkr configuration tab in GUI settings, clearly
   distinguishing library-wide settings from GUI preferences. It edits
   empty-sphere defaults, output filtering, and NOMAD authentication. The
-  output filter offers All, Info+Regex, Regex and None, showing a regex
-  field for the two middle modes. Existing combinations of output filters
-  are represented using an unambiguous quoted tuple
-  (``"ERROR"|"WARNING"``), via the shared normalization in ase2sprkkr;
-  a True/all-output setting takes precedence. Unchanged values are
-  preserved when saving other settings. The default-profile selection lives in the execution-profile
+  output editor offers independent checkboxes for printing all output,
+  printing summary information and printing lines matching a regex. The
+  regex input stays visible, but is enabled only when regex filtering is
+  selected. The all-output option supersedes the other two. Stored
+  ``"info"`` and legacy textual alternatives such as
+  ``('info' | 'ERROR')`` correctly select the summary checkbox and show
+  only ``ERROR`` in the regex field. Multiple regex filters use the shared
+  ``"ERROR"|"WARNING"`` format provided by ase2sprkkr. Unmodified output
+  filters are preserved when saving other settings. The default-profile selection lives in the execution-profile
   editor, with a highlighted default and Make default / Use automatic
   actions. Changes use ase2sprkkr's shared configuration API.
 
