@@ -396,3 +396,28 @@ def test_editor_requires_approval_to_drop_calculated_radial_data(monkeypatch):
     assert dialog.result_atoms is None
     assert dialog.draft.entries[dialog.draft.center].occupation == {"Fe": 1.0}
     assert cluster.sites[0].occupation.to_dict(True) == {"Cu": 1.0}
+
+
+def test_radial_data_reset_requires_explicit_authorization(monkeypatch):
+    parent = host()
+    base = EmbeddingDraft(parent)
+    base.include([base.center])
+    cluster = base.to_atoms()
+    edit = EmbeddingDraft(parent, cluster)
+    edit.set_occupation([edit.center], {"Fe": 1.0})
+    monkeypatch.setattr(edit, "would_discard_radial_data", lambda: True)
+    with pytest.raises(ValueError, match="allow_radial_reset"):
+        edit.to_atoms()
+    changed = edit.to_atoms(allow_radial_reset=True)
+    assert changed.sites[0].occupation.to_dict(True) == {"Fe": 1.0}
+    assert cluster.sites[0].occupation.to_dict(True) == {"Cu": 1.0}
+
+
+def test_embedding_snapshot_has_single_uncopied_host_link():
+    parent = host()
+    draft = EmbeddingDraft(parent)
+    draft.include([draft.center])
+    snapshot = StructureSnapshot.capture(draft.to_atoms())
+    assert snapshot.info["sprkkr_embedding_host"] is parent
+    assert not hasattr(snapshot, "embedding_host")
+    assert snapshot.to_atoms().embedding_host is parent
