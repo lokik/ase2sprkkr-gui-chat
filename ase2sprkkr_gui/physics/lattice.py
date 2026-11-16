@@ -6,13 +6,17 @@ from typing import Any, Literal
 import numpy as np
 from ase2sprkkr import SPRKKRAtoms
 
-StructureKind = Literal["2d", "3d", "unknown"]
+StructureKind = Literal["0d", "2d", "3d", "unknown"]
 
 
 def detect_structure_kind(atoms: Any | None) -> StructureKind | None:
     """Classify structures supported by the bulk and layered workflows."""
     if atoms is None:
         return None
+    # An embedded cluster is finite even though its *host* can be periodic.
+    if ("sprkkr_embedding" in getattr(atoms, "arrays", {})
+            and getattr(atoms, "info", {}).get("sprkkr_embedding_host") is not None):
+        return "0d"
     periodic = sum(atoms.get_pbc())
     if periodic == 3:
         return "3d"
