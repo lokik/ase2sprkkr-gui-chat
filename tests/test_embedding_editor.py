@@ -158,3 +158,61 @@ def test_flow_acceptance_creates_new_structure_and_clears_periodic_run_capabilit
     assert result.embedding_host is parent
     assert controller.structure_kind() == "0d"
     assert not controller.can_calculate()
+
+
+def test_generic_structure_save_does_not_drop_embedding_without_host_potfil(
+    monkeypatch,
+):
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    parent = host()
+    draft = EmbeddingDraft(parent)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    messages = []
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "warning",
+        lambda *args: messages.append(args),
+    )
+    assert file_flows.save_structure(controller, None, None) is False
+    assert messages
+    assert controller.atoms is cluster
+
+
+def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_path):
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from ase2sprkkr.sprkkr.sprkkr_atoms import SPRKKRAtoms
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    class HostPotential:
+        LATTICE = object()
+
+        def __init__(self):
+            self.atoms = host()
+
+    host_potential = HostPotential()
+    cluster = SPRKKRAtoms.from_embedding(
+        host_potential, [(0, (0, 0, 0), "Fe")]
+    )
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    output = tmp_path / "cluster.clu"
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getSaveFileName",
+        lambda *args: (str(output), "SPR-KKR cluster potential (*.clu *.pot)"),
+    )
+
+    class Writer:
+        def save_to_file(self, filename):
+            assert filename == output
+            filename.write_text("CLUPOT", encoding="utf-8")
+
+    def make_writer(atoms, *, scf_status):
+        assert atoms is cluster
+        assert scf_status == "START"
+        return Writer()
+
+    monkeypatch.setattr(ClusterPotential, "from_atoms", make_writer)
+    assert file_flows.save_structure(controller, None, None) is True
+    assert output.read_text() == "CLUPOT"
+    assert not controller.has_unsaved_structure
