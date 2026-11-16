@@ -96,7 +96,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ./kkrunner
           python -m pip install -e ./ase2sprkkr
-          python -m pip install -e ./ase2sprkkr_gui pytest
+          python -m pip install -e ./ase2sprkkr_gui pytest 'setuptools>=61'
 
       - name: Run Ase2sprkkr against selected backend
         working-directory: ase2sprkkr_gui
