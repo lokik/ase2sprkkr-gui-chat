@@ -45,6 +45,7 @@ class ActionIcon(Enum):
     DATABASE = auto()
     SURFACE = auto()
     INTERFACE = auto()
+    EMBEDDING = auto()
     RESULT = auto()
     VIEW = auto()
     CONTINUE = auto()
@@ -80,6 +81,11 @@ class CreateStructure:
 @dataclass(frozen=True)
 class Build2D:
     kind: Build2DKind
+
+
+@dataclass(frozen=True)
+class BuildEmbedding:
+    """Build a new embedded cluster, or edit an existing one."""
 
 
 @dataclass(frozen=True)
@@ -119,6 +125,7 @@ WorkflowCommand = Union[
     UpdateEmptySpheres,
     CreateStructure,
     Build2D,
+    BuildEmbedding,
     Load,
     ContinueRecent,
     VisualizeStructure,
