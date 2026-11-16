@@ -212,7 +212,7 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
         assert scf_status == "START"
         return Writer()
 
-    monkeypatch.setattr(ClusterPotential, "from_atoms", make_writer)
+    monkeypatch.setattr(ClusterPotential, "from_atoms", staticmethod(make_writer))
     assert file_flows.save_structure(controller, None, None) is True
     assert output.read_text() == "CLUPOT"
     assert not controller.has_unsaved_structure
