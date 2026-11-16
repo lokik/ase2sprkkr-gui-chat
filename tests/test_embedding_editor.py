@@ -323,3 +323,36 @@ def test_invalid_cluster_import_does_not_replace_workspace(monkeypatch, tmp_path
     assert errors and "Bad cluster" in str(errors[0])
     assert controller.atoms is initial
     assert controller.structure_generation == generation
+
+
+def test_editor_preview_contains_out_of_layer_cluster_sites_and_is_pickable():
+    from types import SimpleNamespace
+
+    draft_host = host()
+    dialog = BuildEmbeddingDialog(draft_host)
+    outside = HostSite(0, (15, -3, 2))
+    dialog.draft.include([outside])
+    dialog._render()
+    assert outside in dialog._rendered_sites
+    idx = dialog._rendered_sites.index(outside)
+    dialog._preview_pick(SimpleNamespace(artist=dialog._scatter, ind=[idx]))
+    assert dialog._selected_site == outside
+    assert dialog._selected_cell == outside.cell_index
+    assert dialog.origin_x.value() == 15
+    assert dialog.origin_y.value() == -3
+    assert dialog.layer.value() == 2
+
+
+def test_2d_editor_can_reopen_special_native_translation_vectors():
+    from ase2sprkkr.sprkkr.sprkkr_atoms import SPRKKRAtoms
+
+    parent = Atoms("Cu", positions=[[0, 0, 0]], cell=[2, 2, 12],
+                   pbc=(True, True, False))
+    original = HostSite(0, (1, 0, 0, 0, 1))
+    cluster = SPRKKRAtoms.from_embedding(
+        parent, [(original.original_site, original.cell_index, "Fe")]
+    )
+    draft = EmbeddingDraft(parent, cluster)
+    assert original in draft.cell_sites((1, 0))
+    assert original in draft.entries
+    assert draft.to_atoms().sites[0].embedding.translation_vector == (1, 0, 0, 0, 1)
