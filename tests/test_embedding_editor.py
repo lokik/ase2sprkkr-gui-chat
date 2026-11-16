@@ -356,3 +356,44 @@ def test_2d_editor_can_reopen_special_native_translation_vectors():
     assert original in draft.cell_sites((1, 0))
     assert original in draft.entries
     assert draft.to_atoms().sites[0].embedding.translation_vector == (1, 0, 0, 0, 1)
+
+
+def test_reopening_unmodified_cluster_returns_lossless_copy():
+    parent = host()
+    original_draft = EmbeddingDraft(parent)
+    original_draft.set_occupation([original_draft.center], {"Fe": 1.0})
+    cluster = original_draft.to_atoms()
+    cluster.sites[0].magnetisation = np.array([0.1, 0.25])
+    editor_draft = EmbeddingDraft(parent, cluster)
+    assert editor_draft.is_unchanged()
+    restored = editor_draft.to_atoms()
+    assert restored is not cluster
+    assert restored.embedding_host is parent
+    np.testing.assert_array_equal(restored.sites[0].magnetisation,
+                                  cluster.sites[0].magnetisation)
+    editor_draft.set_occupation([editor_draft.center], {"Ni": 1.0})
+    assert not editor_draft.is_unchanged()
+    assert not editor_draft.would_discard_radial_data()
+
+
+def test_editor_requires_approval_to_drop_calculated_radial_data(monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    parent = host()
+    draft = EmbeddingDraft(parent)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    dialog = BuildEmbeddingDialog(cluster)
+    dialog.occupation.setText("Fe")
+    dialog._assign_occupation()
+    monkeypatch.setattr(dialog.draft, "would_discard_radial_data", lambda: True)
+    prompts = []
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        lambda *args: (prompts.append(args) or QMessageBox.StandardButton.Cancel),
+    )
+    dialog._accept()
+    assert len(prompts) == 1
+    assert dialog.result_atoms is None
+    assert dialog.draft.entries[dialog.draft.center].occupation == {"Fe": 1.0}
+    assert cluster.sites[0].occupation.to_dict(True) == {"Cu": 1.0}
