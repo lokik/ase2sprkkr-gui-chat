@@ -371,3 +371,44 @@ def update_empty_spheres(
             ),
         )
     return True
+
+
+def build_embedding_structure(
+    controller: WorkspaceController,
+    parent: QWidget,
+) -> Any | None:
+    """Edit a detached cluster candidate and publish only the accepted result.
+
+    Import lazily because GUI installations with a previously released
+    ASE2SPRKKR must remain usable before the embedding backend is installed.
+    """
+    if not controller.can_build_embedding():
+        QMessageBox.information(
+            parent, "Build Embedded Cluster",
+            "Load a 3D bulk, 2D layered host or an existing embedded cluster first.",
+        )
+        return None
+    try:
+        from ase2sprkkr_gui.gui.dialogs.structures.embedding import (
+            select_build_embedding_structure,
+        )
+    except ImportError as exc:
+        QMessageBox.warning(
+            parent, "Embedding Backend Unavailable",
+            "The current ASE2SPRKKR installation does not provide the "
+            f"embedding editor backend yet:\\n{exc}",
+        )
+        return None
+
+    generation = controller.structure_generation
+    try:
+        change = controller.apply_structure_edit(
+            lambda candidate: select_build_embedding_structure(candidate, parent),
+            expected_structure_generation=generation,
+        )
+    except (ValueError, TypeError, NotImplementedError) as exc:
+        QMessageBox.warning(parent, "Embedded Cluster", str(exc))
+        return None
+    if change is None or not document_change_applied(parent, change):
+        return None
+    return controller.atoms
