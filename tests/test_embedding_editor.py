@@ -222,3 +222,104 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
     assert file_flows.save_structure(controller, Recent(), None) is True
     assert output.read_text() == "CLUPOT"
     assert not controller.has_unsaved_structure
+
+
+def test_cluster_file_detection_distinguishes_host_potfil(tmp_path):
+    from ase2sprkkr_gui.gui.flows.files import _is_cluster_potential
+
+    host_file = tmp_path / "host.pot"
+    host_file.write_text("GLOBAL SYSTEM PARAMETER\\nNQ 1\\n")
+    cluster_file = tmp_path / "cluster.pot"
+    cluster_file.write_text("GLOBAL SYSTEM PARAMETER\\nNQCLU 1\\n")
+    native_file = tmp_path / "cluster.clu"
+    native_file.write_text("CLUPOT")
+    assert not _is_cluster_potential(host_file)
+    assert _is_cluster_potential(cluster_file)
+    assert _is_cluster_potential(native_file)
+
+
+def test_open_native_cluster_with_explicit_host_preserves_reference(
+    monkeypatch, tmp_path,
+):
+    from ase2sprkkr import Potential
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    cluster_path = tmp_path / "sample.clu"
+    cluster_path.write_text("mock-cluster")
+    host_path = tmp_path / "host.pot"
+    host_path.write_text("mock-host")
+    reference = host()
+
+    class HostPotential:
+        LATTICE = object()
+        atoms = reference
+
+    original_host = HostPotential()
+    generated = EmbeddingDraft(original_host)
+    generated.set_occupation([generated.center], {"Fe": 1.0})
+    expected = generated.to_atoms()
+
+    class Parsed:
+        @property
+        def atoms(self):
+            return expected
+
+    calls = []
+    monkeypatch.setattr(Potential, "from_file",
+                        staticmethod(lambda path: original_host))
+    monkeypatch.setattr(
+        ClusterPotential, "from_file",
+        staticmethod(lambda path, *, host: (
+            calls.append((path, host)) or Parsed()
+        )),
+    )
+    monkeypatch.setattr(file_flows, "run_modal_task",
+                        lambda parent, action, **kwargs: action())
+
+    class Recent:
+        def __init__(self):
+            self.saved = []
+
+        def remember(self, kind, path):
+            self.saved.append((kind, path))
+
+    recent = Recent()
+    controller = WorkspaceController(WorkspaceState(atoms=host()))
+    generation = controller.structure_generation
+    assert file_flows.load_embedded_cluster(
+        controller, recent, cluster_path, None, host_path=host_path
+    )
+    assert controller.atoms is expected
+    assert controller.atoms.embedding_host is original_host
+    assert controller.structure_generation == generation.next()
+    assert recent.saved == [("structure", cluster_path)]
+    assert calls == [(cluster_path, original_host)]
+
+
+def test_invalid_cluster_import_does_not_replace_workspace(monkeypatch, tmp_path):
+    from ase2sprkkr import Potential
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    initial = host()
+    controller = WorkspaceController(WorkspaceState(atoms=initial))
+    generation = controller.structure_generation
+    monkeypatch.setattr(Potential, "from_file",
+                        staticmethod(lambda path: object()))
+    monkeypatch.setattr(ClusterPotential, "from_file",
+                        staticmethod(lambda path, *, host: (_ for _ in ()).throw(
+                            ValueError("Bad cluster")
+                        )))
+    monkeypatch.setattr(file_flows, "run_modal_task",
+                        lambda parent, action, **kwargs: action())
+    errors = []
+    monkeypatch.setattr(file_flows.QMessageBox, "critical",
+                        lambda *args: errors.append(args))
+
+    assert not file_flows.load_embedded_cluster(
+        controller, None, tmp_path / "bad.clu", None, host_path=tmp_path / "host.pot"
+    )
+    assert errors and "Bad cluster" in str(errors[0])
+    assert controller.atoms is initial
+    assert controller.structure_generation == generation
