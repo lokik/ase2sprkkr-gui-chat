@@ -25,6 +25,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AvailableActionGroup,
     Build2D,
     Build2DKind,
+    BuildEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -58,6 +59,8 @@ class WorkflowWorkspace(Protocol):
     def structure_kind(self) -> StructureKind | None: ...
 
     def can_build_2d(self) -> bool: ...
+
+    def can_build_embedding(self) -> bool: ...
 
     def scf_status(self) -> str | None: ...
 
@@ -222,7 +225,8 @@ class WorkflowPlanner:
         groups: list[AvailableActionGroup] = []
         calculate: list[AvailableAction] = []
 
-        if not converged and not workspace.structure_change_requires_scf_restart():
+        is_cluster = workspace.structure_kind() == "0d"
+        if not is_cluster and not converged and not workspace.structure_change_requires_scf_restart():
             empty_spheres = workspace.empty_spheres_action()
             if empty_spheres is not None:
                 calculate.append(
@@ -236,7 +240,7 @@ class WorkflowPlanner:
                 )
 
         stage = WorkflowStage.POST_SCF if converged else WorkflowStage.SCF
-        for definition in workflow_tasks(stage):
+        for definition in (() if is_cluster else workflow_tasks(stage)):
             title = definition.workflow.label
             description = definition.workflow.description
             if definition.workflow.role is WorkflowTaskRole.SCF:
@@ -283,29 +287,37 @@ class WorkflowPlanner:
             )
         )
 
+        derived: list[AvailableAction] = []
         if workspace.can_build_2d():
-            groups.append(
-                AvailableActionGroup(
-                    WorkflowSection.CREATE,
-                    "Create derived structure",
-                    (
-                        _action(
-                            Build2D(Build2DKind.SURFACE),
-                            "Create a 2D Surface",
-                            "Derive a surface from the current 3D structure",
-                            "structure",
-                            ActionIcon.SURFACE,
-                        ),
-                        _action(
-                            Build2D(Build2DKind.STRUCTURE),
-                            "Create a 2D Structure",
-                            "Derive an interface or transitional layer",
-                            "structure",
-                            ActionIcon.INTERFACE,
-                        ),
-                    ),
-                )
-            )
+            derived.extend((
+                _action(
+                    Build2D(Build2DKind.SURFACE),
+                    "Create a 2D Surface",
+                    "Derive a surface from the current 3D structure",
+                    "structure",
+                    ActionIcon.SURFACE,
+                ),
+                _action(
+                    Build2D(Build2DKind.STRUCTURE),
+                    "Create a 2D Structure",
+                    "Derive an interface or transitional layer",
+                    "structure",
+                    ActionIcon.INTERFACE,
+                ),
+            ))
+        # Some test/third-party workspace adapters predate this capability.
+        if getattr(workspace, "can_build_embedding", lambda: False)():
+            derived.append(_action(
+                BuildEmbedding(),
+                "Edit Embedded Cluster" if is_cluster else "Build Embedded Cluster",
+                "Choose host cells, substitute sites and expand symmetry/relaxation shells",
+                "structure",
+                ActionIcon.EMBEDDING,
+            ))
+        if derived:
+            groups.append(AvailableActionGroup(
+                WorkflowSection.CREATE, "Create derived structure", tuple(derived)
+            ))
 
         other: list[AvailableAction] = []
         if progress is not ScfProgress.NOT_STARTED:
