@@ -401,9 +401,13 @@ def build_embedding_structure(
         return None
 
     generation = controller.structure_generation
+    source = controller.atoms
     try:
+        # The editor is read-only with respect to the source. Keep its original
+        # Potential identity: generic ASE copy() can discard the attached POTFIL.
+        # apply_structure_edit still checks the workspace generation atomically.
         change = controller.apply_structure_edit(
-            lambda candidate: select_build_embedding_structure(candidate, parent),
+            lambda _candidate: select_build_embedding_structure(source, parent),
             expected_structure_generation=generation,
         )
     except (ValueError, TypeError, NotImplementedError) as exc:
