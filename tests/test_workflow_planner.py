@@ -19,6 +19,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AvailableActionGroup,
     Build2D,
     Build2DKind,
+    BuildEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -339,6 +340,7 @@ def test_real_controller_build_2d_capability_drives_derived_structure_commands()
     assert _commands(plan, WorkflowSection.CREATE) == (
         Build2D(Build2DKind.SURFACE),
         Build2D(Build2DKind.STRUCTURE),
+        BuildEmbedding(),
     )
 
 
@@ -355,3 +357,16 @@ def test_workflow_plan_rejects_duplicate_sections():
 
     with pytest.raises(ValueError, match="each section at most once"):
         WorkflowPlan("subtitle", (first, second))
+
+
+def test_embedded_structure_plan_is_editable_without_periodic_scf_actions():
+    # The GUI must not offer a periodic SCF calculation for a finite cluster.
+    class EmbeddingWorkspace(Workspace):
+        def can_build_embedding(self):
+            return True
+
+    plan = WorkflowPlanner().for_workspace(
+        EmbeddingWorkspace(atoms=FormulaAtoms(), kind="0d", build_2d=False)
+    )
+    assert plan.group(WorkflowSection.CALCULATE) is None
+    assert _commands(plan, WorkflowSection.CREATE) == (BuildEmbedding(),)
