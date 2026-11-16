@@ -55,12 +55,13 @@ jobs:
           ref: master
           path: .ci/kkrunner
 
-      # The frontend tests target the new historical-result API.
-      - name: Checkout ASE2SPRKKR persistent result API
+      # The embedding GUI branch must be tested against its matching
+      # backend branch. Unrelated branches continue testing against develop.
+      - name: Checkout ASE2SPRKKR
         uses: actions/checkout@v7
         with:
           repository: lokik/ase2sprkkr-chat
-          ref: develop
+          ref: ${{ (github.head_ref == 'cluster' || github.ref_name == 'cluster') && 'cluster' || 'develop' }}
           path: .ci/ase2sprkkr
 
       - name: Install package and test dependencies
