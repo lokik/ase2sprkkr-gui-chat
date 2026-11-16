@@ -261,6 +261,10 @@ class WorkspaceController(QObject):
     def can_build_2d(self) -> bool:
         return self.structure_kind() == "3d"
 
+    def can_build_embedding(self) -> bool:
+        """A 3D/2D host or existing embedded cluster can open the editor."""
+        return self.structure_kind() in {"3d", "2d", "0d"}
+
     def scf_status(self) -> str | None:
         return self.structure_state.scf_status()
 
