@@ -35,6 +35,8 @@ class BuildEmbeddingDialog(QDialog):
         self._grid_updating = False
         self._site_updating = False
         self._highlighted: set[HostSite] = set()
+        self._rendered_sites: list[HostSite] = []
+        self._scatter = None
         self._timer = QTimer(self)
         self._timer.setInterval(120)
         self._timer.setSingleShot(True)
@@ -67,6 +69,12 @@ class BuildEmbeddingDialog(QDialog):
         self.grid_radius.setValue(2)
         self.grid_radius.valueChanged.connect(self._refresh_cells)
         row.addWidget(self.grid_radius)
+        row.addWidget(QLabel("Centre x, y"))
+        self.origin_x, self.origin_y = QSpinBox(), QSpinBox()
+        for spin in (self.origin_x, self.origin_y):
+            spin.setRange(-100000, 100000)
+            spin.valueChanged.connect(self._refresh_cells)
+            row.addWidget(spin)
         row.addWidget(QLabel("Layer n3" if self.draft.dimension == 3 else "In-plane cells"))
         if self.draft.dimension == 3:
             self.layer = QSpinBox()
@@ -190,6 +198,7 @@ class BuildEmbeddingDialog(QDialog):
         preview_layout = QVBoxLayout(preview_group)
         self.figure = Figure(figsize=(9, 3.1))
         self.canvas = FigureCanvas(self.figure)
+        self.canvas.mpl_connect("pick_event", self._preview_pick)
         self.axes = self.figure.add_subplot(111, projection="3d")
         preview_layout.addWidget(self.canvas, 1)
         root.addWidget(preview_group, 2)
@@ -214,6 +223,8 @@ class BuildEmbeddingDialog(QDialog):
         self._refresh_cells()
 
     def _cell_index(self, x, y):
+        x += self.origin_x.value()
+        y += self.origin_y.value()
         if self.draft.dimension == 3:
             return x, y, self.layer.value()
         return x, y
@@ -225,8 +236,12 @@ class BuildEmbeddingDialog(QDialog):
         self.cells.blockSignals(True)
         self.cells.setRowCount(size)
         self.cells.setColumnCount(size)
-        self.cells.setHorizontalHeaderLabels([str(x) for x in range(-radius, radius + 1)])
-        self.cells.setVerticalHeaderLabels([str(y) for y in range(radius, -radius - 1, -1)])
+        self.cells.setHorizontalHeaderLabels([
+            str(self.origin_x.value() + x) for x in range(-radius, radius + 1)
+        ])
+        self.cells.setVerticalHeaderLabels([
+            str(self.origin_y.value() + y) for y in range(radius, -radius - 1, -1)
+        ])
         for r in range(size):
             for c in range(size):
                 cell = self._cell_index(c - radius, radius - r)
@@ -248,8 +263,12 @@ class BuildEmbeddingDialog(QDialog):
         if self.draft.dimension == 3 and self.layer.value() != cell[2]:
             self._selected_cell = (cell[0], cell[1], self.layer.value())
             cell = self._selected_cell
-        if abs(cell[0]) <= radius and abs(cell[1]) <= radius:
-            self.cells.setCurrentCell(radius - cell[1], radius + cell[0])
+        rel_x = cell[0] - self.origin_x.value()
+        rel_y = cell[1] - self.origin_y.value()
+        if abs(rel_x) <= radius and abs(rel_y) <= radius:
+            self.cells.setCurrentCell(radius - rel_y, radius + rel_x)
+        else:
+            self.cells.clearSelection()
         self.cells.blockSignals(False)
         self._grid_updating = False
         self._timer.start()
@@ -451,34 +470,72 @@ class BuildEmbeddingDialog(QDialog):
         radius = self.grid_radius.value()
         layer = self.layer.value() if self.layer else 0
         xs, ys, zs, colors, sizes = [], [], [], [], []
-        for i in sorted(self.draft.allowed):
-            for x, y in product(range(-radius, radius + 1), repeat=2):
-                site = HostSite(i, self._cell_index(x, y))
-                position = site.position(self.draft.host)
-                entry = self.draft.entries.get(site)
-                xs.append(position[0] + (entry.displacement[0] if entry else 0))
-                ys.append(position[1] + (entry.displacement[1] if entry else 0))
-                zs.append(position[2] + (entry.displacement[2] if entry else 0))
-                if site in self._highlighted:
-                    colors.append("#a081cf")
-                    sizes.append(65)
-                elif self._is_modified(site):
-                    colors.append("#d88c49")
-                    sizes.append(65)
-                elif entry is not None:
-                    colors.append("#4b92cf")
-                    sizes.append(49)
-                else:
-                    colors.append("#a6aeb6")
-                    sizes.append(15)
+        context = (
+            HostSite(i, self._cell_index(x, y))
+            for i in sorted(self.draft.allowed)
+            for x, y in product(range(-radius, radius + 1), repeat=2)
+        )
+        # Show the entire finite cluster, including selected sites in other
+        # layers or outside the currently visible host-cell map.
+        self._rendered_sites = list(dict.fromkeys(
+            [*context, *sorted(self.draft.entries), *sorted(self._highlighted)]
+        ))
+        for site in self._rendered_sites:
+            position = site.position(self.draft.host)
+            entry = self.draft.entries.get(site)
+            displaced = position + (entry.displacement if entry is not None else 0)
+            xs.append(displaced[0])
+            ys.append(displaced[1])
+            zs.append(displaced[2])
+            if site in self._highlighted:
+                colors.append("#a081cf")
+                sizes.append(85)
+            elif self._is_modified(site):
+                colors.append("#d88c49")
+                sizes.append(75)
+            elif entry is not None:
+                colors.append("#4b92cf")
+                sizes.append(60)
+            else:
+                colors.append("#a6aeb6")
+                sizes.append(15)
+        self._scatter = None
         if xs:
-            ax.scatter(xs, ys, zs, c=colors, s=sizes, depthshade=False)
+            self._scatter = ax.scatter(
+                xs, ys, zs, c=colors, s=sizes, depthshade=False, picker=5
+            )
         ax.set_xlabel("x (Å)")
         ax.set_ylabel("y (Å)")
         ax.set_zlabel("z (Å)")
-        ax.set_title(f"Host layer {layer}; showing {len(xs)} sites")
+        ax.set_title(
+            f"Host layer {layer}; cluster: {len(self.draft.entries)} sites"
+        )
         self.figure.tight_layout()
         self.canvas.draw_idle()
+
+    def _preview_pick(self, event):
+        """Select a physical host site by clicking its rendered atom."""
+        if event.artist is not self._scatter or not len(event.ind):
+            return
+        index = int(event.ind[0])
+        if not 0 <= index < len(self._rendered_sites):
+            return
+        site = self._rendered_sites[index]
+        self._selected_site = site
+        # Pan to distant cells, rather than limiting navigation to [-10, 10].
+        for spin, value in zip(
+            (self.origin_x, self.origin_y), site.cell_index[:2]
+        ):
+            spin.blockSignals(True)
+            spin.setValue(int(value))
+            spin.blockSignals(False)
+        if self.layer is not None:
+            self.layer.blockSignals(True)
+            self.layer.setValue(int(site.cell_index[2]))
+            self.layer.blockSignals(False)
+        self._selected_cell = site.cell_index[:self.draft.dimension]
+        self._refresh_cells()
+        self._refresh_sites()
 
     def _accept(self):
         def action():
