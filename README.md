@@ -39,3 +39,22 @@ calculations also requires a separately installed SPR-KKR executable.
 ## Development
 
 Source: https://github.com/ase2sprkkr/ase2sprkkr-gui
+
+## Embedded cluster editor (development)
+
+The GUI `cluster` branch requires the matching ASE2SPRKKR backend `cluster`
+branch, which provides `HostSite`, `EmbeddingSymmetry` and
+`SPRKKRAtoms.from_embedding`.
+
+From a loaded 3D host or a supported 2D host, choose
+**Structure → Build Embedded Cluster** (or the Guided workflow action). The
+dialog edits explicit host-site occupations and displacements, supports
+centre-preserving symmetry, and adds surrounding host sites by distance or
+coordination shell. Cancel does not change the current structure.
+
+Plain ASE host structures are sufficient to design a cluster, but native
+**Save Structure** exports a START CLUPOT only when the cluster references a
+host SPR-KKR Potential. Generic ASE exports are disabled for embedded clusters
+because they would lose their host-site mapping. Reopening a CLUPOT in the GUI
+with an explicitly selected host POTFIL, and submitting a native embedding
+calculation, are not yet implemented.
