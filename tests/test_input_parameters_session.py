@@ -441,7 +441,8 @@ def test_expert_history_finds_changed_array_component():
 @pytest.mark.parametrize("switch", [("ENERGY", "SPLITSS"), ("CONTROL", "SPLITSS"), ("CONTROL", "FSOHFF")])
 def test_single_site_toggle_restores_clean_input_and_remembers_values(task, switch, tmp_path):
     application = QApplication.instance() or QApplication([])
-    parameters = InputParameters.create(_backend_task(task))
+    # This test exercises E-K (NE=200), not the Bsf-KK requested-task alias.
+    parameters = InputParameters.create("bsfek" if task == "bsf" else _backend_task(task))
     if task == "bsf":
         parameters.ENERGY.NE.set([200])
         parameters.TASK.KPATH.set(1)

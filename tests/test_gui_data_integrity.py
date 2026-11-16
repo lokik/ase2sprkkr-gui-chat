@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 from ase import Atoms
 from ase2sprkkr import SPRKKRAtoms
-from ase2sprkkr.common.warnings import DataValidityError
+from ase2sprkkr.common.warnings import DataValidityError, DataValidityWarning
+from ase2sprkkr.common.grammar_types.warnings import SuspiciousValueWarning
 from ase2sprkkr.input_parameters.input_parameters import InputParameters
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
@@ -230,13 +231,20 @@ def test_invalid_expert_text_blocks_ok_until_corrected(app):
     assert d.result() != QDialog.DialogCode.Accepted
     assert d.parameters().MODE.MDIR() is None
     editor.setText('{0,0,1}')
-    editor.editingFinished.emit()
+    # The backend accepts integer components and explicitly warns when
+    # converting them to the requested floating-point vector type.
+    with pytest.warns(SuspiciousValueWarning, match=r"set <float> value using an <integer>"):
+        editor.editingFinished.emit()
     assert not d.tree_editor.error_text
     d._on_ok()
     assert d.result() == QDialog.DialogCode.Accepted
     d.close()
 
 
+@pytest.mark.filterwarnings(
+    r"ignore:ENERGY\.NE selects BSF-(EK|KK), but BSF-(EK|KK) was requested:"
+    r"ase2sprkkr.common.warnings.DataValidityWarning"
+)
 def test_expert_numeric_error_is_inline_and_keeps_model(app):
     p = InputParameters.create('bsfek')
     p.set({'ENERGY': {'NE': [200]}, 'TASK': {
@@ -244,7 +252,8 @@ def test_expert_numeric_error_is_inline_and_keeps_model(app):
     d = InputParametersDialog(p)
     item, _ = tree_editor(d, 'NE')
     editor = d.tree_editor.tree.itemWidget(item.child(0), 2)
-    editor.setValue(1)
+    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-KK, but BSF-EK was requested"):
+        editor.setValue(1)
     assert '[0]:' in d.tree_editor.error_text
     assert d.parameters().ENERGY.NE()[0] == 200
     d._on_ok()

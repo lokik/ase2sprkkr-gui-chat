@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QLineEdit
 from PyQt6.QtTest import QTest
 from ase2sprkkr.input_parameters.input_parameters import InputParameters
+from ase2sprkkr.common.warnings import DataValidityWarning
 from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
 from ase2sprkkr_gui.gui.widgets.numeric_table import coordinate_text
 
@@ -118,11 +119,16 @@ def test_paste_limits_and_invalid_input_are_non_mutating(dialog):
     assert dialog._commit_pending()
 
 
+@pytest.mark.filterwarnings(
+    r"ignore:ENERGY\.NE selects BSF-(EK|KK), but BSF-(EK|KK) was requested:"
+    r"ase2sprkkr.common.warnings.DataValidityWarning"
+)
 def test_mode_switch_and_default_origin(dialog):
     widget = geometry(dialog)
     mode = dialog.editors_for(("ENERGY", "NE"))[0]
     original = widget._rows()
-    mode.control.mode_combo.setCurrentIndex(mode.control.mode_combo.findData("KK"))
+    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-KK, but BSF-EK was requested"):
+        mode.control.mode_combo.setCurrentIndex(mode.control.mode_combo.findData("KK"))
     assert widget.table.columnCount() == 3 and widget.table.rowCount() == 1
     widget.clear_origin()
     assert dialog.session.value(("TASK", "KA")) is None

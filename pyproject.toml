@@ -43,3 +43,10 @@ ase2sprkkr_gui = [
 [tool.uv.sources]
 ase2sprkkr = { path = "../ase2sprkkr", editable = true }
 kkrunner = { path = "../kkrunner", editable = true }
+
+[tool.pytest.ini_options]
+# Leave ASE/NumPy deprecations visible: suppressing them globally could conceal
+# a misuse of ASE in GUI code. Only filter this specific upstream spglib warning.
+filterwarnings = [
+  'ignore:Set OLD_ERROR_HANDLING to false and catch the errors directly\.:DeprecationWarning:spglib\.spg',
+]
