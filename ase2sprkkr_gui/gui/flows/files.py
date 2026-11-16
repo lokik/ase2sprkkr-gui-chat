@@ -444,7 +444,8 @@ def save_embedded_cluster(
         )
         return False
     controller.mark_structure_saved(generation)
-    recent_files.remember("structure", path)
+    # Do not register CLUPOT as a generic ASE structure: reopening requires
+    # an explicit host POTFIL selection, not supported by load_structure yet.
     return True
 
 
