@@ -173,9 +173,27 @@ def test_unrepresentable_output_filter_is_detected():
     assert output_filter_selection(("ERROR", 42)) is None
 
 
+def test_default_output_filter_is_reflected_without_changes():
+    _application = _app()
+    configuration = _configuration()
+    page = Ase2sprkkrSettingsPage(configuration=configuration)
+
+    selected = output_filter_selection(configuration.running.print_output())
+    assert selected is not None
+    assert (
+        page.print_all.isChecked(),
+        page.print_info.isChecked(),
+        page.print_regex.isChecked(),
+        page.output_filter.text(),
+    ) == selected
+    assert page.changes() == []
+    page.close()
+
+
 def test_shared_settings_page_stages_changes_until_save(monkeypatch):
     _application = _app()
     configuration = _configuration()
+    configuration.running.print_output.set("info")
     saved = _capture_saves(monkeypatch, configuration)
     page = Ase2sprkkrSettingsPage(configuration=configuration)
 
@@ -282,7 +300,9 @@ def test_cancelling_settings_dialog_never_saves_shared_values(tmp_path, monkeypa
 
 def test_output_checkboxes_and_regex_field_enablement():
     _application = _app()
-    page = Ase2sprkkrSettingsPage(configuration=_configuration())
+    configuration = _configuration()
+    configuration.running.print_output.set("info")
+    page = Ase2sprkkrSettingsPage(configuration=configuration)
     assert page.print_all.text() == "Print all output"
     assert page.print_info.text() == "Print summary info"
     assert page.print_regex.text() == "Print lines matching regex"
@@ -354,7 +374,9 @@ def test_output_checkboxes_roundtrip_existing_values(
 
 def test_custom_regex_requires_valid_pattern_before_save():
     _application = _app()
-    page = Ase2sprkkrSettingsPage(configuration=_configuration())
+    configuration = _configuration()
+    configuration.running.print_output.set("info")
+    page = Ase2sprkkrSettingsPage(configuration=configuration)
     page.print_info.setChecked(False)
     page.print_regex.setChecked(True)
     with pytest.raises(ValueError, match="Enter a regular expression"):
