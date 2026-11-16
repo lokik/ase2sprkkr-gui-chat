@@ -255,8 +255,14 @@ class WorkspaceController(QObject):
         return self.structure_state.structure_kind()
 
     def can_calculate(self) -> bool:
-        """Allow execution setup before choosing the working directory."""
-        return self.atoms is not None and self.input_parameters is not None
+        """Allow supported execution setup before choosing a working directory."""
+        # A 0D cluster cannot be run through the periodic SCF launch path.
+        # Enable this only after CLUPOT/host execution is supported.
+        return (
+            self.structure_kind() != "0d"
+            and self.atoms is not None
+            and self.input_parameters is not None
+        )
 
     def can_build_2d(self) -> bool:
         return self.structure_kind() == "3d"
