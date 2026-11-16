@@ -223,13 +223,17 @@ class EmbeddingDraft:
     def add_shells(self, shells: int) -> int:
         return self.include(embedding_sites_within_shells(self.host, self.center, shells))
 
-    def to_atoms(self) -> SPRKKRAtoms:
-        """Build independent atoms, keeping an unchanged cluster's radial data.
+    def to_atoms(self, *, allow_radial_reset=False) -> SPRKKRAtoms:
+        """Build independent atoms without silently losing radial results.
 
-        Changed structures are reconstructed as new START-like clusters.
-        The caller must confirm dropping radial data if
-        would_discard_radial_data() returns True.
+        Existing radial data can only be reset after explicit caller approval.
+        An unchanged cluster returns a full copy with its original data.
         """
+        if self.would_discard_radial_data() and not allow_radial_reset:
+            raise ValueError(
+                "Editing this cluster would discard existing radial data. "
+                "Pass allow_radial_reset=True only after explicit confirmation."
+            )
         if self.is_unchanged():
             return self.original_cluster.copy()
         if not self.entries:
