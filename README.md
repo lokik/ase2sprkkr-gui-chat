@@ -55,6 +55,6 @@ coordination shell. Cancel does not change the current structure.
 Plain ASE host structures are sufficient to design a cluster, but native
 **Save Structure** exports a START CLUPOT only when the cluster references a
 host SPR-KKR Potential. Generic ASE exports are disabled for embedded clusters
-because they would lose their host-site mapping. Reopening a CLUPOT in the GUI
-with an explicitly selected host POTFIL, and submitting a native embedding
-calculation, are not yet implemented.
+because they would lose their host-site mapping. The native **Load from File** action recognizes CLUPOT and reopens it with
+an existing host Potential or asks for the host POTFIL if none is active.
+Submitting a native embedding calculation is not yet implemented.
