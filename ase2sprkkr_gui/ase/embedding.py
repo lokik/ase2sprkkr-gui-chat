@@ -75,6 +75,8 @@ class EmbeddingDraft:
             raise ValueError("The host has no sites available for embedding")
         self.allowed = frozenset(allowed)
         self.entries: dict[HostSite, EmbeddedSiteDraft] = {}
+        self.original_cluster = cluster
+        self._original_entries: dict[HostSite, EmbeddedSiteDraft] = {}
         self.center = HostSite(allowed[0], (0,) * self.dimension)
         if cluster is not None:
             if cluster.embedding_host is not host:
@@ -90,6 +92,38 @@ class EmbeddingDraft:
                 )
             if self.entries:
                 self.center = next(iter(self.entries))
+            self._original_entries = {
+                site: EmbeddedSiteDraft(
+                    dict(entry.occupation), entry.displacement.copy(),
+                    entry.magnetisation.copy()
+                )
+                for site, entry in self.entries.items()
+            }
+
+    def is_unchanged(self) -> bool:
+        """Whether a reopened cluster has exactly its original physical data."""
+        if self.original_cluster is None:
+            return False
+        if self.entries.keys() != self._original_entries.keys():
+            return False
+        return all(
+            entry.occupation == self._original_entries[site].occupation
+            and np.array_equal(entry.displacement, self._original_entries[site].displacement)
+            and np.array_equal(entry.magnetisation, self._original_entries[site].magnetisation)
+            for site, entry in self.entries.items()
+        )
+
+    def would_discard_radial_data(self) -> bool:
+        """True when rebuilding an edited cluster would discard radial results."""
+        if self.original_cluster is None or self.is_unchanged():
+            return False
+        return any(
+            atom_type.potential is not None
+            or atom_type.charge is not None
+            or atom_type.moments is not None
+            for site in self.original_cluster.sites
+            for atom_type in site.occupation
+        )
 
     def canonical(self, site: HostSite) -> HostSite:
         result = site.canonical(self.host)
@@ -190,7 +224,14 @@ class EmbeddingDraft:
         return self.include(embedding_sites_within_shells(self.host, self.center, shells))
 
     def to_atoms(self) -> SPRKKRAtoms:
-        """Build an independent, valid explicit cluster without mutating the host."""
+        """Build independent atoms, keeping an unchanged cluster's radial data.
+
+        Changed structures are reconstructed as new START-like clusters.
+        The caller must confirm dropping radial data if
+        would_discard_radial_data() returns True.
+        """
+        if self.is_unchanged():
+            return self.original_cluster.copy()
         if not self.entries:
             raise ValueError("The cluster must contain at least one site")
         atoms = SPRKKRAtoms.from_embedding(
