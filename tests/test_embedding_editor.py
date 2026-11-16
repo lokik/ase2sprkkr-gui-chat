@@ -213,6 +213,12 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
         return Writer()
 
     monkeypatch.setattr(ClusterPotential, "from_atoms", staticmethod(make_writer))
-    assert file_flows.save_structure(controller, None, None) is True
+
+    class Recent:
+        def remember(self, kind, path):
+            assert kind == "structure"
+            assert path == output
+
+    assert file_flows.save_structure(controller, Recent(), None) is True
     assert output.read_text() == "CLUPOT"
     assert not controller.has_unsaved_structure
