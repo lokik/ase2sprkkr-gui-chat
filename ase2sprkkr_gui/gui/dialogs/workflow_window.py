@@ -46,6 +46,7 @@ from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
 from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
+    BuildEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -264,6 +265,9 @@ class WorkflowWindow(QMainWindow):
                 CreateStructureKind.SURFACE: self._create_surface,
                 CreateStructureKind.TWO_D: self._create_transition,
             }[command.kind]()
+            return
+        if isinstance(command, BuildEmbedding):
+            structure_flows.build_embedding_structure(self.controller, self)
             return
         if isinstance(command, Build2D):
             surface_mode = {
