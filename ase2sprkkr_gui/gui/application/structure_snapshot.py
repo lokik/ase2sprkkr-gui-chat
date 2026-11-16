@@ -17,6 +17,7 @@ _STRUCTURAL_ARRAYS = (
     "tags",
     "masses",
     "initial_magmoms",
+    "sprkkr_embedding",
 )
 _STRUCTURAL_INFO = ("occupancy",)
 
@@ -58,6 +59,11 @@ class StructureSnapshot:
     pbc: tuple[bool, bool, bool]
     arrays: Mapping[str, Any]
     info: Mapping[str, Any]
+    # A cluster needs its canonical host to resolve its integer translations.
+    # Retain the reference, never deepcopy a potentially huge host Potential.
+    embedding_host: Any | None = None
+    embedding_occupations: tuple[tuple[tuple[str, float], ...], ...] = ()
+    embedding_magnetisations: tuple[tuple[float, float], ...] = ()
 
     @classmethod
     def capture(cls, atoms: Any) -> "StructureSnapshot":
@@ -68,6 +74,24 @@ class StructureSnapshot:
             if name in arrays
         }
         atom_info = getattr(atoms, "info", {})
+        embedding_host = (
+            atom_info.get("sprkkr_embedding_host")
+            if "sprkkr_embedding" in arrays
+            else None
+        )
+        if embedding_host is not None:
+            occupations = tuple(
+                tuple((str(symbol), float(concentration))
+                      for symbol, concentration in site.occupation.to_dict(True).items())
+                for site in atoms.sites
+            )
+            magnetisations = tuple(
+                tuple(float(value) for value in site.magnetisation)
+                for site in atoms.sites
+            )
+        else:
+            occupations = ()
+            magnetisations = ()
         structural_info = {
             name: _freeze(atom_info[name])
             for name in _STRUCTURAL_INFO
@@ -86,10 +110,33 @@ class StructureSnapshot:
             pbc=tuple(bool(value) for value in atoms.pbc),
             arrays=MappingProxyType(structural_arrays),
             info=MappingProxyType(structural_info),
+            embedding_host=embedding_host,
+            embedding_occupations=occupations,
+            embedding_magnetisations=magnetisations,
         )
 
     def to_atoms(self) -> Atoms:
-        """Reconstruct a fresh plain ASE ``Atoms`` object from the snapshot."""
+        """Reconstruct the structure, including embedded-cluster identity."""
+        if self.embedding_host is not None:
+            from ase2sprkkr.sprkkr.sprkkr_atoms import SPRKKRAtoms
+
+            if "sprkkr_embedding" not in self.arrays:
+                raise ValueError("Embedding snapshot is missing site identities")
+            rows = np.asarray(_thaw(self.arrays["sprkkr_embedding"]), dtype=int)
+            if rows.shape != (len(self.positions), 6):
+                raise ValueError("Invalid embedding site mapping in structure snapshot")
+            if len(self.embedding_occupations) != len(rows):
+                raise ValueError("Missing cluster occupation metadata in snapshot")
+            sites = [
+                (int(row[0]), tuple(int(i) for i in row[1:]), dict(occ))
+                for row, occ in zip(rows, self.embedding_occupations)
+            ]
+            atoms = SPRKKRAtoms.from_embedding(self.embedding_host, sites)
+            atoms.set_positions(np.asarray(self.positions, dtype=float))
+            for site, magnetisation in zip(atoms.sites, self.embedding_magnetisations):
+                site.magnetisation = np.asarray(magnetisation, dtype=float)
+            return atoms
+
         atoms = Atoms(
             numbers=self.numbers,
             positions=self.positions,
