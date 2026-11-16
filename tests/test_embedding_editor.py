@@ -207,9 +207,8 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
             assert filename == output
             filename.write_text("CLUPOT", encoding="utf-8")
 
-    def make_writer(atoms, *, scf_status):
+    def make_writer(atoms):
         assert atoms is cluster
-        assert scf_status == "START"
         return Writer()
 
     monkeypatch.setattr(ClusterPotential, "from_atoms", staticmethod(make_writer))
