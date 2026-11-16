@@ -539,6 +539,19 @@ class BuildEmbeddingDialog(QDialog):
 
     def _accept(self):
         def action():
+            if self.draft.would_discard_radial_data():
+                choice = QMessageBox.warning(
+                    self, "Existing Radial Data",
+                    "The edited cluster differs from its original calculation. "
+                    "Rebuilding the structure will discard the existing radial "
+                    "potential, charge and moment data and produce a new START "
+                    "structure. The original cluster will not be modified. "
+                    "Continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if choice != QMessageBox.StandardButton.Yes:
+                    return
             self.result_atoms = self.draft.to_atoms()
             self.accept()
         self._guard(action)
