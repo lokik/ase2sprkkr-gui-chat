@@ -530,9 +530,10 @@ def save_embedded_cluster(
     path = Path(file_path).expanduser().resolve()
     try:
         from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
-        ClusterPotential.from_atoms(
-            atoms, scf_status="START"
-        ).save_to_file(path)
+        # Let the backend preserve complete radial data in ITERATING
+        # CLUPOT. For a newly edited structure it naturally emits START.
+        # Partial radial datasets raise instead of being silently discarded.
+        ClusterPotential.from_atoms(atoms).save_to_file(path)
     except (OSError, ValueError, TypeError, NotImplementedError) as exc:
         QMessageBox.critical(
             parent, "Save Embedded Cluster Failed",
