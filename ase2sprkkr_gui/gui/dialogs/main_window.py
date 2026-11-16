@@ -146,6 +146,7 @@ class MainWindow(QMainWindow):
         ):
             action.setEnabled(has_structure)
         self.build_2d_structure_action.setEnabled(self.controller.can_build_2d())
+        self.build_embedding_action.setEnabled(self.controller.can_build_embedding())
 
         has_input = self.controller.input_parameters is not None
         self.save_input_action.setEnabled(has_input)
@@ -378,6 +379,13 @@ class MainWindow(QMainWindow):
         self.build_2d_structure_action = QAction(QIcon(str(icon_path("structure_interface.png"))), "Build &2D Structure...", self)
         self.build_2d_structure_action.triggered.connect(self.build_2d_structure)
         structure_menu.addAction(self.build_2d_structure_action)
+        self.build_embedding_action = QAction("Build Embedded Cluster...", self)
+        self.build_embedding_action.triggered.connect(
+            lambda _checked=False: structure_flows.build_embedding_structure(
+                self.controller, self
+            )
+        )
+        structure_menu.addAction(self.build_embedding_action)
         structure_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
