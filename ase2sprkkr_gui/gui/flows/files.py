@@ -365,6 +365,9 @@ def save_structure(
     atoms = controller.atoms
     if atoms is None:
         return False
+    if ("sprkkr_embedding" in getattr(atoms, "arrays", {})
+            and getattr(atoms, "embedding_host", None) is not None):
+        return save_embedded_cluster(controller, recent_files, parent)
     generation = controller.structure_generation
     formats = {
         " ".join(f"*.{ext}" for ext in file_format.extensions): file_format.name
@@ -394,6 +397,54 @@ def save_structure(
         return False
     recent_files.remember("structure", file_path)
     controller.mark_structure_saved(generation)
+    return True
+
+
+def save_embedded_cluster(
+    controller: WorkspaceController,
+    recent_files: RecentFiles,
+    parent: QWidget,
+) -> bool:
+    """Write native CLUPOT rather than silently drop embedding provenance.
+
+    An ASE .cif/.xyz export loses original-site and translation mapping. A
+    CLUPOT instead requires a converged host POTFIL, which is not synthesized
+    from plain host geometry by this editor.
+    """
+    atoms = controller.atoms
+    host = getattr(atoms, "embedding_host", None)
+    if host is None or not hasattr(host, "LATTICE"):
+        QMessageBox.warning(
+            parent, "Cannot Save Embedded Cluster",
+            "A native CLUPOT requires a host SPR-KKR Potential. The cluster "
+            "geometry is kept in this workspace, but cannot be saved as a "
+            "standalone ASE structure without losing embedding metadata. "
+            "Please create/load a host POTFIL first.",
+        )
+        return False
+    generation = controller.structure_generation
+    file_path, _ = QFileDialog.getSaveFileName(
+        parent,
+        "Save Embedded Cluster (POTFIL_CLU)",
+        "",
+        "SPR-KKR cluster potential (*.clu *.pot);;All Files (*)",
+    )
+    if not file_path:
+        return False
+    path = Path(file_path).expanduser().resolve()
+    try:
+        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+        ClusterPotential.from_atoms(
+            atoms, scf_status="START"
+        ).save_to_file(path)
+    except (OSError, ValueError, TypeError, NotImplementedError) as exc:
+        QMessageBox.critical(
+            parent, "Save Embedded Cluster Failed",
+            f"Could not write the cluster potential:\\n{exc}",
+        )
+        return False
+    controller.mark_structure_saved(generation)
+    recent_files.remember("structure", path)
     return True
 
 
