@@ -7,9 +7,9 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
+    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
     QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -78,8 +78,8 @@ class BuildEmbeddingDialog(QDialog):
         row.addStretch(1)
         left_v.addLayout(row)
         self.cells = QTableWidget(left)
-        self.cells.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.cells.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.cells.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.cells.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.cells.horizontalHeader().setDefaultSectionSize(58)
         self.cells.verticalHeader().setDefaultSectionSize(46)
         self.cells.itemSelectionChanged.connect(self._cell_changed)
@@ -101,9 +101,9 @@ class BuildEmbeddingDialog(QDialog):
         self.sites.setHorizontalHeaderLabels(
             ["Site", "Host occupation", "Cluster occupation", "Included"]
         )
-        self.sites.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.sites.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.sites.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.sites.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.sites.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.sites.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.sites.horizontalHeader().setStretchLastSection(True)
         self.sites.itemSelectionChanged.connect(self._site_changed)
         right_v.addWidget(self.sites, 1)
@@ -238,11 +238,11 @@ class BuildEmbeddingDialog(QDialog):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setData(Qt.ItemDataRole.UserRole, cell)
                 if highlighted:
-                    item.setBackground(QColor("#bba5e8"))
+                    item.setBackground(QBrush(QColor("#bba5e8")))
                 elif changed:
-                    item.setBackground(QColor("#f3bd81"))
+                    item.setBackground(QBrush(QColor("#f3bd81")))
                 elif count:
-                    item.setBackground(QColor("#a2c9ed"))
+                    item.setBackground(QBrush(QColor("#a2c9ed")))
                 self.cells.setItem(r, c, item)
         cell = self._selected_cell
         if self.draft.dimension == 3 and self.layer.value() != cell[2]:
