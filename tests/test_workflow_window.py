@@ -14,6 +14,7 @@ from ase2sprkkr_gui.gui.dialogs import workflow_window as workflow_module
 from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
+    BuildEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -122,6 +123,10 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
             ("build-2d", surface_mode)
         ),
     )
+    monkeypatch.setattr(
+        workflow_module.structure_flows, "build_embedding_structure",
+        lambda *args: events.append("build-embedding"),
+    )
     monkeypatch.setattr(window, "_download_structure", lambda: events.append("download"))
     monkeypatch.setattr(window, "_load_structure", lambda: events.append("load-structure"))
     monkeypatch.setattr(window, "_load_output", lambda: events.append("load-output"))
@@ -146,6 +151,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         CreateStructure(CreateStructureKind.TWO_D),
         Build2D(Build2DKind.SURFACE),
         Build2D(Build2DKind.STRUCTURE),
+        BuildEmbedding(),
         Load(LoadKind.ONLINE_STRUCTURE),
         Load(LoadKind.STRUCTURE),
         Load(LoadKind.OUTPUT),
@@ -167,6 +173,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         "transition",
         ("build-2d", True),
         ("build-2d", False),
+        "build-embedding",
         "download",
         "load-structure",
         "load-output",
