@@ -99,8 +99,18 @@ class EmbeddingDraft:
         return result
 
     def cell_sites(self, cell_index) -> tuple[HostSite, ...]:
+        """Site identities in a displayed cell, including existing native N5VEC."""
         index = tuple(cell_index)
-        return tuple(HostSite(i, index).canonical(self.host) for i in sorted(self.allowed))
+        if len(index) != self.dimension:
+            raise ValueError(f"Expected {self.dimension} displayed cell indices")
+        regular = {HostSite(i, index).canonical(self.host) for i in self.allowed}
+        # The UI has 2D/3D navigation, but may reopen native files with five
+        # independent translation coefficients. Keep those sites accessible.
+        extras = {
+            site for site in self.entries
+            if site.cell_index[:self.dimension] == index
+        }
+        return tuple(sorted(regular | extras))
 
     def set_center(self, site: HostSite) -> None:
         self.center = self.canonical(site)
