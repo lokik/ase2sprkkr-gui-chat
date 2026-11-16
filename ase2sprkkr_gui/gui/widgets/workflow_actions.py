@@ -147,6 +147,7 @@ class WorkflowActionsWidget(QWidget):
             ActionIcon.DATABASE: "database.svg",
             ActionIcon.SURFACE: "surface_2d.svg",
             ActionIcon.INTERFACE: "structure_interface.png",
+            ActionIcon.EMBEDDING: "bulk_crystal.png",
         }
         if icon is ActionIcon.SHELL:
             return QIcon.fromTheme(
