@@ -1,6 +1,8 @@
 """Interactive editor for a finite cluster embedded in an infinite SPR-KKR host."""
 from __future__ import annotations
 
+from itertools import product
+
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -78,13 +80,13 @@ class BuildEmbeddingDialog(QDialog):
         self.inplane_cells.setRange(1, 21)
         self.inplane_cells.setValue(5)
         self.inplane_cells.setToolTip("Actual number of cells displayed along each in-plane axis")
-        self.inplane_cells.valueChanged.connect(self._refresh_cells)
+        self.inplane_cells.valueChanged.connect(self._display_region_changed)
         row.addWidget(self.inplane_cells)
         row.addWidget(QLabel("Centre n1, n2"))
         self.origin_x, self.origin_y = QSpinBox(), QSpinBox()
         for spin in (self.origin_x, self.origin_y):
             spin.setRange(-100000, 100000)
-            spin.valueChanged.connect(self._refresh_cells)
+            spin.valueChanged.connect(self._display_region_changed)
             row.addWidget(spin)
         if self.draft.dimension == 3:
             row.addWidget(QLabel("Layer n3"))
@@ -104,21 +106,7 @@ class BuildEmbeddingDialog(QDialog):
         # The previous itemSelectionChanged/currentItem pair could read the
         # *previous* current item during a mouse selection transition.
         self.cells.currentCellChanged.connect(self._cell_changed)
-        cells_and_actions = QHBoxLayout()
-        cells_and_actions.addWidget(self.cells, 1)
-        cell_actions = QVBoxLayout()
-        include = QPushButton("Include")
-        include.clicked.connect(self._include)
-        cell_actions.addWidget(include)
-        exclude = QPushButton("Exclude")
-        exclude.clicked.connect(self._exclude)
-        cell_actions.addWidget(exclude)
-        centre = QPushButton("Set centre")
-        centre.clicked.connect(self._set_centre)
-        cell_actions.addWidget(centre)
-        cell_actions.addStretch(1)
-        cells_and_actions.addLayout(cell_actions)
-        left_v.addLayout(cells_and_actions, 1)
+        left_v.addWidget(self.cells, 1)
         explanation = QLabel(
             "Blue: included sites   •   Orange: changed occupation or position   "
             "•   Purple: symmetry preview"
@@ -141,7 +129,21 @@ class BuildEmbeddingDialog(QDialog):
         self.sites.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.sites.horizontalHeader().setStretchLastSection(True)
         self.sites.itemSelectionChanged.connect(self._site_changed)
-        right_v.addWidget(self.sites, 1)
+        sites_and_actions = QHBoxLayout()
+        sites_and_actions.addWidget(self.sites, 1)
+        site_actions = QVBoxLayout()
+        include = QPushButton("Include")
+        include.clicked.connect(self._include)
+        site_actions.addWidget(include)
+        exclude = QPushButton("Exclude")
+        exclude.clicked.connect(self._exclude)
+        site_actions.addWidget(exclude)
+        centre = QPushButton("Set centre")
+        centre.clicked.connect(self._set_centre)
+        site_actions.addWidget(centre)
+        site_actions.addStretch(1)
+        sites_and_actions.addLayout(site_actions)
+        right_v.addLayout(sites_and_actions, 1)
 
         self.symmetric = QCheckBox("Apply to symmetry-equivalent sites")
         self.symmetric.toggled.connect(self._update_symmetry_preview)
@@ -202,7 +204,7 @@ class BuildEmbeddingDialog(QDialog):
 
         preview_splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
-        local_group = QGroupBox("Selected host cell · click to select", preview_splitter)
+        local_group = QGroupBox("Host layer · click to select a site", preview_splitter)
         local_layout = QVBoxLayout(local_group)
         self.local_info = QLabel()
         local_layout.addWidget(self.local_info)
@@ -210,22 +212,20 @@ class BuildEmbeddingDialog(QDialog):
         self.local_figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
         self.local_canvas = FigureCanvas(self.local_figure)
         self.local_axes = self.local_figure.add_subplot(111, projection="3d")
+        self.local_axes.view_init(elev=89, azim=-90)
         self.local_canvas.mpl_connect("pick_event", self._local_pick)
         local_layout.addWidget(self.local_canvas, 1)
         preview_splitter.addWidget(local_group)
 
-        global_group = QGroupBox("Result / symmetry · view only", preview_splitter)
+        global_group = QGroupBox("Host structure / embedded cluster · view only", preview_splitter)
         global_layout = QVBoxLayout(global_group)
         global_header = QHBoxLayout()
         self.preview_info = QLabel()
         global_header.addWidget(self.preview_info)
         global_header.addStretch(1)
         self.global_scope = QComboBox()
-        self.global_scope.addItem("Whole cluster", "whole")
-        self.global_scope.addItem(
-            "Current layer" if self.draft.dimension == 3 else "Selected cell",
-            "layer",
-        )
+        self.global_scope.addItem("Whole displayed structure", "whole")
+        self.global_scope.addItem("Current layer", "layer")
         self.global_scope.currentIndexChanged.connect(self._schedule_global_render)
         global_header.addWidget(self.global_scope)
         global_layout.addLayout(global_header)
@@ -257,6 +257,11 @@ class BuildEmbeddingDialog(QDialog):
         except (ValueError, TypeError, IndexError) as exc:
             QMessageBox.warning(self, "Embedded Cluster", str(exc))
             return None
+
+    def _display_region_changed(self, *_):
+        self._refresh_cells()
+        self._schedule_local_render()
+        self._schedule_global_render()
 
     def _layer_changed(self, _value):
         if (
