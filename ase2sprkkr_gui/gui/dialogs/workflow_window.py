@@ -48,6 +48,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
     BuildEmbedding,
+    ConvergeHostScf,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -262,6 +263,15 @@ class WorkflowWindow(QMainWindow):
         """Mechanically route one already-approved workflow command."""
         if isinstance(command, RunTask):
             self._prepare_task(command.backend_task)
+            return
+        if isinstance(command, ConvergeHostScf):
+            calculation_flow.configure_and_run_host_scf(
+                self.controller, self.recent_history, self,
+                dataset_default_mode=self.settings.dataset_default_mode,
+                restart_host_scf=command.restart_scf,
+                track_launch_monitor=self._track_launch_monitor,
+                project_repository=self.project_repository,
+            )
             return
         if isinstance(command, UpdateEmptySpheres):
             self._update_empty_spheres()
