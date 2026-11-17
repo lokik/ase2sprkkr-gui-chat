@@ -156,9 +156,6 @@ class BuildEmbeddingDialog(QDialog):
         # are valid, publish the edit to the cluster without another button.
         self.occupation.occupationEdited.connect(self._occupation_edited)
         right_v.addWidget(self.occupation)
-        reset = QPushButton("Restore host occupation")
-        reset.clicked.connect(self._restore_occupation)
-        right_v.addWidget(reset)
 
         right_v.addWidget(QLabel("Displacement from host position (Å)"))
         displacement_row = QHBoxLayout()
@@ -432,6 +429,9 @@ class BuildEmbeddingDialog(QDialog):
             self.occupation.set_occupation(
                 entry.occupation if entry else site.occupation(self.draft.host)
             )
+            # The host occupation is the original value even when starting
+            # a brand-new embedded cluster. The shared widget owns Restore.
+            self.occupation.set_initial_occupation(site.occupation(self.draft.host))
         values = entry.displacement if entry else (0, 0, 0)
         for spin, value in zip(self.deltas, values):
             spin.setValue(float(value))
@@ -544,11 +544,8 @@ class BuildEmbeddingDialog(QDialog):
         self._guard(action)
 
     def _restore_occupation(self):
-        def action():
-            targets = self._targets()
-            self.draft.reset_occupation(targets)
-            self._changed()
-        self._guard(action)
+        """Compatibility entry point; the button now lives in OccupationEditor."""
+        self.occupation.restore_initial()
 
     def _assign_displacement(self):
         def action():
