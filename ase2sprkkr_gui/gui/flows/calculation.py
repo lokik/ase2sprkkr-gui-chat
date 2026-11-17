@@ -1,6 +1,7 @@
 """Stateless Qt workflow for running and recording a calculation."""
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -14,6 +15,7 @@ from ase2sprkkr_gui.gui.application.result_loading import PotentialVersionChange
 from ase2sprkkr_gui.gui.application.window_geometry import window_placement
 from ase2sprkkr_gui.gui.application.workspace_controller import (
     CalculationNotReady,
+    CalculationRequest,
     WorkspaceController,
 )
 from ase2sprkkr_gui.gui.dialogs.expert_input import edit_input_parameters
@@ -125,6 +127,8 @@ def run_calculation(
     restore_run_directory: bool = False,
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
+    request_override: CalculationRequest | None = None,
+    on_result_loaded: Callable | None = None,
 ) -> SprkkrRunWindow | None:
     """Choose execution, run a task and record its immutable provenance.
 
@@ -142,7 +146,7 @@ def run_calculation(
         # execution setup must not change the workspace.
         if (
             controller.atoms is None
-            or controller.input_parameters is None
+            or (controller.input_parameters is None and request_override is None)
             or controller.structure_id is None
             or controller.state_id is None
         ):
@@ -151,7 +155,8 @@ def run_calculation(
         project_generation = controller.active_project_generation
         selection = _select_profile(
             parent,
-            input_parameters=controller.input_parameters,
+            input_parameters=(request_override.input_parameters if request_override is not None
+                              else controller.input_parameters),
             directory=controller.directory,
             project_repository=project_repository,
             active_project_id=project_id,
@@ -178,7 +183,9 @@ def run_calculation(
             return None
 
     try:
-        request = controller.create_calculation_request()
+        request = (replace(request_override, directory=controller.directory)
+                   if request_override is not None
+                   else controller.create_calculation_request())
     except CalculationNotReady:
         return None
     _apply_run_identification(request.input_parameters, identification)
@@ -213,10 +220,9 @@ def run_calculation(
             )
 
     def finished(loaded) -> None:
-        adoption = controller.adopt_calculation_result(
-            loaded,
-            request=request,
-        )
+        adoption = (controller.adopt_calculation_result(loaded, request=request)
+                    if on_result_loaded is None else
+                    on_result_loaded(loaded, request))
         adoption_completed(adoption)
 
     try:
@@ -238,6 +244,8 @@ def run_calculation(
             restore_run_directory=True,
             track_launch_monitor=track_launch_monitor,
             project_repository=project_repository,
+            request_override=request_override,
+            on_result_loaded=on_result_loaded,
         )
 
     window = SprkkrRunWindow(
