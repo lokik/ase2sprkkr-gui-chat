@@ -400,8 +400,13 @@ def build_embedding_structure(
         # The editor is read-only with respect to the source. Keep its original
         # Potential identity: generic ASE copy() can discard the attached POTFIL.
         # apply_structure_edit still checks the workspace generation atomically.
+        def edit_embedding(_candidate):
+            result = select_build_embedding_structure(source, parent)
+            # Closing an unchanged editor must not create a restarted state.
+            return None if result is source else result
+
         change = controller.apply_structure_edit(
-            lambda _candidate: select_build_embedding_structure(source, parent),
+            edit_embedding,
             expected_structure_generation=generation,
         )
     except (ValueError, TypeError, NotImplementedError) as exc:
