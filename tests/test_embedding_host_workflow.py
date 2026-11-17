@@ -74,6 +74,17 @@ def test_created_cluster_reuses_native_host_during_scf(monkeypatch, tmp_path, so
     launched = []
     monkeypatch.setattr(calculation, "run_calculation",
                         lambda *_args, **_kwargs: launched.append(controller.atoms) or "run")
+    messages = []
+    monkeypatch.setattr(calculation.QMessageBox, "information",
+                        lambda _parent, title, message: messages.append((title, message)))
+    # A freshly generated START host can be saved/edited but not used for
+    # an embedded SCF calculation until its own periodic SCF was run.
+    assert calculation.run_calculation(
+        controller, RecentFiles(tmp_path / "recent.json"), None,
+    ) is None
+    assert messages and messages[0][0] == "Host SCF Required"
+    assert not launched
+    hosts[0].SCF_INFO.SCFSTATUS = "CONVERGED"
     assert calculation.configure_and_run_task(
         controller, RecentFiles(tmp_path / "recent.json"), None,
         "scf", dataset_default_mode="auto",
@@ -102,3 +113,97 @@ def test_failed_host_creation_never_opens_embedding_editor(monkeypatch):
     assert messages == ["Cannot create host"]
     assert controller.atoms is source
     assert controller.structure_generation == generation
+
+def test_host_scf_result_updates_a_cluster_edited_while_host_was_running(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import numpy as np
+    from ase2sprkkr_gui.gui.workflow.model import ConvergeHostScf
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+    from ase2sprkkr_gui.gui.workflow.model import WorkflowSection, RunTask
+
+    host = SPRKKRAtoms.promote_ase_atoms(
+        bulk("Fe", "bcc", a=2.87, cubic=True)
+    ).potential
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    plan = WorkflowPlanner().for_workspace(controller)
+    assert [action.command for action in plan.group(WorkflowSection.CALCULATE).actions] == [
+        ConvergeHostScf()
+    ]
+    assert "Host SCF: START" in plan.subtitle
+
+    parameters = InputParameters.create("SCF")
+    monkeypatch.setattr(calculation, "select_guided_input_parameters",
+                        lambda *_args, **_kwargs: parameters)
+    captured = {}
+    def start(_controller, _recent, _parent, **kwargs):
+        captured.update(kwargs)
+        return "run"
+    monkeypatch.setattr(calculation, "run_calculation", start)
+    assert calculation.configure_and_run_host_scf(
+        controller, RecentFiles(tmp_path / "recent.json"), None,
+        dataset_default_mode="auto",
+    ) == "run"
+
+    request = captured["request_override"]
+    assert request.potential is host
+    assert request.atoms is host.atoms
+    assert not request.restart_scf
+
+    # While host SCF runs, the user edits the cluster. This must not prevent
+    # adoption of the new host or overwrite the later edit.
+    edited = controller.atoms.copy()
+    edited.positions[0, 0] += 0.04
+    controller.replace_structure(edited)
+    expected_positions = edited.positions.copy()
+    new_host = Potential.from_atoms(host.atoms.copy())
+    new_host.SCF_INFO.SCFSTATUS = "CONVERGED"
+    monkeypatch.setattr(controller, "adopt_external_result", lambda _loaded: "record")
+    assert captured["on_result_loaded"](
+        SimpleNamespace(atoms=new_host.atoms), request
+    ) == "record"
+    assert controller.atoms.embedding_host is new_host
+    np.testing.assert_allclose(controller.atoms.positions, expected_positions)
+    assert not controller.is_scf_converged()
+
+    # An independently changed host must not be overwritten by the old run.
+    third_host = Potential.from_atoms(host.atoms.copy())
+    current = controller.atoms.copy()
+    current.embedding_host = third_host
+    controller.replace_structure(current)
+    assert not controller.replace_embedding_host_if_current(host, new_host)
+    assert controller.atoms.embedding_host is third_host
+
+
+@pytest.mark.parametrize("status", ["ITR", "CONVERGED"])
+def test_partially_converged_host_actions_and_restart(status):
+    from ase2sprkkr_gui.gui.workflow.model import (
+        ConvergeHostScf, RunTask, WorkflowSection,
+    )
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+
+    host = SPRKKRAtoms.promote_ase_atoms(
+        bulk("Fe", "bcc", a=2.87, cubic=True)
+    ).potential
+    host.SCF_INFO.SCFSTATUS = status
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    controller = WorkspaceController(WorkspaceState(atoms=draft.to_atoms()))
+    plan = WorkflowPlanner().for_workspace(controller)
+    calculate = plan.group(WorkflowSection.CALCULATE)
+    commands = [action.command for action in calculate.actions]
+    assert RunTask("scf") in commands
+    if status == "ITR":
+        assert ConvergeHostScf() in commands
+        assert "may be unreliable" in next(
+            action.description for action in calculate.actions
+            if action.command == RunTask("scf")
+        )
+    else:
+        assert ConvergeHostScf() not in commands
+    assert ConvergeHostScf(restart_scf=True) in [
+        action.command
+        for action in plan.group(WorkflowSection.OTHER).actions
+    ]
