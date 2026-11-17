@@ -62,6 +62,16 @@ class EmbeddingPreview(QWidget):
         self.fit_button = QPushButton("Fit")
         self.fit_button.clicked.connect(self._fit)
         controls.addWidget(self.fit_button)
+
+        # Keep the scope selector, projection selector, and Fit button aligned.
+        # Each preview computes its own width from its longest control label.
+        width_controls = [self.projection, self.fit_button]
+        if controls_header is not None:
+            width_controls.insert(0, controls_header)
+        control_width = max(control.sizeHint().width() for control in width_controls)
+        for control in width_controls:
+            control.setFixedWidth(control_width)
+
         self.site_numbers = None
         if selectable:
             self.site_numbers = QCheckBox("All site\nnumbers")

@@ -1705,6 +1705,10 @@ def test_preview_controls_are_on_the_outer_sides_of_the_canvases():
     dialog = BuildEmbeddingDialog(host())
     focus_embedding_control(dialog, dialog.cell_rings)
     for preview, right in ((dialog.local_preview, False), (dialog.global_preview, True)):
+        controls = [preview.projection, preview.fit_button]
+        if right:
+            controls.insert(0, dialog.global_scope)
+        assert len({control.width() for control in controls}) == 1
         canvas_left = preview.canvas.mapTo(preview, QPoint()).x()
         canvas_right = canvas_left + preview.canvas.width()
         for control in (preview.projection, preview.fit_button):
