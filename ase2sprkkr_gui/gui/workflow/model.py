@@ -45,8 +45,10 @@ class ActionIcon(Enum):
     DATABASE = auto()
     SURFACE = auto()
     INTERFACE = auto()
+    EMBEDDING = auto()
     RESULT = auto()
     VIEW = auto()
+    SAVE = auto()
     CONTINUE = auto()
     NEW_CALCULATION = auto()
     RESET = auto()
@@ -83,6 +85,11 @@ class Build2D:
 
 
 @dataclass(frozen=True)
+class BuildEmbedding:
+    """Build a new embedded cluster, or edit an existing one."""
+
+
+@dataclass(frozen=True)
 class Load:
     kind: LoadKind
 
@@ -105,6 +112,22 @@ class VisualizeStructure:
 
 
 @dataclass(frozen=True)
+class SaveStructure:
+    """Write the current structure without requiring a calculation."""
+
+
+@dataclass(frozen=True)
+class LoadHostPotential:
+    """Associate a matching host POTFIL with an embedded cluster."""
+
+
+@dataclass(frozen=True)
+class CreateHostPotential:
+    """Generate a host potential from a periodic structure."""
+
+
+
+@dataclass(frozen=True)
 class UseForNewCalculation:
     pass
 
@@ -119,9 +142,13 @@ WorkflowCommand = Union[
     UpdateEmptySpheres,
     CreateStructure,
     Build2D,
+    BuildEmbedding,
     Load,
     ContinueRecent,
     VisualizeStructure,
+    SaveStructure,
+    LoadHostPotential,
+    CreateHostPotential,
     UseForNewCalculation,
     StartOver,
 ]

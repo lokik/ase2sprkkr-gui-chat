@@ -24,6 +24,8 @@ from ase2sprkkr_gui.gui.dialogs.guided_input import (
 )
 from ase2sprkkr_gui.gui.dialogs.profiles import ProfileSelectionDialog, RunIdentification
 from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
+from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
+from ase2sprkkr_gui.gui.application.sprkkr_execution import SprkkrExecution
 from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_value
 from ase2sprkkr_gui.gui.input_parameters.tasks import is_guided_task
 from ase2sprkkr_gui.gui.misc.structure_wait import document_change_applied
@@ -79,8 +81,8 @@ def _select_profile(
     selected_profile_name: str | None = None,
     initial_identification: RunIdentification | None = None,
     directory_is_explicit: bool = False,
-) -> tuple[bool, str | None, RunIdentification | None, str | None, str | None]:
-    """Choose execution, run identifiers, working directory and project."""
+) -> tuple[bool, str | None, RunIdentification | None, str | None, str | None, bool]:
+    """Choose a run or preparation-only operation with the same identifiers."""
     dialog = ProfileSelectionDialog(
         parent,
         input_parameters=input_parameters,
@@ -93,10 +95,10 @@ def _select_profile(
     )
     _position_like_window(dialog, position_like_window)
     if dialog.exec() != dialog.DialogCode.Accepted:
-        return False, None, None, None, None
+        return False, None, None, None, None, False
     return (
         True, dialog.profile_name(), dialog.identification(),
-        dialog.directory_name(), dialog.project_id(),
+        dialog.directory_name(), dialog.project_id(), dialog.save_only_selected(),
     )
 
 
@@ -134,6 +136,7 @@ def run_calculation(
     """
     identification = initial_identification
     project_id = controller.active_project_id
+    prepare_only = False
     if select_profile:
         # Resolve the directory only after input-parameter editing. Cancelling
         # execution setup must not change the workspace.
@@ -146,7 +149,7 @@ def run_calculation(
             return None
         directory_generation = controller.directory_generation
         project_generation = controller.active_project_generation
-        accepted, profile_name, identification, directory, project_id = _select_profile(
+        selection = _select_profile(
             parent,
             input_parameters=controller.input_parameters,
             directory=controller.directory,
@@ -157,6 +160,8 @@ def run_calculation(
             initial_identification=initial_identification,
             directory_is_explicit=restore_run_directory,
         )
+        accepted, profile_name, identification, directory, project_id = selection[:5]
+        prepare_only = bool(selection[5]) if len(selection) > 5 else False
         if not accepted or not directory:
             return None
         # Selecting a project for a run also makes it the active project.
@@ -177,6 +182,24 @@ def run_calculation(
     except CalculationNotReady:
         return None
     _apply_run_identification(request.input_parameters, identification)
+
+    if prepare_only:
+        execution = SprkkrExecution(
+            request, RunCancellation(), profile_name=profile_name,
+        )
+        try:
+            written, input_file, host_file, _output_file = execution.prepare_files()
+        except Exception as exc:  # noqa: BLE001 - native writers expose varied errors
+            QMessageBox.critical(parent, "Save SPR-KKR Files Failed", str(exc))
+            return None
+        cluster_file = written.CONTROL.POTFIL_CLU()
+        additional = f"\nCluster potential: {cluster_file}" if cluster_file else ""
+        QMessageBox.information(
+            parent, "SPR-KKR Files Prepared",
+            f"Input: {input_file}\nHost potential: {host_file}{additional}\n"
+            "No calculation was started.",
+        )
+        return None
 
     def adoption_completed(adoption) -> None:
         if adoption.output_path is not None:
@@ -277,6 +300,15 @@ def configure_and_run_task(
 
     if parameters is None:
         return None
+    if controller.structure_kind() == "0d" and not controller.can_run_embedding():
+        # The Guided SCF command remains visible for clusters built from ASE
+        # geometry. Resolve the external native host only after the user has
+        # accepted the parameter editor, without launching a periodic binary.
+        from ase2sprkkr_gui.gui.flows.files import ensure_embedded_host_potential
+
+        if not ensure_embedded_host_potential(controller, parent):
+            return None
+        structure_generation = controller.structure_generation
     if not document_change_applied(
         parent,
         controller.replace_input_parameters(

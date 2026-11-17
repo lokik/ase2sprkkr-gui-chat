@@ -89,6 +89,8 @@ class SprkkrExecution:
 
     def _create_runner(self, calculator: SPRKKR):
         input_file, potential_file, output_file = self.file_names()
+        # The backend Potential.from_atoms factory recognizes embedded Atoms.
+        # Keep the same public atoms= path as periodic calculations.
         return self._with_mpi_warnings(
             lambda: calculator.create_run(
                 atoms=self.request.atoms,
@@ -103,6 +105,20 @@ class SprkkrExecution:
                 project=self._project_context(),
                 restart_scf=self.request.restart_scf,
             )
+        )
+
+    def prepare_files(self):
+        """Write native input/potential files without submitting a runner."""
+        input_file, potential_file, _output_file = self.file_names()
+        return self._calculator().save_input(
+            atoms=self.request.atoms,
+            input_parameters=self.request.input_parameters,
+            directory=self.request.directory,
+            input_file=input_file,
+            potential_file=potential_file,
+            output_file=False,
+            empty_spheres=False,
+            restart_scf=self.request.restart_scf,
         )
 
     def _notify_persistent_job_changed(self, runner: Any) -> None:
@@ -148,10 +164,15 @@ class SprkkrExecution:
             self._notify_persistent_job_changed(runner)
 
         self._status("Loading result…")
-        loaded = load_result(
-            result,
-            fallback_directory=self.request.directory,
-            persistent_ref=(runner.id if self.project_id is not None else None),
-        )
+        kwargs = {
+            "fallback_directory": self.request.directory,
+            "persistent_ref": runner.id if self.project_id is not None else None,
+        }
+        host = getattr(self.request.atoms, "embedding_host", None)
+        if host is not None:
+            # Native CLUPOT is not a standalone structure. Preserve the
+            # canonical launch host when interpreting the result file.
+            kwargs["embedding_host"] = host
+        loaded = load_result(result, **kwargs)
         self._status("Finished")
         return loaded

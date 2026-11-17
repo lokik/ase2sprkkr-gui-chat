@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QScrollArea,
     QStyle,
     QSizePolicy,
     QSplitter,
@@ -46,6 +47,7 @@ from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
 from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
+    BuildEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -56,6 +58,9 @@ from ase2sprkkr_gui.gui.workflow.model import (
     UpdateEmptySpheres,
     UseForNewCalculation,
     VisualizeStructure,
+    SaveStructure,
+    LoadHostPotential,
+    CreateHostPotential,
     WorkflowCommand,
     WorkflowPlan,
 )
@@ -134,9 +139,14 @@ class WorkflowWindow(QMainWindow):
 
         self._actions = WorkflowActionsWidget(content)
         self._actions.commandRequested.connect(self.execute_workflow_command)
-        content_layout.addWidget(self._actions)
+        action_scroll = QScrollArea(content)
+        action_scroll.setObjectName("workflowActionScrollArea")
+        action_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        action_scroll.setWidgetResizable(True)
+        action_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        action_scroll.setWidget(self._actions)
+        content_layout.addWidget(action_scroll, 1)
 
-        content_layout.addStretch(1)
         splitter.addWidget(content)
 
         # The sidebar is only a layout container: the result view and the
@@ -265,6 +275,9 @@ class WorkflowWindow(QMainWindow):
                 CreateStructureKind.TWO_D: self._create_transition,
             }[command.kind]()
             return
+        if isinstance(command, BuildEmbedding):
+            structure_flows.build_embedding_structure(self.controller, self)
+            return
         if isinstance(command, Build2D):
             surface_mode = {
                 Build2DKind.SURFACE: True,
@@ -284,6 +297,19 @@ class WorkflowWindow(QMainWindow):
             return
         if isinstance(command, VisualizeStructure):
             self._visualize_structure()
+            return
+        if isinstance(command, SaveStructure):
+            self._save_structure()
+            return
+        if isinstance(command, LoadHostPotential):
+            file_flows.load_host_potential(
+                self.controller, self.recent_history, self
+            )
+            return
+        if isinstance(command, CreateHostPotential):
+            file_flows.create_host_potential(
+                self.controller, self.recent_history, self
+            )
             return
         if isinstance(command, UseForNewCalculation):
             self._use_for_new_calculation()
@@ -381,6 +407,9 @@ class WorkflowWindow(QMainWindow):
 
     def _visualize_structure(self) -> None:
         visualization_flow.visualize_structure(self.controller, self.settings, self)
+
+    def _save_structure(self) -> None:
+        file_flows.save_structure(self.controller, self.recent_history, self)
 
     def _open_settings(self) -> None:
         edit_settings(self.settings, self)

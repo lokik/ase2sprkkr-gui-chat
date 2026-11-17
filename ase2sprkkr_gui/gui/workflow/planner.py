@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from ase2sprkkr import InputParameters
+from ase2sprkkr.sprkkr.executables import executables
+
 from ase2sprkkr_gui.gui.input_parameters.tasks import (
     WorkflowStage,
     WorkflowTaskRole,
@@ -25,6 +28,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AvailableActionGroup,
     Build2D,
     Build2DKind,
+    BuildEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -35,6 +39,9 @@ from ase2sprkkr_gui.gui.workflow.model import (
     UpdateEmptySpheres,
     UseForNewCalculation,
     VisualizeStructure,
+    SaveStructure,
+    LoadHostPotential,
+    CreateHostPotential,
     WorkflowCommand,
     WorkflowPlan,
     WorkflowSection,
@@ -58,6 +65,10 @@ class WorkflowWorkspace(Protocol):
     def structure_kind(self) -> StructureKind | None: ...
 
     def can_build_2d(self) -> bool: ...
+
+    def can_build_embedding(self) -> bool: ...
+
+    def can_run_embedding(self) -> bool: ...
 
     def scf_status(self) -> str | None: ...
 
@@ -104,53 +115,96 @@ def _recent_menu(
     )
 
 
+def _cluster_task_supported(definition):
+    """Require explicit task support, not merely a shared cluster executable."""
+    try:
+        task = InputParameters.task_registry[definition.backend_task.upper()]
+        return (task.supports_embedded_cluster
+                and executables[task.executable].cluster_variant is not None)
+    except (AttributeError, KeyError):
+        return False
+
+
 class WorkflowPlanner:
     """Build the complete ordered Guided workflow presentation plan."""
 
     def initial_plan(
         self,
         recent: RecentHistorySnapshot | None = None,
+        *,
+        read_only_cluster: str | None = None,
     ) -> WorkflowPlan:
-        create = AvailableActionGroup(
-            WorkflowSection.CREATE,
-            "Create structure",
-            (
-                _action(
-                    CreateStructure(CreateStructureKind.THREE_D),
-                    "Create a 3D Structure",
-                    "Build a periodic bulk crystal",
-                    "structure",
-                    ActionIcon.BULK_CRYSTAL,
+        if read_only_cluster is not None:
+            return WorkflowPlan(
+                f"CLUPOT loaded read-only: {read_only_cluster}. "
+                "Attach its host POTFIL before editing or calculating.",
+                (
+                    AvailableActionGroup(
+                        WorkflowSection.CREATE, "Create / attach host",
+                        (
+                            _action(
+                                LoadHostPotential(), "Load Host Potential",
+                                "Choose an existing matching host POTFIL",
+                                "structure", ActionIcon.OPEN,
+                            ),
+                            _action(
+                                CreateHostPotential(), "Create Host Potential",
+                                "Build a matching periodic host and generate its POTFIL",
+                                "structure", ActionIcon.BULK_CRYSTAL,
+                            ),
+                        ),
+                    ),
+                    AvailableActionGroup(
+                        WorkflowSection.LOAD, "Load another structure",
+                        (
+                            _action(
+                                Load(LoadKind.STRUCTURE), "Load a Structure",
+                                "Open another structure instead of this CLUPOT",
+                                "load", ActionIcon.OPEN,
+                            ),
+                        ),
+                    ),
                 ),
-                _action(
-                    CreateStructure(CreateStructureKind.PROTOTYPE),
-                    "Create Structure from Prototype Database",
-                    "Start from a crystallographic structure prototype",
-                    "structure",
-                    ActionIcon.DATABASE,
-                ),
-                _action(
-                    CreateStructure(CreateStructureKind.SHELL),
-                    "Create by Python Shell",
-                    "Build an ASE structure interactively in Python",
-                    "structure",
-                    ActionIcon.SHELL,
-                ),
-                _action(
-                    CreateStructure(CreateStructureKind.SURFACE),
-                    "Create a 2D Surface",
-                    "Build a surface with vacuum on one side",
-                    "structure",
-                    ActionIcon.SURFACE,
-                ),
-                _action(
-                    CreateStructure(CreateStructureKind.TWO_D),
-                    "Create a 2D Structure",
-                    "Build an interface or transitional layer",
-                    "structure",
-                    ActionIcon.INTERFACE,
-                ),
+            )
+        create_actions = (
+            _action(
+                CreateStructure(CreateStructureKind.THREE_D),
+                "Create a 3D Structure",
+                "Build a periodic bulk crystal",
+                "structure",
+                ActionIcon.BULK_CRYSTAL,
             ),
+            _action(
+                CreateStructure(CreateStructureKind.PROTOTYPE),
+                "Create Structure from Prototype Database",
+                "Start from a crystallographic structure prototype",
+                "structure",
+                ActionIcon.DATABASE,
+            ),
+            _action(
+                CreateStructure(CreateStructureKind.SHELL),
+                "Create by Python Shell",
+                "Build an ASE structure interactively in Python",
+                "structure",
+                ActionIcon.SHELL,
+            ),
+            _action(
+                CreateStructure(CreateStructureKind.SURFACE),
+                "Create a 2D Surface",
+                "Build a surface with vacuum on one side",
+                "structure",
+                ActionIcon.SURFACE,
+            ),
+            _action(
+                CreateStructure(CreateStructureKind.TWO_D),
+                "Create a 2D Structure",
+                "Build an interface or transitional layer",
+                "structure",
+                ActionIcon.INTERFACE,
+            ),
+        )
+        create = AvailableActionGroup(
+            WorkflowSection.CREATE, "Create structure", create_actions
         )
         load_actions = [
             _action(
@@ -211,7 +265,11 @@ class WorkflowPlanner:
     ) -> WorkflowPlan:
         atoms = workspace.atoms
         if atoms is None:
-            return self.initial_plan(recent)
+            path = getattr(workspace, "unresolved_cluster_path", None)
+            return self.initial_plan(
+                recent,
+                read_only_cluster=str(path) if path is not None else None,
+            )
 
         status = workspace.scf_status()
         progress = classify_scf_progress(
@@ -222,7 +280,9 @@ class WorkflowPlanner:
         groups: list[AvailableActionGroup] = []
         calculate: list[AvailableAction] = []
 
-        if not converged and not workspace.structure_change_requires_scf_restart():
+        is_cluster = workspace.structure_kind() == "0d"
+        invalid_cluster = is_cluster and getattr(atoms, "embedding_host", None) is None
+        if not is_cluster and not converged and not workspace.structure_change_requires_scf_restart():
             empty_spheres = workspace.empty_spheres_action()
             if empty_spheres is not None:
                 calculate.append(
@@ -236,7 +296,14 @@ class WorkflowPlanner:
                 )
 
         stage = WorkflowStage.POST_SCF if converged else WorkflowStage.SCF
-        for definition in workflow_tasks(stage):
+        supported_tasks = workflow_tasks(stage)
+        if is_cluster:
+            # Only a cluster with a known host geometry can be configured.
+            # Missing host identity is a corrupt document, not a pending task.
+            supported_tasks = (() if invalid_cluster else tuple(
+                d for d in supported_tasks if _cluster_task_supported(d)
+            ))
+        for definition in supported_tasks:
             title = definition.workflow.label
             description = definition.workflow.description
             if definition.workflow.role is WorkflowTaskRole.SCF:
@@ -248,6 +315,8 @@ class WorkflowPlanner:
                     )
                 elif workspace.structure_kind() == "2d":
                     description = "Converge bulk region(s), then the interaction zone"
+            if is_cluster and not getattr(workspace, "can_run_embedding", lambda: False)():
+                description += " (requires a matching host POTFIL)"
             calculate.append(
                 _action(
                     RunTask(definition.backend_task),
@@ -270,7 +339,7 @@ class WorkflowPlanner:
         groups.append(
             AvailableActionGroup(
                 WorkflowSection.VIEW,
-                "View",
+                "Structure",
                 (
                     _action(
                         VisualizeStructure(),
@@ -279,33 +348,67 @@ class WorkflowPlanner:
                         "neutral",
                         ActionIcon.VIEW,
                     ),
+                    _action(
+                        SaveStructure(),
+                        "Save Structure",
+                        "Write the current structure to a file without calculating",
+                        "neutral",
+                        ActionIcon.SAVE,
+                    ),
                 ),
             )
         )
 
+        derived: list[AvailableAction] = []
         if workspace.can_build_2d():
-            groups.append(
-                AvailableActionGroup(
-                    WorkflowSection.CREATE,
-                    "Create derived structure",
-                    (
-                        _action(
-                            Build2D(Build2DKind.SURFACE),
-                            "Create a 2D Surface",
-                            "Derive a surface from the current 3D structure",
-                            "structure",
-                            ActionIcon.SURFACE,
-                        ),
-                        _action(
-                            Build2D(Build2DKind.STRUCTURE),
-                            "Create a 2D Structure",
-                            "Derive an interface or transitional layer",
-                            "structure",
-                            ActionIcon.INTERFACE,
-                        ),
-                    ),
-                )
-            )
+            derived.extend((
+                _action(
+                    Build2D(Build2DKind.SURFACE),
+                    "Create a 2D Surface",
+                    "Derive a surface from the current 3D structure",
+                    "structure",
+                    ActionIcon.SURFACE,
+                ),
+                _action(
+                    Build2D(Build2DKind.STRUCTURE),
+                    "Create a 2D Structure",
+                    "Derive an interface or transitional layer",
+                    "structure",
+                    ActionIcon.INTERFACE,
+                ),
+            ))
+        # Some test/third-party workspace adapters predate this capability.
+        if not invalid_cluster and getattr(workspace, "can_build_embedding", lambda: False)():
+            derived.append(_action(
+                BuildEmbedding(),
+                "Edit Embedded Cluster" if is_cluster else "Build Embedded Cluster",
+                "Choose host cells, substitute sites and expand symmetry/relaxation shells",
+                "structure",
+                ActionIcon.EMBEDDING,
+            ))
+        missing_native_host = (
+            is_cluster and not invalid_cluster
+            and not getattr(workspace, "can_run_embedding", lambda: False)()
+        )
+        if missing_native_host:
+            derived[:0] = [
+                _action(
+                    LoadHostPotential(), "Load Host Potential",
+                    "Attach a matching host POTFIL to the embedded cluster",
+                    "structure", ActionIcon.OPEN,
+                ),
+                _action(
+                    CreateHostPotential(), "Create Host Potential",
+                    "Generate a host POTFIL from the host geometry",
+                    "structure", ActionIcon.BULK_CRYSTAL,
+                ),
+            ]
+        if derived:
+            groups.append(AvailableActionGroup(
+                WorkflowSection.CREATE,
+                "Create / attach host" if missing_native_host
+                else "Create derived structure", tuple(derived),
+            ))
 
         other: list[AvailableAction] = []
         if progress is not ScfProgress.NOT_STARTED:
@@ -337,9 +440,10 @@ class WorkflowPlanner:
 
         formula = structure_formula(atoms)
         return WorkflowPlan(
-            (
-                f"Current structure: {formula}  •  "
-                f"SCF status: {scf_progress_label(progress, status)}"
-            ),
+            ("Invalid embedded structure: the host reference is missing. "
+             "Reload or rebuild it from the original host structure."
+             if invalid_cluster else
+             f"Current structure: {formula}  •  "
+             f"SCF status: {scf_progress_label(progress, status)}"),
             tuple(groups),
         )

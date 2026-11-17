@@ -66,6 +66,13 @@ def _snapshot_needed(version: PotentialFileVersion | None) -> bool:
     return version is None or not version.available
 
 
+def _is_embedded_snapshot(snapshot: StructureSnapshot | None) -> bool:
+    return bool(
+        snapshot is not None
+        and snapshot.info.get("sprkkr_embedding_host") is not None
+    )
+
+
 @dataclass(frozen=True)
 class StructureRecord:
     """Identity of one user-visible physical structure."""
@@ -338,9 +345,13 @@ class ResultStore:
     ) -> _PreparedState:
         resolved_version = _resolve_potential_version(potential_path, potential_version)
         formula = structure_formula(atoms) or type(atoms).__name__
+        # CLUPOT alone is not self-contained. Retain only its small site
+        # mapping and canonical host reference alongside the versioned file.
+        # Ordinary periodic POTFIL states still avoid duplicate snapshots.
+        is_embedded = getattr(atoms, "embedding_host", None) is not None
         snapshot = (
             StructureSnapshot.capture(atoms)
-            if _snapshot_needed(resolved_version)
+            if _snapshot_needed(resolved_version) or is_embedded
             else None
         )
         source_result_id = (
@@ -400,12 +411,13 @@ class ResultStore:
         if resolved_version is None or not resolved_version.available:
             resolved_source = None
 
-        if _snapshot_needed(resolved_version):
-            resolved_snapshot = (
-                parent.structure_snapshot
-                if structure_snapshot is _KEEP_STRUCTURE
-                else structure_snapshot
-            )
+        proposed_snapshot = (
+            parent.structure_snapshot
+            if structure_snapshot is _KEEP_STRUCTURE
+            else structure_snapshot
+        )
+        if _snapshot_needed(resolved_version) or _is_embedded_snapshot(proposed_snapshot):
+            resolved_snapshot = proposed_snapshot
             if resolved_snapshot is None:
                 raise ValueError(
                     "A state without a usable potential requires a structure snapshot."

@@ -177,3 +177,24 @@ def test_guided_parameter_editor_opens_without_directory_prompt(monkeypatch, tmp
     ) == "run"
     assert calls == [None]
     assert controller.input_parameters is parameters
+
+
+def test_cluster_guided_task_requests_native_host_before_committing(monkeypatch, tmp_path):
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+    from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
+    from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
+
+    controller = WorkspaceController(WorkspaceState(atoms=Atoms("Fe", pbc=False)))
+    # 0D atoms without an embedding host are not a valid cluster; this verifies
+    # that the Guided boundary refuses the host preparation before starting.
+    request = []
+    monkeypatch.setattr(calculation_flow, "select_guided_input_parameters",
+                        lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(file_flows, "ensure_embedded_host_potential",
+                        lambda ctrl, parent: request.append((ctrl, parent)) or False)
+    assert calculation_flow.configure_and_run_task(
+        controller, RecentFiles(tmp_path / "recent.json"), None, "scf",
+        dataset_default_mode="auto",
+    ) is None
+    assert request == [(controller, None)]
+    assert controller.input_parameters is None

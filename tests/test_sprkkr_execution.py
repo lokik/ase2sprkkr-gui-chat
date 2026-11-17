@@ -287,3 +287,68 @@ def test_persistent_job_observer_failure_does_not_fail_calculation(
     monkeypatch.setattr(execution_module, "load_result", lambda *_args, **_kwargs: object())
 
     assert execution.run() is not None
+
+
+def test_embedded_execution_forwards_original_host_to_result_reader(
+    monkeypatch, tmp_path
+):
+    from ase2sprkkr import SPRKKRAtoms
+
+    host = Atoms("Cu", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
+    cluster = SPRKKRAtoms.from_embedding(
+        host, [(0, (0, 0, 0), "Fe")]
+    )
+    request = CalculationRequest(
+        atoms=cluster, input_parameters=object(), directory=str(tmp_path),
+        structure_id=1, state_id=1,
+    )
+    calls = []
+
+    class Runner:
+        id = "cluster-run"
+
+        def submit(self):
+            pass
+
+        def wait(self):
+            return object()
+
+    class Calculator:
+        def create_run(self, **kwargs):
+            assert kwargs["atoms"].embedding_host is host
+            assert kwargs["empty_spheres"] is False
+            return Runner()
+
+    execution = SprkkrExecution(request, _Cancellation())
+    monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
+
+    def read_result(_result, **kwargs):
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(execution_module, "load_result", read_result)
+    execution.run()
+    assert calls[0]["embedding_host"] is host
+    assert calls[0]["fallback_directory"] == str(tmp_path)
+
+
+def test_prepare_only_uses_save_input_without_creating_a_runner(monkeypatch, tmp_path):
+    captured = {}
+
+    class Calculator:
+        def save_input(self, **kwargs):
+            captured.update(kwargs)
+            return ("parameters", "input.inp", "host.pot", None)
+
+        def create_run(self, **kwargs):
+            raise AssertionError("Preparing files must not launch a runner")
+
+    execution = SprkkrExecution(_request(tmp_path, restart_scf=True), _Cancellation())
+    monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
+    assert execution.prepare_files() == ("parameters", "input.inp", "host.pot", None)
+    assert captured["directory"] == str(tmp_path)
+    assert captured["empty_spheres"] is False
+    assert captured["restart_scf"] is True
+    assert captured["output_file"] is False
+    assert captured["input_file"] == "%a_%T.inp"
+    assert captured["potential_file"] == "%a.pot"

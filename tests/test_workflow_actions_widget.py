@@ -238,3 +238,29 @@ def test_replacing_plan_retires_old_groups():
     ]
     assert visible_labels == ["New"]
     widget.close()
+
+
+def test_tall_panel_keeps_groups_and_labels_compact():
+    application = _app()
+    widget = WorkflowActionsWidget()
+    groups = tuple(
+        AvailableActionGroup(
+            section, title, _single_action_plan(title=title).groups[0].actions
+        )
+        for section, title in (
+            (WorkflowSection.CREATE, "First"), (WorkflowSection.LOAD, "Second")
+        )
+    )
+    widget.set_plan(WorkflowPlan("subtitle", groups))
+    widget.resize(550, 1200)
+    widget.show()
+    application.processEvents()
+
+    labels = widget.findChildren(QLabel, "workflowActionGroupLabel")
+    panels = [label.parentWidget() for label in labels]
+    assert panels[0].geometry().top() == 0
+    for panel, label in zip(panels, labels):
+        assert panel.height() == panel.sizeHint().height()
+        assert label.height() == label.sizeHint().height()
+    assert panels[1].geometry().bottom() < widget.height() / 2
+    widget.close()

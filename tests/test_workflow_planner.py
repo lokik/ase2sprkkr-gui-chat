@@ -19,12 +19,16 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AvailableActionGroup,
     Build2D,
     Build2DKind,
+    BuildEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
     Load,
     LoadKind,
+    LoadHostPotential,
+    CreateHostPotential,
     RunTask,
+    SaveStructure,
     StartOver,
     UpdateEmptySpheres,
     UseForNewCalculation,
@@ -178,6 +182,8 @@ def test_current_structure_plan_has_canonical_group_order_without_output_loader(
         WorkflowSection.OTHER,
     )
     assert plan.group(WorkflowSection.LOAD) is None
+    assert plan.group(WorkflowSection.VIEW).title == "Structure"
+    assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
     assert all(
         command != Load(LoadKind.OUTPUT)
         for group in plan.groups
@@ -339,6 +345,7 @@ def test_real_controller_build_2d_capability_drives_derived_structure_commands()
     assert _commands(plan, WorkflowSection.CREATE) == (
         Build2D(Build2DKind.SURFACE),
         Build2D(Build2DKind.STRUCTURE),
+        BuildEmbedding(),
     )
 
 
@@ -355,3 +362,90 @@ def test_workflow_plan_rejects_duplicate_sections():
 
     with pytest.raises(ValueError, match="each section at most once"):
         WorkflowPlan("subtitle", (first, second))
+
+
+def test_embedded_structure_plan_offers_cluster_scf_and_save_without_host_potential():
+    class EmbeddingWorkspace(Workspace):
+        def can_build_embedding(self):
+            return True
+
+        def can_run_embedding(self):
+            return False
+
+    atoms = FormulaAtoms()
+    atoms.embedding_host = object()  # Geometry exists, but POTFIL is not attached.
+    plan = WorkflowPlanner().for_workspace(
+        EmbeddingWorkspace(atoms=atoms, kind="0d", build_2d=False)
+    )
+    assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
+    assert "host POTFIL" in plan.group(WorkflowSection.CALCULATE).actions[0].description
+    assert _commands(plan, WorkflowSection.CREATE) == (
+        LoadHostPotential(), CreateHostPotential(), BuildEmbedding(),
+    )
+    assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
+
+
+def test_no_host_recovery_action_for_an_invalid_orphan_cluster():
+    class CorruptCluster(Workspace):
+        def can_build_embedding(self):
+            return False
+
+        def can_run_embedding(self):
+            return False
+
+    plan = WorkflowPlanner().for_workspace(
+        CorruptCluster(atoms=FormulaAtoms(), kind="0d")
+    )
+    assert plan.group(WorkflowSection.CREATE) is None
+    assert _commands(plan, WorkflowSection.CALCULATE) == ()
+    assert "host" in plan.subtitle.lower()
+
+
+def test_native_host_does_not_offer_redundant_attachment():
+    class ReadyCluster(Workspace):
+        def can_build_embedding(self):
+            return True
+
+        def can_run_embedding(self):
+            return True
+
+    atoms = FormulaAtoms()
+    atoms.embedding_host = object()
+    plan = WorkflowPlanner().for_workspace(
+        ReadyCluster(atoms=atoms, kind="0d")
+    )
+    assert _commands(plan, WorkflowSection.CREATE) == (BuildEmbedding(),)
+
+
+def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
+    from types import SimpleNamespace
+    from ase2sprkkr_gui.gui.workflow import planner as planning
+
+    fake_registry = {
+        "SCF": SimpleNamespace(executable="kkrscf", supports_embedded_cluster=True),
+        "DOS": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=True),
+        "XAS": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
+        "ARPES": SimpleNamespace(executable="kkrspec", supports_embedded_cluster=False),
+        "BSFEK": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
+        "JXC": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
+    }
+    monkeypatch.setattr(planning.InputParameters, "task_registry", fake_registry)
+    for stage, expected in ((WorkflowStage.SCF, ("scf",)),
+                            (WorkflowStage.POST_SCF, ("dos",))):
+        filtered = tuple(d.backend_task for d in workflow_tasks(stage)
+                         if planning._cluster_task_supported(d))
+        assert filtered == expected
+
+
+def test_read_only_clupot_is_not_a_structure_and_offers_only_host_attachment():
+    class Hostless(Workspace):
+        unresolved_cluster_path = "/tmp/imported.clu"
+        atoms = None
+
+    workspace = Hostless(atoms=None)
+    plan = WorkflowPlanner().for_workspace(workspace)
+    create = _commands(plan, WorkflowSection.CREATE)
+    assert create == (LoadHostPotential(), CreateHostPotential())
+    assert _commands(plan, WorkflowSection.CALCULATE) == ()
+    assert "read-only" in plan.subtitle.lower()
+    assert "imported.clu" in plan.subtitle

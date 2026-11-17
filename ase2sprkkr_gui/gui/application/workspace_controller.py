@@ -120,6 +120,10 @@ class WorkspaceController(QObject):
         self._workspace = workspace or WorkspaceState()
         self._conflict_resolver = conflict_resolver
         self._results = ResultStore()
+        # A native CLUPOT may be opened read-only without its host POTFIL.
+        # It is a loaded file, not an editable Atoms document or unsaved work.
+        self._unresolved_cluster = None
+        self._unresolved_cluster_path: Path | None = None
         # The loaded or written revision, not merely the presence of a file.
         self._saved_structure_generation: Generation | None = None
         self._saved_input_parameters_generation: Generation | None = None
@@ -140,6 +144,37 @@ class WorkspaceController(QObject):
                 ),
                 generation=structure_lock.generation,
             )
+
+    @property
+    def unresolved_cluster(self):
+        """Native read-only CLUPOT awaiting an explicitly provided host."""
+        return self._unresolved_cluster
+
+    @property
+    def unresolved_cluster_path(self) -> Path | None:
+        return self._unresolved_cluster_path
+
+    def load_unresolved_cluster(
+        self,
+        potential,
+        path: str | Path,
+        *,
+        expected_structure_generation: Generation | None = None,
+        expected_directory_generation: Generation | None = None,
+    ) -> DocumentChange:
+        """Open an orphan CLUPOT without treating it as an editable structure."""
+        path = Path(path).resolve()
+        change = self.replace_structure(
+            None,
+            directory=str(path.parent),
+            expected_structure_generation=expected_structure_generation,
+            expected_directory_generation=expected_directory_generation,
+        )
+        if change is DocumentChange.APPLIED:
+            self._unresolved_cluster = potential
+            self._unresolved_cluster_path = path
+            self.structureChanged.emit(None)
+        return change
 
     @property
     def structure_state(self) -> StructureState:
@@ -254,12 +289,29 @@ class WorkspaceController(QObject):
     def structure_kind(self):
         return self.structure_state.structure_kind()
 
+    def can_run_embedding(self) -> bool:
+        """A guided cluster task can be configured once a native host exists."""
+        if self.structure_kind() != "0d":
+            return False
+        from ase2sprkkr import Potential
+
+        return isinstance(getattr(self.atoms, "embedding_host", None), Potential)
+
     def can_calculate(self) -> bool:
-        """Allow execution setup before choosing the working directory."""
-        return self.atoms is not None and self.input_parameters is not None
+        """Whether a fully configured calculation can be launched."""
+        if self.atoms is None or self.input_parameters is None:
+            return False
+        return self.structure_kind() != "0d" or self.can_run_embedding()
 
     def can_build_2d(self) -> bool:
         return self.structure_kind() == "3d"
+
+    def can_build_embedding(self) -> bool:
+        """A 3D/2D host or existing embedded cluster can open the editor."""
+        kind = self.structure_kind()
+        return (kind in {"3d", "2d"}
+                or (kind == "0d" and
+                    getattr(self.atoms, "embedding_host", None) is not None))
 
     def scf_status(self) -> str | None:
         return self.structure_state.scf_status()
@@ -272,7 +324,7 @@ class WorkspaceController(QObject):
 
     def empty_spheres_action(self) -> _EmptySpheresAction | None:
         """Return the empty-sphere workflow action recommended for the draft."""
-        if self.atoms is None:
+        if self.atoms is None or self.structure_kind() == "0d":
             return None
         if self.empty_spheres is not None:
             return _EmptySpheresAction.RECALCULATE
@@ -302,6 +354,10 @@ class WorkspaceController(QObject):
         ):
             raise CalculationNotReady(
                 "Structure, input parameters, working directory and calculation state are required."
+            )
+        if not self.can_calculate():
+            raise CalculationNotReady(
+                "An embedded calculation requires a host SPR-KKR Potential."
             )
         return CalculationRequest(
             atoms=atoms,
@@ -437,6 +493,9 @@ class WorkspaceController(QObject):
             )
         if directory_changed:
             self.directoryChanged.emit(directory)
+        # A successfully loaded regular structure replaces the read-only CLUPOT.
+        self._unresolved_cluster = None
+        self._unresolved_cluster_path = None
         self.structureChanged.emit(atoms)
         return DocumentChange.APPLIED
 
@@ -481,7 +540,9 @@ class WorkspaceController(QObject):
             structure_id=structure_id,
             state_id=state_id,
             empty_spheres=None,
-            restarted=True,
+            # New embedded clusters already start with SCFSTATUS=START.
+            # Do not request another restart (which would discard radial data).
+            restarted="sprkkr_embedding" not in getattr(atoms, "arrays", {}),
         )
         self._commit_locked(
             self._workspace.structure,
@@ -796,6 +857,8 @@ class WorkspaceController(QObject):
 
     def reset(self) -> None:
         """Clear calculation values while preserving history and active project."""
+        self._unresolved_cluster = None
+        self._unresolved_cluster_path = None
         structure = self.structure_state
         if (
             structure.atoms is not None
