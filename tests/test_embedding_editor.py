@@ -1052,3 +1052,29 @@ def test_whole_global_preview_includes_host_even_before_any_cluster_site():
     )
     assert len(dialog._rendered_sites) == expected
     assert "Cluster: 0/0" in dialog.preview_info.text()
+
+
+def test_2d_transition_region_excludes_leads_but_whole_host_shows_them():
+    from types import SimpleNamespace
+
+    atoms = Atoms(
+        "Cu3", positions=[[0, 0, 0], [0, 0, 2], [0, 0, 4]],
+        cell=[2, 2, 12], pbc=(True, True, False),
+    )
+    atoms.regions = {
+        "left": SimpleNamespace(ids=(0,)),
+        "central": SimpleNamespace(ids=(1,)),
+        "right": SimpleNamespace(ids=(2,)),
+    }
+    dialog = BuildEmbeddingDialog(atoms)
+    assert dialog.draft.allowed == frozenset({1})
+    dialog._render()
+    cells = dialog.inplane_cells.value() ** 2
+    assert len(dialog._local_sites) == cells
+    assert all(site.original_site == 1 for site in dialog._local_sites)
+    assert len(dialog._rendered_sites) == 3 * cells
+
+    dialog.global_scope.setCurrentIndex(1)
+    dialog._render_global()
+    assert len(dialog._rendered_sites) == cells
+    assert all(site.original_site == 1 for site in dialog._rendered_sites)
