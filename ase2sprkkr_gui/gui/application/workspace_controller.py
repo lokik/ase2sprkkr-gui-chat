@@ -283,7 +283,7 @@ class WorkspaceController(QObject):
 
     def empty_spheres_action(self) -> _EmptySpheresAction | None:
         """Return the empty-sphere workflow action recommended for the draft."""
-        if self.atoms is None:
+        if self.atoms is None or self.structure_kind() == "0d":
             return None
         if self.empty_spheres is not None:
             return _EmptySpheresAction.RECALCULATE
