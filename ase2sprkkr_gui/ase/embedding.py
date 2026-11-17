@@ -19,7 +19,7 @@ from ase2sprkkr.sprkkr.embedding_geometry import (
     embedding_sites_within_radius,
     embedding_sites_within_shells,
 )
-from ase2sprkkr.sprkkr.sprkkr_atoms import SPRKKRAtoms
+from ase2sprkkr import SPRKKRAtoms
 
 
 @dataclass
