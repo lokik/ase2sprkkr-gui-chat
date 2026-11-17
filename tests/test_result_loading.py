@@ -228,7 +228,7 @@ def test_native_cluster_result_requires_and_reuses_original_host(tmp_path, monke
     from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
 
     cluster_path = tmp_path / "after_scf.clu"
-    cluster_path.write_text("NQCLU 1\\n", encoding="utf-8")
+    cluster_path.write_text("GLOBAL SYSTEM PARAMETER\nNQCLU 1\n", encoding="utf-8")
     host = object()
     expected = Atoms("Fe")
     calls = []
@@ -260,8 +260,8 @@ def test_native_pot_extension_cluster_is_detected_by_header(tmp_path):
 
     periodic = tmp_path / "bulk.pot"
     embedded = tmp_path / "cluster.pot_new"
-    periodic.write_text("HEADER\\nNQ 1\\n", encoding="utf-8")
-    embedded.write_text("HEADER\\nNQCLU 3\\n", encoding="utf-8")
+    periodic.write_text("GLOBAL SYSTEM PARAMETER\nNQ 1\n", encoding="utf-8")
+    embedded.write_text("GLOBAL SYSTEM PARAMETER\nNQCLU 3\n", encoding="utf-8")
     assert not Potential.is_cluster_file(periodic)
     assert Potential.is_cluster_file(embedded)
     assert not Potential.is_cluster_file(tmp_path / "missing.pot")
