@@ -36,6 +36,10 @@ from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_value, filename_
 from ase2sprkkr_gui.gui.widgets.settings.run_configurations import RunConfigurationsPage
 
 
+# This is a dialog-only action, not a persisted execution profile.
+_SAVE_ONLY_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
 @dataclass(frozen=True)
 class RunIdentification:
     """Output identifiers for a single calculation, independent of its profile."""
@@ -126,7 +130,8 @@ class ProfileSelectionDialog(QDialog):
         heading.setFont(heading_font)
         layout.addWidget(heading)
         intro = QLabel(
-            "Choose where this calculation will run. The profile also controls MPI and executable selection.",
+            "Choose an execution profile, or save the input and potential files "
+            "without running a calculation.",
             self,
         )
         intro.setWordWrap(True)
@@ -241,15 +246,6 @@ class ProfileSelectionDialog(QDialog):
         layout.addWidget(directory_box)
         directory_box.setVisible(require_directory)
         self._project_changed()
-        self.prepare_only = QCheckBox(
-            "Save input and potential files only (do not run)", self
-        )
-        self.prepare_only.setToolTip(
-            "Prepare the native SPR-KKR input file and both required potentials "
-            "(host and CLUPOT for an embedded cluster), without starting "
-            "an executable or creating a persistent job."
-        )
-        layout.addWidget(self.prepare_only)
         layout.addStretch(1)
 
         buttons = QDialogButtonBox(
@@ -261,11 +257,6 @@ class ProfileSelectionDialog(QDialog):
         buttons.rejected.connect(self.reject)
         self._confirm_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self._confirm_button.setText("Run")
-        self.prepare_only.toggled.connect(
-            lambda save_only: self._confirm_button.setText(
-                "Save files" if save_only else "Run"
-            )
-        )
         layout.addWidget(buttons)
         self._reload_profiles(selected_profile_name)
 
@@ -389,7 +380,11 @@ class ProfileSelectionDialog(QDialog):
         self._project_changed()
 
     def _reload_profiles(self, selected: str | None = None) -> None:
-        if selected is None and self.profiles.count():
+        save_only = (
+            selected is None and self.profiles.count() > 0
+            and self.save_only_selected()
+        )
+        if selected is None and self.profiles.count() and not save_only:
             selected = self.profiles.currentData()
         self.profiles.clear()
         names = self._store.names()
@@ -398,18 +393,43 @@ class ProfileSelectionDialog(QDialog):
         else:
             for name in names:
                 self.profiles.addItem(name, name)
+        # Keep this outside ExecutionProfileStore: it is an operation, not a
+        # backend (and must never be saved into user execution profiles).
+        save_index = self.profiles.count()
+        self.profiles.addItem("<Save input files only>", None)
+        self.profiles.setItemData(save_index, True, _SAVE_ONLY_ROLE)
+        self.profiles.setItemData(
+            save_index,
+            "Write the SPR-KKR input and potential files; do not launch a job.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
         default = self._store.resolved_name(None)
         wanted = selected if selected in names else default
-        index = self.profiles.findData(wanted)
+        index = save_index if save_only else self.profiles.findData(wanted)
         self.profiles.setCurrentIndex(max(index, 0))
         self._update_description()
 
+    def save_only_selected(self) -> bool:
+        """True for the non-persistent file-preparation entry in the picker."""
+        return bool(self.profiles.currentData(_SAVE_ONLY_ROLE))
+
     def _update_description(self) -> None:
-        try:
-            text = self._store.describe(self.profiles.currentData())
-        except (KeyError, TypeError, ValueError) as exc:
-            text = f"Profile cannot be resolved: {exc}"
+        if self.save_only_selected():
+            text = (
+                "Write the native SPR-KKR input and potential files to the "
+                "selected working directory without starting a calculation "
+                "or creating a persistent job. Embedded calculations also "
+                "write the host and cluster potentials."
+            )
+        else:
+            try:
+                text = self._store.describe(self.profiles.currentData())
+            except (KeyError, TypeError, ValueError) as exc:
+                text = f"Profile cannot be resolved: {exc}"
         self.description.setText(text)
+        self._confirm_button.setText(
+            "Save files" if self.save_only_selected() else "Run"
+        )
 
     def _edit_profiles(self) -> None:
         """Open only the reusable run-configuration editor, not all Settings."""
@@ -492,6 +512,9 @@ class ProfileSelectionDialog(QDialog):
         )
 
     def profile_name(self) -> str | None:
+        # Saving files does not define or select a real execution profile.
+        if self.save_only_selected():
+            return None
         value = self.profiles.currentData()
         return None if value is None else str(value)
 

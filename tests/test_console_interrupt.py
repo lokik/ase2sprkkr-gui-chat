@@ -20,7 +20,9 @@ def test_console_interrupt_wakes_qt_once_and_restores_handler(capfd):
     try:
         assert signal.getsignal(signal.SIGINT) != previous_handler
         interrupt._mark_interrupt(signal.SIGINT, None)
-        assert "Ctrl+C: shutdown requested" in capfd.readouterr().err
+        message = capfd.readouterr().err
+        assert "Ctrl+C: shutdown requested" in message
+        assert "Hit CTRL+C again to force terminate" in message
         interrupt._writer.send(bytes([2]))
         app.processEvents()
         assert received == [True]

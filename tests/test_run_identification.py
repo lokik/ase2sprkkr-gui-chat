@@ -178,13 +178,33 @@ def test_execution_dialog_requires_working_directory_and_can_browse(
     dialog.close()
 
 
-def test_profile_dialog_prepare_only_changes_confirmation_label(application, tmp_path):
-    from ase2sprkkr_gui.gui.dialogs.profiles import ProfileSelectionDialog
+def test_save_only_is_a_special_non_persistent_profile_choice(application, tmp_path):
+    dialog = ProfileSelectionDialog(
+        directory=str(tmp_path), store=_Profiles()
+    )
+    assert not hasattr(dialog, "prepare_only")
+    assert dialog._confirm_button.text() == "Run"
+    assert not dialog.save_only_selected()
+    assert dialog.profiles.itemText(dialog.profiles.count() - 1) == (
+        "<Save input files only>"
+    )
 
-    dialog = ProfileSelectionDialog(directory=str(tmp_path))
-    assert not dialog.prepare_only.isChecked()
-    assert dialog._confirm_button.text() == "Run"
-    dialog.prepare_only.setChecked(True)
+    dialog.profiles.setCurrentIndex(dialog.profiles.count() - 1)
+    assert dialog.save_only_selected()
+    assert dialog.profile_name() is None
     assert dialog._confirm_button.text() == "Save files"
-    dialog.prepare_only.setChecked(False)
+    assert "without starting" in dialog.description.text()
+    assert dialog.identification() is None
+
+    # Managing real profiles must preserve this special choice, but must not
+    # add it to the store of actual executors.
+    assert _Profiles().names() == []
+    dialog._reload_profiles()
+    assert dialog.save_only_selected()
+    assert dialog._confirm_button.text() == "Save files"
+
+    dialog.profiles.setCurrentIndex(0)
+    assert not dialog.save_only_selected()
     assert dialog._confirm_button.text() == "Run"
+    assert "Built-in local profile" in dialog.description.text()
+    dialog.close()

@@ -76,7 +76,8 @@ class ConsoleInterrupt(QObject):
         self._interrupted = True
         self._first_interrupt_at = now
         self._console_notice(
-            b"Ctrl+C: shutdown requested; repeat after 0.5 s to force exit.\n"
+            b"Ctrl+C: shutdown requested.\n"
+            b"Hit CTRL+C again to force terminate (after 500 ms).\n"
         )
 
     def _on_readable(self, *_args) -> None:

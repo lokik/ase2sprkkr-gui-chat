@@ -98,7 +98,7 @@ def _select_profile(
         return False, None, None, None, None, False
     return (
         True, dialog.profile_name(), dialog.identification(),
-        dialog.directory_name(), dialog.project_id(), dialog.prepare_only.isChecked(),
+        dialog.directory_name(), dialog.project_id(), dialog.save_only_selected(),
     )
 
 
