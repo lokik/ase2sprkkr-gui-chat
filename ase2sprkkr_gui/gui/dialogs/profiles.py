@@ -396,16 +396,17 @@ class ProfileSelectionDialog(QDialog):
         # Keep this outside ExecutionProfileStore: it is an operation, not a
         # backend (and must never be saved into user execution profiles).
         save_index = self.profiles.count()
-        self.profiles.addItem("<Save input files only>", None)
-        self.profiles.setItemData(save_index, True, _SAVE_ONLY_ROLE)
-        self.profiles.setItemData(
-            save_index,
-            "Write the SPR-KKR input and potential files; do not launch a job.",
-            Qt.ItemDataRole.ToolTipRole,
-        )
+        if self._require_directory:
+            self.profiles.addItem("<Save input files only>", None)
+            self.profiles.setItemData(save_index, True, _SAVE_ONLY_ROLE)
+            self.profiles.setItemData(
+                save_index,
+                "Write the SPR-KKR input and potential files; do not launch a job.",
+                Qt.ItemDataRole.ToolTipRole,
+            )
         default = self._store.resolved_name(None)
         wanted = selected if selected in names else default
-        if save_only:
+        if save_only and self._require_directory:
             index = save_index
         elif wanted in names:
             index = self.profiles.findData(wanted)

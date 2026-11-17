@@ -239,3 +239,13 @@ def test_save_only_is_not_selected_as_default_when_no_default_profile(
     assert dialog._confirm_button.text() == "Save files"
     dialog.close()
 
+
+
+def test_profile_only_selector_does_not_offer_file_preparation(application):
+    dialog = ProfileSelectionDialog(
+        store=_Profiles(), require_directory=False,
+    )
+    assert dialog.profiles.count() == 1
+    assert dialog.profiles.itemText(0) == "Automatic / built-in"
+    assert not dialog.save_only_selected()
+    dialog.close()
