@@ -225,7 +225,7 @@ def run_calculation(
         description = None
 
     def back_to_run_setup() -> None:
-        # A file conflict was rejected before the new job started. Open the
+        # Submission was rejected before the new job started. Open the
         # normal setup dialog again, without discarding the user's last choices.
         # The run identifiers were request-only overrides, not workspace edits.
         run_calculation(
