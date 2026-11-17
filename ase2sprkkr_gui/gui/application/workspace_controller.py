@@ -254,16 +254,19 @@ class WorkspaceController(QObject):
     def structure_kind(self):
         return self.structure_state.structure_kind()
 
+    def can_run_embedding(self) -> bool:
+        """A guided cluster task can be configured once a native host exists."""
+        if self.structure_kind() != "0d":
+            return False
+        from ase2sprkkr import Potential
+
+        return isinstance(getattr(self.atoms, "embedding_host", None), Potential)
+
     def can_calculate(self) -> bool:
-        """Allow supported execution setup before choosing a working directory."""
+        """Whether a fully configured calculation can be launched."""
         if self.atoms is None or self.input_parameters is None:
             return False
-        if self.structure_kind() == "0d":
-            # Native embedded calculations need a real, separate host POTFIL.
-            from ase2sprkkr import Potential
-
-            return isinstance(getattr(self.atoms, "embedding_host", None), Potential)
-        return True
+        return self.structure_kind() != "0d" or self.can_run_embedding()
 
     def can_build_2d(self) -> bool:
         return self.structure_kind() == "3d"
