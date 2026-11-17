@@ -116,6 +116,21 @@ class SaveStructure:
     """Write the current structure without requiring a calculation."""
 
 
+@dataclass(frozen=True)
+class SaveOrphanCluster:
+    """Write an existing native CLUPOT without requiring its host."""
+
+
+@dataclass(frozen=True)
+class LoadHostPotential:
+    """Associate a matching host POTFIL with an embedded cluster."""
+
+
+@dataclass(frozen=True)
+class CreateHostPotential:
+    """Generate a host potential from a periodic structure."""
+
+
 
 @dataclass(frozen=True)
 class UseForNewCalculation:
@@ -137,6 +152,9 @@ WorkflowCommand = Union[
     ContinueRecent,
     VisualizeStructure,
     SaveStructure,
+    SaveOrphanCluster,
+    LoadHostPotential,
+    CreateHostPotential,
     UseForNewCalculation,
     StartOver,
 ]

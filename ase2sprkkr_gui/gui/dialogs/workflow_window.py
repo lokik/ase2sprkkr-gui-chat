@@ -58,6 +58,9 @@ from ase2sprkkr_gui.gui.workflow.model import (
     UseForNewCalculation,
     VisualizeStructure,
     SaveStructure,
+    SaveOrphanCluster,
+    LoadHostPotential,
+    CreateHostPotential,
     WorkflowCommand,
     WorkflowPlan,
 )
@@ -292,6 +295,21 @@ class WorkflowWindow(QMainWindow):
             return
         if isinstance(command, SaveStructure):
             self._save_structure()
+            return
+        if isinstance(command, SaveOrphanCluster):
+            file_flows.save_orphan_cluster(
+                self.controller, self.recent_history, self
+            )
+            return
+        if isinstance(command, LoadHostPotential):
+            file_flows.load_host_potential(
+                self.controller, self.recent_history, self
+            )
+            return
+        if isinstance(command, CreateHostPotential):
+            file_flows.create_host_potential(
+                self.controller, self.recent_history, self
+            )
             return
         if isinstance(command, UseForNewCalculation):
             self._use_for_new_calculation()
