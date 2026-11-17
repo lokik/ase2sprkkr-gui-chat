@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from ase2sprkkr import InputParameters
+from ase2sprkkr.sprkkr.executables import executables
+
 from ase2sprkkr_gui.gui.input_parameters.tasks import (
     WorkflowStage,
     WorkflowTaskRole,
@@ -105,6 +108,15 @@ def _recent_menu(
         )
         for group in presentation.groups
     )
+
+
+def _cluster_task_supported(definition):
+    """Use backend executable metadata rather than a parallel GUI task list."""
+    try:
+        task = InputParameters.task_registry[definition.backend_task.upper()]
+        return executables[task.executable].cluster_variant is not None
+    except (AttributeError, KeyError):
+        return False
 
 
 class WorkflowPlanner:
@@ -240,7 +252,14 @@ class WorkflowPlanner:
                 )
 
         stage = WorkflowStage.POST_SCF if converged else WorkflowStage.SCF
-        for definition in (() if is_cluster else workflow_tasks(stage)):
+        supported_tasks = workflow_tasks(stage)
+        if is_cluster:
+            supported_tasks = (
+                tuple(d for d in supported_tasks if _cluster_task_supported(d))
+                if getattr(workspace, "can_calculate", lambda: False)()
+                else ()
+            )
+        for definition in supported_tasks:
             title = definition.workflow.label
             description = definition.workflow.description
             if definition.workflow.role is WorkflowTaskRole.SCF:
