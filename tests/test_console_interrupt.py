@@ -136,3 +136,52 @@ def test_loaded_structure_exits_without_save_prompt(tmp_path, monkeypatch):
 
     monkeypatch.setattr(QMessageBox, "question", unexpected_prompt)
     assert gui.request_exit()
+
+
+def test_second_ctrl_c_force_exits_while_first_handler_is_running(monkeypatch):
+    import pytest
+    from ase2sprkkr_gui.gui.application import console_interrupt as bridge
+
+    app = QApplication.instance() or QApplication([])
+    events = []
+
+    def forced_exit(code):
+        events.append(("forced", code))
+        raise SystemExit(code)
+
+    monkeypatch.setattr(bridge.os, "_exit", forced_exit)
+    interrupt = None
+
+    def shutdown():
+        events.append("shutdown")
+        interrupt._mark_interrupt(signal.SIGINT, None)
+
+    interrupt = ConsoleInterrupt(shutdown, parent=app)
+    try:
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        with pytest.raises(SystemExit) as exc:
+            interrupt._on_readable()
+        assert exc.value.code == 130
+        assert events == ["shutdown", ("forced", 130)]
+    finally:
+        interrupt.close()
+
+
+def test_second_ctrl_c_force_exits_before_qt_consumes_first(monkeypatch):
+    import pytest
+    from ase2sprkkr_gui.gui.application import console_interrupt as bridge
+
+    app = QApplication.instance() or QApplication([])
+    called = []
+    monkeypatch.setattr(
+        bridge.os, "_exit",
+        lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    )
+    interrupt = ConsoleInterrupt(lambda: called.append(True), parent=app)
+    try:
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        with pytest.raises(SystemExit, match="130"):
+            interrupt._mark_interrupt(signal.SIGINT, None)
+        assert not called
+    finally:
+        interrupt.close()

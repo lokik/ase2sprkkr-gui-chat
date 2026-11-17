@@ -9,6 +9,7 @@ then wakes Qt so the normal shutdown callback runs on the GUI thread.
 """
 from __future__ import annotations
 
+import os
 import signal
 import socket
 from collections.abc import Callable
@@ -26,6 +27,7 @@ class ConsoleInterrupt(QObject):
         super().__init__(parent)
         self._on_interrupt = on_interrupt
         self._interrupted = False
+        self._handling_interrupt = False
         self._closed = False
         self._reader, self._writer = socket.socketpair()
         self._reader.setblocking(False)
@@ -49,6 +51,12 @@ class ConsoleInterrupt(QObject):
             raise
 
     def _mark_interrupt(self, _signum: int, _frame: FrameType | None) -> None:
+        if self._interrupted or self._handling_interrupt:
+            # A second Ctrl+C is an explicit forced exit. The first may have
+            # entered a nested Qt modal dialog; another GUI callback cannot
+            # reliably interrupt that synchronous stack. Do not run Qt APIs in
+            # this signal handler or wait for the blocked event loop.
+            os._exit(130)
         self._interrupted = True
 
     def _on_readable(self, *_args) -> None:
@@ -60,7 +68,11 @@ class ConsoleInterrupt(QObject):
                 break
         if self._interrupted:
             self._interrupted = False
-            self._on_interrupt()
+            self._handling_interrupt = True
+            try:
+                self._on_interrupt()
+            finally:
+                self._handling_interrupt = False
 
     def close(self) -> None:
         """Restore process signal state and close wakeup sockets."""
