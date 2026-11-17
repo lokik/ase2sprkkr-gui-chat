@@ -102,6 +102,15 @@ class QLetterRow(QWidget):
             selector=select_element,
         )
         self.vbox.addWidget(self.occupation_editor)
+        # Splitting symmetry changes the grouping of Wyckoff positions, not
+        # their occupation. Keep this bulk-only action outside the shared widget.
+        self.break_btn = QPushButton("Break symmetry")
+        self.break_btn.setVisible(bool(site.can_split))
+        if site.can_split and callable(self._on_break):
+            self.break_btn.clicked.connect(lambda: self._on_break(self.site))
+        self.vbox.addWidget(
+            self.break_btn, alignment=Qt.AlignmentFlag.AlignRight
+        )
         # Compatibility handles used by this dialog's older callers/tests.
         self.rows = self.occupation_editor.rows
         self.normalize_btn = self.occupation_editor.normalize_btn
