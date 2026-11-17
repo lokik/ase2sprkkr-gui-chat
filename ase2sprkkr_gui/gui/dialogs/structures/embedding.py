@@ -47,6 +47,10 @@ class BuildEmbeddingDialog(QDialog):
         self._local_timer.setInterval(80)
         self._local_timer.setSingleShot(True)
         self._local_timer.timeout.connect(self._render_local)
+        self._displacement_timer = QTimer(self)
+        self._displacement_timer.setSingleShot(True)
+        self._displacement_timer.setInterval(350)
+        self._displacement_timer.timeout.connect(self._assign_displacement)
         self._build_ui()
         self._refresh_cells()
         self._refresh_sites()
@@ -167,11 +171,10 @@ class BuildEmbeddingDialog(QDialog):
             spin.setRange(-100.0, 100.0)
             spin.setSingleStep(0.01)
             self.deltas.append(spin)
+            spin.valueChanged.connect(self._schedule_displacement)
+            spin.editingFinished.connect(self._apply_pending_displacement)
             displacement_row.addWidget(spin)
         right_v.addLayout(displacement_row)
-        apply_delta = QPushButton("Apply displacement")
-        apply_delta.clicked.connect(self._assign_displacement)
-        right_v.addWidget(apply_delta)
         splitter.addWidget(right)
         splitter.setSizes([480, 680])
 
@@ -256,6 +259,7 @@ class BuildEmbeddingDialog(QDialog):
             return None
 
     def _layer_changed(self, _value):
+        self._apply_pending_displacement()
         if (
             self._selected_site is not None
             and not self.occupation.is_valid()
@@ -349,6 +353,7 @@ class BuildEmbeddingDialog(QDialog):
     def _cell_changed(self, row, column, *_):
         if self._grid_updating or row < 0 or column < 0:
             return
+        self._apply_pending_displacement()
         item = self.cells.item(row, column)
         if item is None:
             return
@@ -400,6 +405,7 @@ class BuildEmbeddingDialog(QDialog):
     def _site_changed(self):
         if self._site_updating:
             return
+        self._apply_pending_displacement()
         row = self.sites.currentRow()
         if 0 <= row < len(self._site_rows):
             next_site = self._site_rows[row]
@@ -434,7 +440,9 @@ class BuildEmbeddingDialog(QDialog):
             self.occupation.set_initial_occupation(site.occupation(self.draft.host))
         values = entry.displacement if entry else (0, 0, 0)
         for spin, value in zip(self.deltas, values):
+            spin.blockSignals(True)
             spin.setValue(float(value))
+            spin.blockSignals(False)
 
     def _targets(self):
         site = self._selected_site
@@ -547,11 +555,30 @@ class BuildEmbeddingDialog(QDialog):
         """Compatibility entry point; the button now lives in OccupationEditor."""
         self.occupation.restore_initial()
 
+    def _schedule_displacement(self, *_):
+        if self._selected_site is not None:
+            self._displacement_timer.start()
+
+    def _apply_pending_displacement(self):
+        if self._displacement_timer.isActive():
+            self._displacement_timer.stop()
+            self._assign_displacement()
+
     def _assign_displacement(self):
         def action():
             if self._selected_site is None:
-                raise ValueError("Select a site first")
-            values = [spin.value() for spin in self.deltas]
+                return
+            values = np.asarray([spin.value() for spin in self.deltas])
+            targets = self._targets()
+            if not self.symmetric.isChecked() and all(
+                np.array_equal(
+                    self.draft.entries[site].displacement
+                    if site in self.draft.entries else np.zeros(3),
+                    values,
+                )
+                for site in targets
+            ):
+                return
             self.draft.set_displacement(
                 self._selected_site, values, symmetric=self.symmetric.isChecked()
             )
@@ -690,6 +717,7 @@ class BuildEmbeddingDialog(QDialog):
         self._site_changed()
 
     def _accept(self):
+        self._apply_pending_displacement()
         def action():
             if self._selected_site is not None and not self.occupation.is_valid():
                 raise ValueError(
