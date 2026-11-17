@@ -179,16 +179,12 @@ def load_embedded_cluster(
         return False
 
     if geometry_warning:
-        # A CLUPOT does not identify its host uniquely. Never silently
-        # replace the workspace with geometry inconsistent with the host.
-        answer = QMessageBox.question(
+        # CLUPOT contains no host-cell identity; an approximate geometrical
+        # mismatch is advisory, not grounds for rejecting an explicit choice.
+        QMessageBox.warning(
             parent, "Host Potential May Not Match",
-            geometry_warning + "\n\nUse this host POTFIL anyway?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+            geometry_warning + "\n\nCheck the host POTFIL before calculating.",
         )
-        if answer != QMessageBox.StandardButton.Yes:
-            return False
 
     change = controller.replace_structure(
         cluster,
