@@ -342,41 +342,138 @@ def test_saved_cluster_automatically_loads_companion_host(monkeypatch, tmp_path)
     assert chosen == [str(host_path.resolve())]
 
 
-def test_orphan_clupot_loading_requires_host_and_does_not_change_workspace(
-    monkeypatch, tmp_path,
-):
+def test_hostless_clupot_loads_read_only_without_save_prompt(monkeypatch, tmp_path):
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
     from ase2sprkkr_gui.gui.flows import files as file_flows
+    from ase2sprkkr_gui.gui.workflow.model import (
+        CreateHostPotential, LoadHostPotential, WorkflowSection,
+    )
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
 
     path = tmp_path / "unpaired.clu"
-    path.write_text("native CLUPOT")
-    original = host()
-    controller = WorkspaceController(WorkspaceState(atoms=original))
-    warning = []
+    path.write_text("native CLUPOT", encoding="utf-8")
+    controller = WorkspaceController(WorkspaceState())
+    original = object()
+    calls = []
     monkeypatch.setattr(
-        file_flows.QFileDialog, "getOpenFileName",
-        lambda *_args: ("", ""),
-    )
-    monkeypatch.setattr(
-        file_flows.QMessageBox, "warning",
-        lambda *args: warning.append(args),
+        ClusterPotential, "from_file",
+        lambda path, *, host=None: (
+            calls.append((path, host)) or original
+        ),
     )
     monkeypatch.setattr(
         file_flows, "run_modal_task",
-        lambda *_args, **_kwargs: pytest.fail(
-            "Must not construct/edit a cluster without a host"
-        ),
+        lambda _parent, action, **_kw: action(),
+    )
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "information", lambda *_args: None,
     )
 
     class Recent:
-        def remember(self, *_args):
-            pytest.fail("Rejected cluster cannot enter recent files")
+        def remember(self, kind, name):
+            assert kind == "structure"
+            assert name == path
 
-    assert not file_flows.load_embedded_cluster(
-        controller, Recent(), path, None,
+    assert file_flows.load_embedded_cluster(controller, Recent(), path, None)
+    assert calls == [(path, None)]
+    assert controller.atoms is None
+    assert controller.unresolved_cluster is original
+    assert controller.unresolved_cluster_path == path
+    assert not controller.has_unsaved_structure
+    plan = WorkflowPlanner().for_workspace(controller)
+    assert tuple(a.command for a in plan.group(WorkflowSection.CREATE).actions) == (
+        LoadHostPotential(), CreateHostPotential(),
     )
-    assert controller.atoms is original
-    assert warning and warning[0][1] == "Host Potential Required"
-    assert not hasattr(controller, "pending_embedded_cluster")
+    assert "read-only" in plan.subtitle.lower()
+
+
+def test_attaching_host_to_read_only_clupot_enables_editing(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from ase2sprkkr import Potential
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    cluster_path = tmp_path / "orphan.clu"
+    cluster_path.write_text("CLUPOT")
+    host_path = tmp_path / "host.pot"
+    host_path.write_text("HOST")
+    controller = WorkspaceController(WorkspaceState())
+    host_potential = Potential.from_atoms(host())
+    draft = EmbeddingDraft(host_potential)
+    draft.include([draft.center])
+    embedded = draft.to_atoms()
+    seen = []
+
+    def parse(path, *, host=None):
+        seen.append((path, host))
+        if host is None:
+            return SimpleNamespace()
+        return SimpleNamespace(
+            atoms=embedded, host_geometry_warning=lambda: None,
+        )
+
+    monkeypatch.setattr(ClusterPotential, "from_file", parse)
+    monkeypatch.setattr(Potential, "from_file", lambda *_args: host_potential)
+    monkeypatch.setattr(
+        file_flows, "run_modal_task",
+        lambda _parent, work, **_kw: work(),
+    )
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "information", lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getOpenFileName",
+        lambda *_args: (str(host_path), ""),
+    )
+    class Recent:
+        def remember(self, *_args):
+            pass
+
+    recent = Recent()
+    assert file_flows.load_embedded_cluster(
+        controller, recent, cluster_path, None,
+    )
+    assert controller.unresolved_cluster is not None
+    assert file_flows.load_host_potential(controller, recent, None)
+    assert controller.unresolved_cluster is None
+    assert controller.unresolved_cluster_path is None
+    assert controller.atoms is embedded
+    assert controller.atoms.embedding_host is host_potential
+    assert not controller.has_unsaved_structure
+    assert seen == [(cluster_path, None), (cluster_path, host_potential)]
+
+
+def test_read_only_clupot_does_not_prompt_to_save_on_quit(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+    from ase2sprkkr_gui.main import GuiApplication
+
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    gui = GuiApplication(recent_files_path=tmp_path / "recents.json")
+    path = tmp_path / "read_only.clu"
+    path.write_text("CLUPOT")
+    monkeypatch.setattr(
+        ClusterPotential, "from_file",
+        lambda *_a, **_kw: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        file_flows, "run_modal_task",
+        lambda _parent, work, **_kw: work(),
+    )
+    monkeypatch.setattr(file_flows.QMessageBox, "information", lambda *_a: None)
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "question",
+        lambda *_a: pytest.fail("Read-only CLUPOT must not be saved on exit"),
+    )
+    assert file_flows.load_embedded_cluster(
+        gui.controller, gui.recent_files, path, None,
+    )
+    assert gui.request_exit()
 
 
 def test_cluster_file_detection_distinguishes_host_potfil(tmp_path):

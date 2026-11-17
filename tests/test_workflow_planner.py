@@ -435,3 +435,17 @@ def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
         filtered = tuple(d.backend_task for d in workflow_tasks(stage)
                          if planning._cluster_task_supported(d))
         assert filtered == expected
+
+
+def test_read_only_clupot_is_not_a_structure_and_offers_only_host_attachment():
+    class Hostless(Workspace):
+        unresolved_cluster_path = "/tmp/imported.clu"
+        atoms = None
+
+    workspace = Hostless(atoms=None)
+    plan = WorkflowPlanner().for_workspace(workspace)
+    create = _commands(plan, WorkflowSection.CREATE)
+    assert create == (LoadHostPotential(), CreateHostPotential())
+    assert _commands(plan, WorkflowSection.CALCULATE) == ()
+    assert "read-only" in plan.subtitle.lower()
+    assert "imported.clu" in plan.subtitle
