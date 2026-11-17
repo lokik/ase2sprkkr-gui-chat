@@ -120,7 +120,7 @@ def test_snapshot_restores_embedded_occupations_positions_and_host_reference():
 def test_dialog_builds_cluster_and_is_cancel_safe():
     parent = host()
     dialog = BuildEmbeddingDialog(parent)
-    dialog.occupation.setText("Fe")
+    dialog.occupation.set_occupation({"Fe": 1.0})
     dialog._assign_occupation()
     assert len(dialog.draft.entries) == 1
     dialog._accept()
@@ -330,22 +330,31 @@ def test_invalid_cluster_import_does_not_replace_workspace(monkeypatch, tmp_path
     assert controller.structure_generation == generation
 
 
-def test_editor_preview_contains_out_of_layer_cluster_sites_and_is_pickable():
+def test_embedded_global_preview_shows_distant_sites_without_allowing_picking():
     from types import SimpleNamespace
 
-    draft_host = host()
-    dialog = BuildEmbeddingDialog(draft_host)
+    dialog = BuildEmbeddingDialog(host())
     outside = HostSite(0, (15, -3, 2))
     dialog.draft.include([outside])
     dialog._render()
     assert outside in dialog._rendered_sites
-    idx = dialog._rendered_sites.index(outside)
-    dialog._preview_pick(SimpleNamespace(artist=dialog._scatter, ind=[idx]))
+    assert outside not in dialog._local_sites
+    selected_before = dialog._selected_site
+    dialog._local_pick(SimpleNamespace(artist=dialog._scatter, ind=[0]))
+    assert dialog._selected_site == selected_before
+
+    # Navigate to the distant cell; only its local preview becomes pickable.
+    for spin, value in ((dialog.origin_x, 15), (dialog.origin_y, -3),
+                        (dialog.layer, 2)):
+        spin.setValue(value)
+    dialog._selected_cell = outside.cell_index
+    dialog._refresh_cells()
+    dialog._refresh_sites()
+    dialog._render()
+    assert outside in dialog._local_sites
+    idx = dialog._local_sites.index(outside)
+    dialog._local_pick(SimpleNamespace(artist=dialog._local_scatter, ind=[idx]))
     assert dialog._selected_site == outside
-    assert dialog._selected_cell == outside.cell_index
-    assert dialog.origin_x.value() == 15
-    assert dialog.origin_y.value() == -3
-    assert dialog.layer.value() == 2
 
 
 def test_2d_editor_can_reopen_special_native_translation_vectors():
@@ -389,7 +398,7 @@ def test_editor_requires_approval_to_drop_calculated_radial_data(monkeypatch):
     draft.include([draft.center])
     cluster = draft.to_atoms()
     dialog = BuildEmbeddingDialog(cluster)
-    dialog.occupation.setText("Fe")
+    dialog.occupation.set_occupation({"Fe": 1.0})
     dialog._assign_occupation()
     monkeypatch.setattr(dialog.draft, "would_discard_radial_data", lambda: True)
     prompts = []
@@ -577,11 +586,78 @@ def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
         dialog._render()
         dialog.canvas.draw()
 
-    assert "Host layer 0" in dialog.preview_info.text()
     assert "Cluster: 1 sites" in dialog.preview_info.text()
     assert "Displayed:" in dialog.preview_info.text()
+    assert "Cell (0, 0, 0)" in dialog.local_info.text()
     assert dialog.axes.get_title() == ""
     assert dialog.axes.get_xlabel() == ""
     assert dialog.axes.get_ylabel() == ""
     assert dialog.axes.get_zlabel() == ""
     assert not any("Tight layout not applied" in str(w.message) for w in captured)
+
+
+def test_editor_occupation_matches_bulk_rows_with_normalize_and_picker():
+    from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
+
+    dialog = BuildEmbeddingDialog(host())
+    assert isinstance(dialog.occupation, OccupationEditor)
+    dialog.occupation.set_occupation({"Fe": 0.7, "Ni": 0.3})
+    assert dialog.occupation.is_valid()
+    assert dialog.occupation.occupation() == {"Fe": 0.7, "Ni": 0.3}
+    dialog.occupation.set_occupation({"Fe": 0.6})
+    assert not dialog.occupation.is_valid()
+    dialog.occupation.normalize()
+    assert dialog.occupation.occupation() == {"Fe": 1.0}
+    dialog.occupation.set_occupation({"Vc": 1.0})
+    assert dialog.occupation.occupation() == {"X": 1.0}
+    dialog.occupation.set_occupation({"Fe": 1.0})
+    dialog.occupation.add_row()
+    second = dialog.occupation.rows[-1]
+    second["elem"].setText("Ni")
+    second["occ"].setValue(0.5)
+    assert not dialog.occupation.is_valid()
+    dialog.occupation.rows[0]["occ"].setValue(0.5)
+    dialog._assign_occupation()
+    assert dialog.draft.entries[dialog.draft.center].occupation == {
+        "Fe": 0.5, "Ni": 0.5
+    }
+
+
+def test_global_preview_highlights_all_equivalents_not_only_selected_cell():
+    dialog = BuildEmbeddingDialog(host())
+    selected = HostSite(0, (1, 0, 0))
+    dialog._selected_cell = selected.cell_index
+    dialog._selected_site = selected
+    dialog._update_symmetry_preview()
+    dialog._render()
+    assert len(dialog._highlighted) == 6
+    assert set(dialog._highlighted) <= set(dialog._rendered_sites)
+    assert any(site.cell_index != selected.cell_index
+               for site in dialog._rendered_sites)
+    assert len(dialog._local_sites) == 1
+    dialog.global_scope.setCurrentIndex(1)  # Current layer
+    dialog._render_global()
+    assert all(site.cell_index[2] == dialog.layer.value()
+               for site in dialog._rendered_sites)
+    dialog.global_scope.setCurrentIndex(0)
+    dialog._render_global()
+    assert set(dialog._highlighted) <= set(dialog._rendered_sites)
+
+
+def test_bulk_occupation_uses_the_same_widget_as_embedding():
+    from ase2sprkkr_gui.gui.dialogs.structures.element_assignment import (
+        ElementAssignmentDialog,
+    )
+    from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
+
+    parent = host()
+    parent.set_array("spacegroup_kinds", np.array([0]))
+    parent.info["occupancy"] = {"0": {"Cu": 1.0}}
+    editor = ElementAssignmentDialog()
+    editor.setup(parent)
+    row = editor._letter_widgets[0]
+    assert isinstance(row.occupation_editor, OccupationEditor)
+    row.occupation_editor.rows[0]["occ"].setValue(0.6)
+    assert editor._draft.sites[0].occupancies[0].value == 0.6
+    row.occupation_editor.normalize()
+    assert editor._draft.sites[0].occupancies[0].value == 1.0
