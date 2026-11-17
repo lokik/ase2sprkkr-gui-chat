@@ -1,15 +1,13 @@
 """Interactive editor for a finite cluster embedded in an infinite SPR-KKR host."""
 from __future__ import annotations
 
-from itertools import product
-
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton,
     QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -28,7 +26,7 @@ class BuildEmbeddingDialog(QDialog):
         host, cluster = embedding_source(atoms)
         self.draft = EmbeddingDraft(host, cluster)
         self.setWindowTitle("Edit Embedded Cluster" if cluster is not None else "Build Embedded Cluster")
-        self.resize(1250, 850)
+        self.resize(1450, 950)
         self.result_atoms = None
         self._selected_cell = (0,) * self.draft.dimension
         self._selected_site: HostSite | None = None
@@ -37,11 +35,17 @@ class BuildEmbeddingDialog(QDialog):
         self._site_updating = False
         self._highlighted: set[HostSite] = set()
         self._rendered_sites: list[HostSite] = []
+        self._local_sites: list[HostSite] = []
         self._scatter = None
-        self._timer = QTimer(self)
-        self._timer.setInterval(120)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self._render)
+        self._local_scatter = None
+        self._global_timer = QTimer(self)
+        self._global_timer.setInterval(120)
+        self._global_timer.setSingleShot(True)
+        self._global_timer.timeout.connect(self._render_global)
+        self._local_timer = QTimer(self)
+        self._local_timer.setInterval(80)
+        self._local_timer.setSingleShot(True)
+        self._local_timer.timeout.connect(self._render_local)
         self._build_ui()
         self._refresh_cells()
         self._refresh_sites()
@@ -196,23 +200,47 @@ class BuildEmbeddingDialog(QDialog):
         opt_row.addStretch(1)
         root.addWidget(options)
 
-        preview_group = QGroupBox("Cluster preview")
-        preview_layout = QVBoxLayout(preview_group)
-        preview_header = QHBoxLayout()
+        preview_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+
+        local_group = QGroupBox("Selected host cell · click to select", preview_splitter)
+        local_layout = QVBoxLayout(local_group)
+        self.local_info = QLabel()
+        local_layout.addWidget(self.local_info)
+        self.local_figure = Figure(figsize=(4.5, 3))
+        self.local_figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
+        self.local_canvas = FigureCanvas(self.local_figure)
+        self.local_axes = self.local_figure.add_subplot(111, projection="3d")
+        self.local_canvas.mpl_connect("pick_event", self._local_pick)
+        local_layout.addWidget(self.local_canvas, 1)
+        preview_splitter.addWidget(local_group)
+
+        global_group = QGroupBox("Result / symmetry · view only", preview_splitter)
+        global_layout = QVBoxLayout(global_group)
+        global_header = QHBoxLayout()
         self.preview_info = QLabel()
-        preview_header.addWidget(self.preview_info)
-        preview_header.addStretch(1)
-        preview_header.addWidget(QLabel(
-            "Blue: included   Orange: modified   Purple: symmetry   Gray: host"
+        global_header.addWidget(self.preview_info)
+        global_header.addStretch(1)
+        self.global_scope = QComboBox()
+        self.global_scope.addItem("Whole cluster", "whole")
+        self.global_scope.addItem(
+            "Current layer" if self.draft.dimension == 3 else "Selected cell",
+            "layer",
+        )
+        self.global_scope.currentIndexChanged.connect(self._schedule_global_render)
+        global_header.addWidget(self.global_scope)
+        global_layout.addLayout(global_header)
+        global_layout.addWidget(QLabel(
+            "Gold: selected   Purple: symmetry equivalents   "
+            "Blue: included   Orange: modified"
         ))
-        preview_layout.addLayout(preview_header)
-        self.figure = Figure(figsize=(9, 3.1))
+        self.figure = Figure(figsize=(4.5, 3))
         self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
         self.canvas = FigureCanvas(self.figure)
-        self.canvas.mpl_connect("pick_event", self._preview_pick)
         self.axes = self.figure.add_subplot(111, projection="3d")
-        preview_layout.addWidget(self.canvas, 1)
-        root.addWidget(preview_group, 2)
+        global_layout.addWidget(self.canvas, 1)
+        preview_splitter.addWidget(global_group)
+        preview_splitter.setSizes([650, 650])
+        root.addWidget(preview_splitter, 2)
 
         self.summary = QLabel()
         root.addWidget(self.summary)
@@ -232,6 +260,7 @@ class BuildEmbeddingDialog(QDialog):
 
     def _layer_changed(self, _value):
         self._refresh_cells()
+        self._refresh_sites()
 
     def _cell_index(self, x, y):
         x += self.origin_x.value()
@@ -298,8 +327,6 @@ class BuildEmbeddingDialog(QDialog):
             self.cells.clearSelection()
         self.cells.blockSignals(False)
         self._grid_updating = False
-        self._timer.start()
-
     def _is_modified(self, site):
         entry = self.draft.entries.get(site)
         if entry is None:
@@ -376,16 +403,25 @@ class BuildEmbeddingDialog(QDialog):
         return self.draft.targets(site, symmetric=self.symmetric.isChecked())
 
     def _update_symmetry_preview(self, *_):
+        # All equivalent sites are visible globally, independently of whether
+        # the edit-operation checkbox will apply to them.
         self._highlighted.clear()
         if self._selected_site is not None:
             try:
+                self._highlighted.update(
+                    self.draft.equivalents(self._selected_site)
+                )
                 targets = self._targets()
             except (ValueError, IndexError) as exc:
                 self.symmetry_info.setText(f"Symmetry unavailable: {exc}")
             else:
-                self._highlighted.update(targets)
-                self.symmetry_info.setText(f"{len(targets)} site(s) affected")
+                self.symmetry_info.setText(
+                    f"{len(self._highlighted)} equivalent sites; "
+                    f"edits affect {len(targets)} site(s)"
+                )
         self._refresh_cells()
+        self._schedule_global_render()
+        self._schedule_local_render()
 
     def _show_equivalents(self):
         def action():
@@ -396,6 +432,8 @@ class BuildEmbeddingDialog(QDialog):
                 f"{len(self._highlighted)} symmetry-equivalent site(s) highlighted"
             )
             self._refresh_cells()
+            self._schedule_global_render()
+            self._schedule_local_render()
         self._guard(action)
 
     def _confirm_overwrite(self, targets, occupation=None):
@@ -474,8 +512,9 @@ class BuildEmbeddingDialog(QDialog):
 
     def _changed(self):
         self._refresh_sites()
-        self._refresh_cells()
         self._refresh_summary()
+        self._schedule_global_render()
+        self._schedule_local_render()
 
     def _refresh_summary(self):
         center = self.draft.center
@@ -491,79 +530,101 @@ class BuildEmbeddingDialog(QDialog):
         )
         self.summary.setText(f"{included} cluster sites; {changed} modified{suffix}")
 
-    def _render(self):
-        ax = self.axes
-        ax.clear()
-        ax.set_axis_off()
-        offsets = self._inplane_offsets()
-        layer = self.layer.value() if self.layer else 0
-        xs, ys, zs, colors, sizes = [], [], [], [], []
-        # Cap context markers; cluster sites are always shown independently.
-        displayed_cells = len(offsets) ** 2
-        limit = max(1, 20000 // displayed_cells)
-        context = (
-            HostSite(i, self._cell_index(x, y))
-            for i in sorted(self.draft.allowed)[:limit]
-            for x, y in product(offsets, repeat=2)
-        )
-        # Show the entire finite cluster, including selected sites in other
-        # layers or outside the currently visible host-cell map.
-        self._rendered_sites = list(dict.fromkeys(
-            [*context, *sorted(self.draft.entries), *sorted(self._highlighted)]
-        ))
-        for site in self._rendered_sites:
-            position = site.position(self.draft.host)
-            entry = self.draft.entries.get(site)
-            displaced = position + (entry.displacement if entry is not None else 0)
-            xs.append(displaced[0])
-            ys.append(displaced[1])
-            zs.append(displaced[2])
-            if site in self._highlighted:
-                colors.append("#a081cf")
-                sizes.append(85)
-            elif self._is_modified(site):
-                colors.append("#d88c49")
-                sizes.append(75)
-            elif entry is not None:
-                colors.append("#4b92cf")
-                sizes.append(60)
-            else:
-                colors.append("#a6aeb6")
-                sizes.append(15)
-        self._scatter = None
-        if xs:
-            self._scatter = ax.scatter(
-                xs, ys, zs, c=colors, s=sizes, depthshade=False, picker=5
-            )
-        self.preview_info.setText(
-            f"Host layer {layer} · Cluster: {len(self.draft.entries)} sites "
-            f"· Displayed: {len(self._rendered_sites)} atoms"
-        )
-        self.canvas.draw_idle()
+    def _schedule_global_render(self, *_):
+        self._global_timer.start()
 
-    def _preview_pick(self, event):
-        """Select a physical host site by clicking its rendered atom."""
-        if event.artist is not self._scatter or not len(event.ind):
+    def _schedule_local_render(self, *_):
+        self._local_timer.start()
+
+    def _render(self):
+        """Render both views synchronously (also useful for GUI regression tests)."""
+        self._render_local()
+        self._render_global()
+
+    def _site_colour(self, site, *, local=False):
+        if site == self._selected_site:
+            return "#d5a13b", 100
+        if site in self._highlighted:
+            return "#a081cf", 75
+        if self._is_modified(site):
+            return "#d88c49", 65
+        if site in self.draft.entries:
+            return "#4b92cf", 55
+        return "#a6aeb6", 23 if local else 12
+
+    def _draw_sites(self, ax, canvas, sites, *, pick=False):
+        # Preserve the user's camera orientation across content updates.
+        elev, azim = ax.elev, ax.azim
+        ax.clear()
+        ax.view_init(elev=elev, azim=azim)
+        ax.set_axis_off()
+        points, colors, sizes = [], [], []
+        for site in sites:
+            entry = self.draft.entries.get(site)
+            displacement = entry.displacement if entry is not None else 0
+            points.append(site.position(self.draft.host) + displacement)
+            color, size = self._site_colour(site, local=pick)
+            colors.append(color)
+            sizes.append(size)
+        scatter = None
+        if points:
+            coordinates = np.asarray(points)
+            scatter = ax.scatter(
+                coordinates[:, 0], coordinates[:, 1], coordinates[:, 2],
+                c=colors, s=sizes, depthshade=False,
+                **({"picker": 7} if pick else {}),
+            )
+        canvas.draw_idle()
+        return scatter
+
+    def _render_local(self):
+        """The only pickable 3D view: one host cell/2D transition region."""
+        self._local_sites = list(self.draft.cell_sites(self._selected_cell))
+        self._local_scatter = self._draw_sites(
+            self.local_axes, self.local_canvas, self._local_sites, pick=True
+        )
+        self.local_info.setText(
+            f"Cell {self._selected_cell} · {len(self._local_sites)} sites"
+        )
+
+    def _render_global(self):
+        """The resulting cluster, plus all symmetry equivalents of selection."""
+        sites = set(self.draft.entries) | self._highlighted
+        if self._selected_site is not None:
+            sites.add(self._selected_site)
+        if self.global_scope.currentData() == "layer":
+            if self.draft.dimension == 3:
+                sites = {
+                    site for site in sites
+                    if site.cell_index[2] == self.layer.value()
+                }
+            else:
+                sites = {
+                    site for site in sites
+                    if site.cell_index[:2] == self._selected_cell[:2]
+                }
+        self._rendered_sites = sorted(sites)
+        self._scatter = self._draw_sites(
+            self.axes, self.canvas, self._rendered_sites
+        )
+        self.preview_info.setText(
+            f"Cluster: {len(self.draft.entries)} sites · "
+            f"Equivalents: {len(self._highlighted)} · "
+            f"Displayed: {len(self._rendered_sites)}"
+        )
+
+    def _local_pick(self, event):
+        """Select a site through the local view; global view is not pickable."""
+        if event.artist is not self._local_scatter or not len(event.ind):
             return
         index = int(event.ind[0])
-        if not 0 <= index < len(self._rendered_sites):
+        if not 0 <= index < len(self._local_sites):
             return
-        site = self._rendered_sites[index]
-        self._selected_site = site
-        # Pan to distant cells, rather than limiting navigation to [-10, 10].
-        for spin, value in zip(
-            (self.origin_x, self.origin_y), site.cell_index[:2]
-        ):
-            spin.blockSignals(True)
-            spin.setValue(int(value))
-            spin.blockSignals(False)
-        if self.layer is not None:
-            self.layer.blockSignals(True)
-            self.layer.setValue(int(site.cell_index[2]))
-            self.layer.blockSignals(False)
-        self._selected_cell = site.cell_index[:self.draft.dimension]
-        self._refresh_cells()
-        self._refresh_sites()
+        site = self._local_sites[index]
+        if site not in self._site_rows:
+            return
+        self.sites.selectRow(self._site_rows.index(site))
+        self._site_changed()
 
     def _accept(self):
         def action():
