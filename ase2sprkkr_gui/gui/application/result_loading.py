@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +41,34 @@ class LoadedResult:
     persistent_ref: str | None = None
 
 
-def load_potential_atoms(file_path: str | Path) -> Any:
-    """Load one stable POT file and return the atoms owned by that potential."""
+def is_embedded_cluster_file(file_path: str | Path) -> bool:
+    """Detect a CLUPOT before passing it to the periodic Potential parser.
+
+    A native cluster may use .clu, .pot or .pot_new; inspect the native
+    NQCLU header for ambiguous extensions. Missing paths are handled by
+    the regular file loader rather than raising during a format probe.
+    """
+    path = Path(file_path)
+    if path.suffix.lower() == ".clu":
+        return True
+    if path.suffix.lower() not in {".pot", ".pot_new"} or not path.is_file():
+        return False
+    with path.open("r", encoding="utf-8") as handle:
+        return bool(re.search(r"(?m)^\\s*NQCLU\\s+\\d+\\b", handle.read(16384)))
+
+
+def load_potential_atoms(file_path: str | Path, *, embedding_host=None) -> Any:
+    """Read a periodic POTFIL or CLUPOT, preserving native radial information."""
     path = Path(file_path).resolve()
-    potential = Potential.from_file(str(path), check_file_unchanged=True)
+    if is_embedded_cluster_file(path):
+        if embedding_host is None:
+            raise ValueError(
+                f"Embedded cluster {path} requires a host SPR-KKR Potential"
+            )
+        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+        potential = ClusterPotential.from_file(path, host=embedding_host)
+    else:
+        potential = Potential.from_file(str(path), check_file_unchanged=True)
     atoms = potential.atoms
     if atoms is None:
         raise ValueError(f"Potential file contains no structure: {path}")
@@ -94,6 +119,7 @@ def load_result(
     fallback_directory: str | Path | None,
     output_fallback: str | Path | None = None,
     persistent_ref: str | None = None,
+    embedding_host=None,
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
     output, potential = _result_files(result, fallback_directory)
@@ -105,7 +131,7 @@ def load_result(
     except OSError as exc:
         atoms, potential_error = None, exc
     else:
-        atoms, potential_error = _load_potential(potential)
+        atoms, potential_error = _load_potential(potential, embedding_host=embedding_host)
     input_parameters, input_parameters_error = _load_input_parameters(result)
     directory = str(output.parent.resolve()) if output is not None else None
     return LoadedResult(
@@ -174,6 +200,8 @@ def _result_files(
 
 def _load_potential(
     potential: Path | None,
+    *,
+    embedding_host=None,
 ) -> tuple[Any | None, Exception | None]:
     if potential is None:
         return None, None
@@ -186,6 +214,8 @@ def _load_potential(
             f"Referenced potential is not a file: {potential}"
         )
     try:
+        if embedding_host is not None:
+            return load_potential_atoms(potential, embedding_host=embedding_host), None
         return load_potential_atoms(potential), None
     except Exception as exc:  # noqa: BLE001 - parser failures are data
         return None, exc
