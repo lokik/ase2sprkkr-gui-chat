@@ -547,3 +547,21 @@ def test_active_cluster_potential_is_not_mistaken_for_a_periodic_host():
     cluster._potential = object()  # Simulate an attached non-periodic potential.
     controller = WorkspaceController(WorkspaceState(atoms=cluster))
     assert _current_host_potential(controller) is None
+
+
+def test_guided_cluster_scf_is_available_without_input_parameters():
+    from ase2sprkkr import Potential, SPRKKRAtoms
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+    from ase2sprkkr_gui.gui.workflow.model import RunTask, WorkflowSection
+
+    native_host = Potential.from_atoms(host())
+    cluster = SPRKKRAtoms.from_embedding(
+        native_host, [(0, (0, 0, 0), "Fe")]
+    )
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    assert controller.can_run_embedding()
+    assert not controller.can_calculate()  # Guided setup creates parameters.
+    plan = WorkflowPlanner().for_workspace(controller)
+    calculation = plan.group(WorkflowSection.CALCULATE)
+    assert calculation is not None
+    assert RunTask("scf") in [action.command for action in calculation.actions]
