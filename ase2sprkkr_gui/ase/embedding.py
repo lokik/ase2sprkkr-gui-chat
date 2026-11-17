@@ -6,11 +6,14 @@ All temporary editor changes stay in this draft.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Mapping
 
 import numpy as np
 from ase.data import atomic_numbers
+from ase.geometry import minkowski_reduce
+from ase2sprkkr import SPRKKRAtoms
 from ase2sprkkr.sprkkr.embedding import embedding_data, host_atoms, host_dimension
 from ase2sprkkr.sprkkr.embedding_geometry import (
     EmbeddingSymmetry,
@@ -19,14 +22,28 @@ from ase2sprkkr.sprkkr.embedding_geometry import (
     embedding_sites_within_radius,
     embedding_sites_within_shells,
 )
-from ase2sprkkr import SPRKKRAtoms
 
 
-@dataclass
+@dataclass(eq=False)
 class EmbeddedSiteDraft:
     occupation: dict[str, float]
     displacement: np.ndarray = field(default_factory=lambda: np.zeros(3))
     magnetisation: np.ndarray = field(default_factory=lambda: np.zeros(2))
+
+    def __eq__(self, other):
+        if not isinstance(other, EmbeddedSiteDraft):
+            return NotImplemented
+        return (self.occupation == other.occupation
+                and np.array_equal(self.displacement, other.displacement)
+                and np.array_equal(self.magnetisation, other.magnetisation))
+
+
+@dataclass(frozen=True)
+class EmbeddingDraftState:
+    """Detached editable state; contains no host or original radial data."""
+
+    center: HostSite
+    entries: dict[HostSite, EmbeddedSiteDraft]
 
 
 def parse_occupation(value: str) -> dict[str, float]:
@@ -64,6 +81,110 @@ def occupation_label(occupation: Mapping[str, float]) -> str:
     return ", ".join(f"{symbol}:{amount:.6g}" for symbol, amount in occupation.items())
 
 
+def embedding_cell(host):
+    """Return the reference origin and vectors used to display one host cell.
+
+    Native 2D cells consist of consecutive left, central and right regions.
+    Keep the central region's full third vector, including its lateral shear.
+    For an ASE slab without those regions, clip the original cell direction
+    to the occupied heights rather than displaying its surrounding vacuum.
+    No atom positions or embedding translation indices are changed.
+    """
+    atoms = host_atoms(host)
+    cell = np.asarray(atoms.cell, dtype=float).copy()
+    origin = np.zeros(3)
+    if host_dimension(host) == 3:
+        return origin, cell
+    regions = getattr(atoms, "regions", {})
+    if all(name in regions for name in ("left", "central", "right")):
+        origin = np.asarray(regions["left"].cell[2], dtype=float).copy()
+        cell[2] = regions["central"].cell[2]
+    else:
+        normal = np.cross(cell[0], cell[1])
+        norm = np.linalg.norm(normal)
+        if norm <= 1e-12:
+            raise ValueError("The two periodic lattice vectors must be independent")
+        normal /= norm
+        heights = np.asarray(atoms.positions)[list(embedding_host_indices(host))] @ normal
+        height = np.dot(cell[2], normal)
+        direction = cell[2] / height if abs(height) > 1e-12 else normal
+        origin = heights.min() * direction
+        cell[2] = np.ptp(heights) * direction
+    return origin, cell
+
+
+def cell_ring_offsets(vectors, rings):
+    """Cells within ``rings`` Wigner-Seitz adjacency steps of (0, 0).
+
+    Two cells are neighbours when their translation points' Voronoi regions
+    share an edge (a shared vertex alone does not count). Distances use the
+    two actual 3D translation vectors, independently of the display projection.
+    Return indices in the original basis; never change the displayed cells.
+    """
+    vectors = np.asarray(vectors, dtype=float)
+    if vectors.shape != (2, 3) or not np.isfinite(vectors).all():
+        raise ValueError("Cell-map vectors must be two finite 3D vectors")
+    # Normalize together so the rank check and ASE's reduction tolerances do
+    # not depend on the unit of length. Collinear vectors have no 2D cells.
+    scale = np.abs(vectors).max()
+    if scale == 0 or np.linalg.matrix_rank(vectors / scale) < 2:
+        raise ValueError("Cell-map vectors must be independent")
+    reduced, transform = minkowski_reduce(
+        np.vstack((vectors / scale, np.zeros(3))), pbc=(True, True, False),
+    )
+    first, second = reduced[:2]
+    a, b = transform[:2, :2]
+    # In a Gauss-reduced 2D basis the Voronoi neighbours are ±a, ±b
+    # and ±(b-sign(a·b)a). For orthogonal vectors the latter cells meet
+    # only at a vertex, so exclude them. Snap numerical orthogonality at 1e-10.
+    directions = [a, b]
+    dot = np.dot(first, second)
+    if abs(dot) > 1e-10 * np.linalg.norm(first) * np.linalg.norm(second):
+        directions.append(b - (a if dot > 0 else -a))
+    steps = [tuple(sign * direction) for direction in directions for sign in (-1, 1)]
+    visited = frontier = {(0, 0)}
+    for _ in range(rings):
+        frontier = {(x + dx, y + dy) for x, y in frontier for dx, dy in steps} - visited
+        visited |= frontier
+    return tuple(sorted(visited))
+
+
+def fill_cell_hull(cells, max_cells=10000):
+    """Fill gaps in a finite 2D host viewport with complete periodic cells.
+
+    Use the convex hull of cell footprints instead of separate patches around
+    symmetry previews. Widely separated groups remain bounded by max_cells.
+    """
+    cells = set(cells)
+    indices = np.asarray(sorted(cells), dtype=int)
+    lower, upper = indices.min(axis=0), indices.max(axis=0)
+    if np.prod(upper - lower + 1) > max_cells:
+        return cells
+    vertices = sorted({(x + dx, y + dy) for x, y in cells
+                       for dx, dy in ((0, 0), (1, 0), (1, 1), (0, 1))})
+
+    def boundary(points):
+        result = []
+        for point in points:
+            while len(result) >= 2:
+                a, b = result[-2:]
+                cross = ((b[0] - a[0]) * (point[1] - a[1])
+                         - (b[1] - a[1]) * (point[0] - a[0]))
+                if cross > 0:
+                    break
+                result.pop()
+            result.append(point)
+        return result
+
+    hull = np.asarray(boundary(vertices)[:-1] + boundary(reversed(vertices))[:-1])
+    candidates = np.array([(x, y) for x in range(lower[0], upper[0] + 1)
+                           for y in range(lower[1], upper[1] + 1)])
+    relative = candidates[:, None, :] + .5 - hull
+    edges = np.roll(hull, -1, axis=0) - hull
+    cross = edges[:, 0] * relative[:, :, 1] - edges[:, 1] * relative[:, :, 0]
+    return {tuple(index) for index in candidates[np.all(cross >= -1e-9, axis=1)]}
+
+
 class EmbeddingDraft:
     """Editor-only state: host, centre and explicit included cluster sites."""
 
@@ -92,26 +213,20 @@ class EmbeddingDraft:
                 )
             if self.entries:
                 self.center = next(iter(self.entries))
-            self._original_entries = {
-                site: EmbeddedSiteDraft(
-                    dict(entry.occupation), entry.displacement.copy(),
-                    entry.magnetisation.copy()
-                )
-                for site, entry in self.entries.items()
-            }
+            self._original_entries = deepcopy(self.entries)
+
+    def snapshot(self) -> EmbeddingDraftState:
+        """Capture independent editable values, keeping the host shared."""
+        return EmbeddingDraftState(self.center, deepcopy(self.entries))
+
+    def restore(self, state: EmbeddingDraftState) -> None:
+        """Restore a snapshot without allowing later edits to mutate it."""
+        self.center = state.center
+        self.entries = deepcopy(state.entries)
 
     def is_unchanged(self) -> bool:
         """Whether a reopened cluster has exactly its original physical data."""
-        if self.original_cluster is None:
-            return False
-        if self.entries.keys() != self._original_entries.keys():
-            return False
-        return all(
-            entry.occupation == self._original_entries[site].occupation
-            and np.array_equal(entry.displacement, self._original_entries[site].displacement)
-            and np.array_equal(entry.magnetisation, self._original_entries[site].magnetisation)
-            for site, entry in self.entries.items()
-        )
+        return self.original_cluster is not None and self.entries == self._original_entries
 
     def would_discard_radial_data(self) -> bool:
         """True when rebuilding an edited cluster would discard radial results."""
@@ -149,16 +264,20 @@ class EmbeddingDraft:
     def set_center(self, site: HostSite) -> None:
         self.center = self.canonical(site)
 
-    def equivalents(self, site: HostSite) -> tuple[HostSite, ...]:
-        original = self.canonical(site)
+    def equivalents(self, sites) -> tuple[HostSite, ...]:
+        originals = [self.canonical(site) for site in sites]
+        if not originals:
+            return ()
         symmetry = EmbeddingSymmetry(self.host, self.center)
         # Only sites for which CLUPOT can represent an embedding are eligible.
-        return tuple(s for s in symmetry.equivalent_sites(original)
-                     if s.original_site in self.allowed)
+        return tuple(sorted({s for original in originals
+                             for s in symmetry.equivalent_sites(original)
+                             if s.original_site in self.allowed}))
 
-    def targets(self, site: HostSite, symmetric: bool = False) -> tuple[HostSite, ...]:
-        original = self.canonical(site)
-        return self.equivalents(original) if symmetric else (original,)
+    def targets(self, sites, symmetric: bool = False) -> tuple[HostSite, ...]:
+        if symmetric:
+            return self.equivalents(sites)
+        return tuple(sorted({self.canonical(site) for site in sites}))
 
     def _entry(self, site: HostSite) -> EmbeddedSiteDraft:
         site = self.canonical(site)
@@ -188,20 +307,22 @@ class EmbeddingDraft:
             site = self.canonical(site)
             self._entry(site).occupation = site.occupation(self.host)
 
-    def set_displacement(self, site: HostSite, value, *, symmetric=False) -> None:
-        """Apply a displacement, rotating it to equivalent host sites if requested.
+    def set_displacement(self, sites, value, *, symmetric=False) -> None:
+        """Set a common Cartesian vector, rotating it onto symmetry targets.
 
-        If several operations map to the same site but imply different displacements,
-        the proposed operation would break the requested symmetry and is rejected.
-        No draft entry is modified until all targets have been validated.
+        Overlapping target orbits must agree. Validate the complete operation
+        before changing any entry, including when several sites are selected.
         """
-        site = self.canonical(site)
         vector = np.asarray(value, dtype=float)
         if vector.shape != (3,) or not np.all(np.isfinite(vector)):
             raise ValueError("Displacement must be a finite Cartesian three-vector")
-        if symmetric:
-            symmetry = EmbeddingSymmetry(self.host, self.center)
-            changes = {}
+        symmetry = EmbeddingSymmetry(self.host, self.center) if symmetric else None
+        changes = {}
+        for original in sites:
+            site = self.canonical(original)
+            if symmetry is None:
+                changes[site] = vector
+                continue
             for operation in symmetry.operations:
                 mapped = symmetry.map_site(site, operation)
                 if mapped.original_site not in self.allowed:
@@ -212,16 +333,22 @@ class EmbeddingDraft:
                 ):
                     raise ValueError("Displacement conflicts with the selected site symmetry")
                 changes[mapped] = displacement
-        else:
-            changes = {site: vector}
         for mapped, displacement in changes.items():
             self._entry(mapped).displacement = np.array(displacement, copy=True)
 
+    def sites_within_radius(self, radius: float) -> tuple[HostSite, ...]:
+        """Read-only expansion selection, shared by preview and inclusion."""
+        return embedding_sites_within_radius(self.host, self.center, radius)
+
+    def sites_within_shells(self, shells: int) -> tuple[HostSite, ...]:
+        """Read-only coordination-shell selection, including the centre."""
+        return embedding_sites_within_shells(self.host, self.center, shells)
+
     def add_radius(self, radius: float) -> int:
-        return self.include(embedding_sites_within_radius(self.host, self.center, radius))
+        return self.include(self.sites_within_radius(radius))
 
     def add_shells(self, shells: int) -> int:
-        return self.include(embedding_sites_within_shells(self.host, self.center, shells))
+        return self.include(self.sites_within_shells(shells))
 
     def to_atoms(self, *, allow_radial_reset=False) -> SPRKKRAtoms:
         """Build independent atoms without silently losing radial results.

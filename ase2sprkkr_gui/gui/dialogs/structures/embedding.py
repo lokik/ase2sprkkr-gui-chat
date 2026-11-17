@@ -1,23 +1,57 @@
 """Interactive editor for a finite cluster embedded in an infinite SPR-KKR host."""
 from __future__ import annotations
 
+from collections import Counter
+from dataclasses import dataclass
 from itertools import product
 
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QBrush, QColor
+from PyQt6.QtCore import QEvent, QItemSelection, QItemSelectionModel, Qt, QTimer
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton,
-    QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ase2sprkkr_gui.ase.embedding import (
-    EmbeddingDraft, HostSite, embedding_source, occupation_label,
+    EmbeddingDraft,
+    HostSite,
+    cell_ring_offsets,
+    embedding_cell,
+    embedding_source,
+    fill_cell_hull,
+    occupation_label,
 )
+from ase2sprkkr_gui.gui.dialogs.structures.embedding_history import EmbeddingUndoStack
+from ase2sprkkr_gui.gui.plots.lattice import corner_indices
+from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
+from ase2sprkkr_gui.gui.widgets.structures.host_cell_map import HostCellMap
 from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
+
+
+@dataclass(frozen=True)
+class _PendingDisplacement:
+    sites: tuple[HostSite, ...]
+    vector: np.ndarray
+    symmetric: bool
+    edit_key: tuple
 
 
 class BuildEmbeddingDialog(QDialog):
@@ -27,20 +61,25 @@ class BuildEmbeddingDialog(QDialog):
         super().__init__(parent)
         host, cluster = embedding_source(atoms)
         self.draft = EmbeddingDraft(host, cluster)
+        self.undo_stack = EmbeddingUndoStack(self.draft, self)
+        self._occupation_edit_key = None
+        self._pending_displacement: _PendingDisplacement | None = None
         self.setWindowTitle("Edit Embedded Cluster" if cluster is not None else "Build Embedded Cluster")
         self.resize(1450, 950)
         self.result_atoms = None
-        self._selected_cell = (0,) * self.draft.dimension
-        self._selected_site: HostSite | None = None
+        self._selected_cell = self.draft.center.cell_index[:self.draft.dimension]
+        self._selected_site: HostSite | None = self.draft.center
         self._occupation_overwrite_approval = None
+        self._selected_sites = {self.draft.center}
         self._site_rows: list[HostSite] = []
-        self._grid_updating = False
         self._site_updating = False
         self._highlighted: set[HostSite] = set()
+        self._expansion_mode: str | None = None
+        self._expansion_sites: set[HostSite] = set()
+        self._expansion_key = None
         self._rendered_sites: list[HostSite] = []
+        self._rendered_host_sites: set[HostSite] = set()
         self._local_sites: list[HostSite] = []
-        self._scatter = None
-        self._local_scatter = None
         self._global_timer = QTimer(self)
         self._global_timer.setInterval(120)
         self._global_timer.setSingleShot(True)
@@ -52,11 +91,23 @@ class BuildEmbeddingDialog(QDialog):
         self._displacement_timer = QTimer(self)
         self._displacement_timer.setSingleShot(True)
         self._displacement_timer.setInterval(350)
-        self._displacement_timer.timeout.connect(self._assign_displacement)
+        self._displacement_timer.timeout.connect(self._apply_pending_displacement)
+        self._expansion_timer = QTimer(self)
+        self._expansion_timer.setSingleShot(True)
+        self._expansion_timer.setInterval(120)
+        self._expansion_timer.timeout.connect(self._update_expansion_preview)
         self._build_ui()
         self._refresh_cells()
         self._refresh_sites()
         self._refresh_summary()
+        self.undo_stack.stateRestored.connect(self._history_restored)
+        self.undo_stack.indexChanged.connect(self._update_history_actions)
+        self.occupation.validityChanged.connect(self._occupation_validity_changed)
+        self.occupation.add_btn.pressed.connect(self.undo_stack.end_edit)
+        self._update_history_actions()
+        QApplication.instance().focusChanged.connect(self._expansion_focus_changed)
+        QApplication.instance().focusChanged.connect(self._editing_focus_changed)
+        QApplication.instance().installEventFilter(self)
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -69,66 +120,89 @@ class BuildEmbeddingDialog(QDialog):
 
         self.centre_label = QLabel()
         root.addWidget(self.centre_label)
+        body = QSplitter(Qt.Orientation.Vertical, self)
+        body.setChildrenCollapsible(False)
+        root.addWidget(body, 1)
+        controls = QWidget(body)
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        root.addWidget(splitter, 3)
+        controls_layout.addWidget(splitter, 1)
 
         left = QGroupBox("Host cells", splitter)
         left_v = QVBoxLayout(left)
         row = QHBoxLayout()
-        row.addWidget(QLabel("In-plane cells per axis"))
-        self.inplane_cells = QSpinBox()
-        self.inplane_cells.setRange(1, 21)
-        self.inplane_cells.setValue(5)
-        self.inplane_cells.setToolTip("Actual number of cells displayed along each in-plane axis")
-        self.inplane_cells.valueChanged.connect(self._display_region_changed)
-        row.addWidget(self.inplane_cells)
-        row.addWidget(QLabel("Centre n1, n2"))
-        self.origin_x, self.origin_y = QSpinBox(), QSpinBox()
-        for spin in (self.origin_x, self.origin_y):
-            spin.setRange(-100000, 100000)
-            spin.valueChanged.connect(self._display_region_changed)
-            row.addWidget(spin)
+        row.addWidget(QLabel("Wigner–Seitz rings around (0,0)"))
+        self.cell_rings = QSpinBox()
+        self.cell_rings.setRange(0, 20)
+        self.cell_rings.setValue(2)
+        self.cell_rings.setToolTip(
+            "Each ring adds neighbours sharing a Wigner–Seitz (Voronoi) edge, "
+            "using the actual lattice metric. Zero shows only cell (0,0). "
+            "Drawn cells remain primitive parallelograms."
+        )
+        self.cell_rings.valueChanged.connect(self._display_region_changed)
+        row.addWidget(self.cell_rings)
+        self.map_indices = QLabel("n1, n2")
+        row.addWidget(self.map_indices)
         if self.draft.dimension == 3:
-            row.addWidget(QLabel("Layer n3"))
+            self.layer_label = QLabel("Layer n3")
+            row.addWidget(self.layer_label)
             self.layer = QSpinBox()
-            self.layer.setRange(-100, 100)
+            self.layer.setRange(-100000, 100000)
+            self.layer.setValue(self._selected_cell[2])
+            self.layer.setToolTip("Cell translation index n3, not an individual atomic plane")
             self.layer.valueChanged.connect(self._layer_changed)
             row.addWidget(self.layer)
         else:
             self.layer = None
         row.addStretch(1)
         left_v.addLayout(row)
-        self.cells = QTableWidget(left)
-        self.cells.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.cells.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.cells.horizontalHeader().setDefaultSectionSize(58)
-        self.cells.verticalHeader().setDefaultSectionSize(46)
-        # The previous itemSelectionChanged/currentItem pair could read the
-        # *previous* current item during a mouse selection transition.
-        self.cells.currentCellChanged.connect(self._cell_changed)
+        self.cell_plane = QComboBox()
+        for name, axes in (("XY", (0, 1)), ("XZ", (0, 2)), ("YZ", (1, 2))):
+            self.cell_plane.addItem(name, axes)
+        self.cell_plane.setToolTip(
+            "Cartesian projection; XY varies n1,n2, XZ varies n1,n3, YZ varies n2,n3"
+        )
+        self.cell_plane.currentIndexChanged.connect(self._plane_changed)
+        if self.draft.dimension == 3:
+            plane_row = QHBoxLayout()
+            plane_row.addWidget(QLabel("Cell map plane"))
+            plane_row.addWidget(self.cell_plane)
+            plane_row.addStretch(1)
+            left_v.addLayout(plane_row)
+        else:
+            self.cell_plane.hide()
+        self.cells = HostCellMap(left)
+        self.cells.cellSelected.connect(self._cell_changed)
         left_v.addWidget(self.cells, 1)
         explanation = QLabel(
-            "Blue: included sites   •   Orange: changed occupation or position   "
-            "•   Purple: symmetry preview"
+            "Fill: blue = included sites, orange = modified. "
+            "Borders: gold = selected cell, purple = symmetry preview."
         )
         explanation.setWordWrap(True)
         left_v.addWidget(explanation)
         splitter.addWidget(left)
 
-        right = QGroupBox("Sites in selected cell", splitter)
+        right = QWidget(splitter)
         right_v = QVBoxLayout(right)
+        right_v.setContentsMargins(0, 0, 0, 0)
+        site_group = QGroupBox("Sites in selected cell", right)
+        site_layout = QVBoxLayout(site_group)
+        right_v.addWidget(site_group, 2)
         self.cell_label = QLabel()
-        right_v.addWidget(self.cell_label)
-        self.sites = QTableWidget(right)
+        site_layout.addWidget(self.cell_label)
+        self.sites = QTableWidget(site_group)
         self.sites.setColumnCount(4)
         self.sites.setHorizontalHeaderLabels(
             ["Site", "Host occupation", "Cluster occupation", "Included"]
         )
         self.sites.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.sites.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.sites.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.sites.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.sites.horizontalHeader().setStretchLastSection(True)
         self.sites.itemSelectionChanged.connect(self._site_changed)
+        self.sites.currentCellChanged.connect(self._current_site_changed)
         sites_and_actions = QHBoxLayout()
         sites_and_actions.addWidget(self.sites, 1)
         site_actions = QVBoxLayout()
@@ -138,15 +212,16 @@ class BuildEmbeddingDialog(QDialog):
         exclude = QPushButton("Exclude")
         exclude.clicked.connect(self._exclude)
         site_actions.addWidget(exclude)
-        centre = QPushButton("Set centre")
-        centre.clicked.connect(self._set_centre)
-        site_actions.addWidget(centre)
+        self.centre_button = QPushButton("Use as symmetry centre")
+        self.centre_button.setToolTip("Centre for point symmetry and radius/shell expansion")
+        self.centre_button.clicked.connect(self._set_centre)
+        site_actions.addWidget(self.centre_button)
         site_actions.addStretch(1)
         sites_and_actions.addLayout(site_actions)
-        right_v.addLayout(sites_and_actions, 1)
+        site_layout.addLayout(sites_and_actions, 1)
 
         self.symmetric = QCheckBox("Apply to symmetry-equivalent sites")
-        self.symmetric.toggled.connect(self._update_symmetry_preview)
+        self.symmetric.toggled.connect(self._symmetry_changed)
         right_v.addWidget(self.symmetric)
         sym_row = QHBoxLayout()
         self.symmetry_info = QLabel()
@@ -154,16 +229,28 @@ class BuildEmbeddingDialog(QDialog):
         sym_row.addWidget(self.symmetry_info, 1)
         right_v.addLayout(sym_row)
 
-        right_v.addWidget(QLabel("Occupation"))
+        occupation_group = QGroupBox("Occupation", right)
+        occupation_layout = QVBoxLayout(occupation_group)
+        self.occupation_info = QLabel()
+        self.occupation_info.setWordWrap(True)
+        occupation_layout.addWidget(self.occupation_info)
+        self.occupation_group = occupation_group
+        right_v.addWidget(occupation_group)
         self.occupation = OccupationEditor(
-            right, require_full=True, allow_duplicates=False
+            occupation_group, require_full=True, allow_duplicates=False
         )
         # An incomplete mixture stays in this control. Once its fractions
         # are valid, publish the edit to the cluster without another button.
         self.occupation.occupationEdited.connect(self._occupation_edited)
-        right_v.addWidget(self.occupation)
+        self.occupation.restore_btn.clicked.disconnect(self.occupation.restore_initial)
+        self.occupation.restore_btn.clicked.connect(self._restore_occupation)
+        occupation_layout.addWidget(self.occupation)
 
-        right_v.addWidget(QLabel("Displacement from host position (Å)"))
+        displacement_group = QGroupBox("Displacement from host position (Å)", right)
+        displacement_layout = QVBoxLayout(displacement_group)
+        self.displacement_info = QLabel()
+        self.displacement_info.setWordWrap(True)
+        displacement_layout.addWidget(self.displacement_info)
         displacement_row = QHBoxLayout()
         self.deltas = []
         for label in ("x", "y", "z"):
@@ -174,50 +261,56 @@ class BuildEmbeddingDialog(QDialog):
             spin.setSingleStep(0.01)
             self.deltas.append(spin)
             spin.valueChanged.connect(self._schedule_displacement)
-            spin.editingFinished.connect(self._apply_pending_displacement)
+            spin.editingFinished.connect(self._finish_displacement_edit)
             displacement_row.addWidget(spin)
-        right_v.addLayout(displacement_row)
+        displacement_layout.addLayout(displacement_row)
+        self.displacement_group = displacement_group
+        right_v.addWidget(displacement_group)
         splitter.addWidget(right)
         splitter.setSizes([480, 680])
 
         options = QGroupBox("Expand cluster around centre")
-        opt_row = QHBoxLayout(options)
+        options_layout = QVBoxLayout(options)
+        opt_row = QHBoxLayout()
+        options_layout.addLayout(opt_row)
         opt_row.addWidget(QLabel("Radius (Å):"))
         self.radius = QDoubleSpinBox()
         self.radius.setRange(0, 1000)
         self.radius.setDecimals(2)
         self.radius.setValue(5.0)
+        self.radius.valueChanged.connect(self._schedule_expansion_preview)
         opt_row.addWidget(self.radius)
-        add_radius = QPushButton("Add radius")
-        add_radius.clicked.connect(self._add_radius)
-        opt_row.addWidget(add_radius)
+        self.add_radius_button = QPushButton("Add radius")
+        self.add_radius_button.clicked.connect(self._add_radius)
+        opt_row.addWidget(self.add_radius_button)
         opt_row.addWidget(QLabel("Coordination shells:"))
         self.shells = QSpinBox()
         self.shells.setRange(0, 50)
         self.shells.setValue(1)
+        self.shells.valueChanged.connect(self._schedule_expansion_preview)
         opt_row.addWidget(self.shells)
-        add_shells = QPushButton("Add shells")
-        add_shells.clicked.connect(self._add_shells)
-        opt_row.addWidget(add_shells)
+        self.add_shells_button = QPushButton("Add shells")
+        self.add_shells_button.clicked.connect(self._add_shells)
+        opt_row.addWidget(self.add_shells_button)
         opt_row.addStretch(1)
-        root.addWidget(options)
+        self.expansion_info = QLabel()
+        self.expansion_info.setWordWrap(True)
+        self.expansion_info.hide()
+        options_layout.addWidget(self.expansion_info)
+        controls_layout.addWidget(options)
 
         preview_splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
         local_group = QGroupBox(
-            "Host layer · click to select" if self.draft.dimension == 3
-            else "Transition region · click to select", preview_splitter
+            "Selected cell · click a site to edit" if self.draft.dimension == 3
+            else "Selected cell: transition region · click a site to edit", preview_splitter
         )
         local_layout = QVBoxLayout(local_group)
         self.local_info = QLabel()
         local_layout.addWidget(self.local_info)
-        self.local_figure = Figure(figsize=(4.5, 3))
-        self.local_figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
-        self.local_canvas = FigureCanvas(self.local_figure)
-        self.local_axes = self.local_figure.add_subplot(111, projection="3d")
-        self.local_axes.view_init(elev=25, azim=-60)
-        self.local_canvas.mpl_connect("pick_event", self._local_pick)
-        local_layout.addWidget(self.local_canvas, 1)
+        self.local_preview = EmbeddingPreview(selectable=True)
+        self.local_preview.pointSelected.connect(self._select_local_site)
+        local_layout.addWidget(self.local_preview, 1)
         preview_splitter.addWidget(local_group)
 
         global_group = QGroupBox("Host structure / embedded cluster · view only", preview_splitter)
@@ -228,26 +321,25 @@ class BuildEmbeddingDialog(QDialog):
         global_header.addStretch(1)
         self.global_scope = QComboBox()
         self.global_scope.addItem("Whole displayed structure", "whole")
-        self.global_scope.addItem(
-            "Current layer" if self.draft.dimension == 3
-            else "Transition region",
-            "layer",
-        )
+        if self.draft.dimension == 3:
+            self.global_scope.addItem("Current cell layer (n3)", "layer")
+        else:
+            self.global_scope.addItem("Transition region across cells", "layer")
         self.global_scope.currentIndexChanged.connect(self._schedule_global_render)
         global_header.addWidget(self.global_scope)
         global_layout.addLayout(global_header)
-        global_layout.addWidget(QLabel(
-            "Gold: selected   Purple: symmetry equivalents   "
-            "Blue: included   Orange: modified"
-        ))
-        self.figure = Figure(figsize=(4.5, 3))
-        self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
-        self.canvas = FigureCanvas(self.figure)
-        self.axes = self.figure.add_subplot(111, projection="3d")
-        global_layout.addWidget(self.canvas, 1)
+        legend = QLabel(
+            "Rings: gold = selected site, purple = symmetry preview. "
+            "Fill: blue = in cluster, orange = modified, green = expansion preview."
+        )
+        legend.setWordWrap(True)
+        global_layout.addWidget(legend)
+        self.global_preview = EmbeddingPreview(controls_on_right=True)
+        global_layout.addWidget(self.global_preview, 1)
         preview_splitter.addWidget(global_group)
         preview_splitter.setSizes([650, 650])
-        root.addWidget(preview_splitter, 2)
+        body.addWidget(preview_splitter)
+        body.setSizes([350, 450])
 
         self.summary = QLabel()
         root.addWidget(self.summary)
@@ -256,7 +348,132 @@ class BuildEmbeddingDialog(QDialog):
         )
         self.buttons.accepted.connect(self._accept)
         self.buttons.rejected.connect(self.reject)
-        root.addWidget(self.buttons)
+        footer = QHBoxLayout()
+        for name, key, slot in (("undo", QKeySequence.StandardKey.Undo, self._undo),
+                                ("redo", QKeySequence.StandardKey.Redo, self._redo)):
+            action = QAction(name.title(), self)
+            action.setShortcuts(QKeySequence.keyBindings(key))
+            action.triggered.connect(slot)
+            self.addAction(action)
+            setattr(self, name + "_action", action)
+            button = QToolButton(self)
+            button.setDefaultAction(action)
+            footer.addWidget(button)
+        footer.addStretch(1)
+        footer.addWidget(self.buttons)
+        root.addLayout(footer)
+
+    def _edit_key(self, field):
+        return self.undo_stack.edit_key((field, frozenset(self._selected_sites),
+                                         self.symmetric.isChecked(), self.draft.center))
+
+    def _record_edit(self, text, operation, *, edit_key=None, preserve_occupation=False):
+        if self.undo_stack.apply(operation, text, merge_key=edit_key):
+            self._changed(preserve_occupation=preserve_occupation)
+        self._update_history_actions()
+
+    def _edit_control(self, widget):
+        if widget is None:
+            return None
+        controls = list(self.deltas)
+        controls.extend(control for row in self.occupation.rows
+                        for control in (row["elem"], row["occ"], row["pick"], row["del"]))
+        for control in controls:
+            if widget is control or control.isAncestorOf(widget):
+                return control
+        return None
+
+    def _editing_focus_changed(self, old, new):
+        if self._edit_control(old) is not self._edit_control(new):
+            self._apply_pending_displacement()
+            self.undo_stack.end_edit()
+
+    def eventFilter(self, obj, event):
+        # Child line edits otherwise consume Ctrl+Z as a character-level undo.
+        # Keep shortcuts scoped to this dialog, excluding separate modal windows.
+        if (event.type() == QEvent.Type.KeyRelease
+                and isinstance(obj, QWidget) and obj.window() is self):
+            self._update_history_actions()
+        if (event.type() in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress)
+                and isinstance(obj, QWidget) and obj.window() is self):
+            for key, action in ((QKeySequence.StandardKey.Undo, self.undo_action),
+                                (QKeySequence.StandardKey.Redo, self.redo_action)):
+                if event.matches(key):
+                    if event.type() == QEvent.Type.KeyPress:
+                        self._update_history_actions()
+                        action.trigger()
+                    event.accept()
+                    return True
+            if (event.type() == QEvent.Type.KeyPress
+                    and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)):
+                control = self._edit_control(obj)
+                if control is not None:
+                    if isinstance(control, QDoubleSpinBox):
+                        control.interpretText()
+                    self._finish_displacement_edit()
+                    event.accept()
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _update_history_actions(self, *_):
+        dirty = self._has_occupation_buffer() or bool(self._unfinished_numbers())
+        pending = self._pending_displacement is not None
+        self.undo_action.setEnabled(self.undo_stack.canUndo() or dirty or pending)
+        self.redo_action.setEnabled(self.undo_stack.canRedo() and not dirty and not pending)
+        for action, text, key in ((self.undo_action, self.undo_stack.undoText(), "Undo"),
+                                  (self.redo_action, self.undo_stack.redoText(), "Redo")):
+            shortcut = action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
+            action.setToolTip(f"{key} {text} ({shortcut})" if text else f"{key} ({shortcut})")
+
+    def _has_occupation_buffer(self):
+        return (not self.occupation.is_valid()
+                or any(not entry.symbol.strip() for entry in self.occupation.entries))
+
+    def _unfinished_numbers(self):
+        controls = self.deltas + [row["occ"] for row in self.occupation.rows]
+        return [spin for spin in controls if not spin.hasAcceptableInput()]
+
+    def _prepare_history_navigation(self):
+        try:
+            self._commit_pending_displacement()
+        except (ValueError, TypeError, IndexError):
+            # Undo cancels an invalid pending vector without undoing an older,
+            # unrelated command or letting a timer reapply the invalid edit.
+            self._display_site()
+            self.undo_stack.end_edit()
+            self._update_history_actions()
+            return False
+        return True
+
+    def _undo(self):
+        unfinished = self._has_occupation_buffer()
+        edit_key = self._occupation_edit_key
+        numbers = self._unfinished_numbers()
+        if numbers:
+            unfinished = True
+            field = "displacement" if numbers[0] in self.deltas else "occupation"
+            edit_key = self._edit_key(field)
+        if not self._prepare_history_navigation():
+            return
+        undo_edit = not unfinished or self.undo_stack.last_edit_matches(edit_key)
+        self._display_site()
+        if undo_edit:
+            self.undo_stack.undo()
+        self.undo_stack.end_edit()
+        self._update_history_actions()
+
+    def _redo(self):
+        if self._prepare_history_navigation():
+            self._display_site()
+            self.undo_stack.redo()
+            self.undo_stack.end_edit()
+            self._update_history_actions()
+
+    def _history_restored(self):
+        self._displacement_timer.stop()
+        self._pending_displacement = None
+        self._occupation_overwrite_approval = None
+        self._changed()
 
     def _guard(self, operation):
         try:
@@ -270,91 +487,89 @@ class BuildEmbeddingDialog(QDialog):
         self._schedule_local_render()
         self._schedule_global_render()
 
-    def _layer_changed(self, _value):
+    def _plane_axes(self):
+        return tuple(self.cell_plane.currentData()) if self.draft.dimension == 3 else (0, 1)
+
+    def _fixed_axis(self):
+        return next(i for i in range(3) if i not in self._plane_axes())
+
+    def _plane_changed(self, *_):
+        axes = self._plane_axes()
+        fixed = self._fixed_axis()
+        self.layer.blockSignals(True)
+        self.layer.setValue(self._selected_cell[fixed])
+        self.layer.blockSignals(False)
+        self.map_indices.setText(f"n{axes[0] + 1}, n{axes[1] + 1}")
+        self.layer_label.setText(f"Layer n{fixed + 1}")
+        self.global_scope.setItemText(1, f"Current cell layer (n{fixed + 1})")
+        self._display_region_changed()
+
+    def _layer_changed(self, value):
+        fixed = self._fixed_axis()
         if (
             self._selected_site is not None
             and not self.occupation.is_valid()
-            and self._selected_cell[2] != self.layer.value()
+            and self._selected_cell[fixed] != value
         ):
             self.layer.blockSignals(True)
-            self.layer.setValue(self._selected_cell[2])
+            self.layer.setValue(self._selected_cell[fixed])
             self.layer.blockSignals(False)
             return
         self._apply_pending_displacement()
+        self.undo_stack.end_edit()
+        cell = list(self._selected_cell)
+        cell[fixed] = value
+        self._selected_cell = tuple(cell)
         self._refresh_cells()
         self._refresh_sites()
 
     def _cell_index(self, x, y):
-        x += self.origin_x.value()
-        y += self.origin_y.value()
-        if self.draft.dimension == 3:
-            return x, y, self.layer.value()
-        return x, y
+        cell = [0] * self.draft.dimension
+        for axis, value in zip(self._plane_axes(), (x, y)):
+            cell[axis] = value
+        if self.layer is not None:
+            cell[self._fixed_axis()] = self.layer.value()
+        return tuple(cell)
 
-    def _inplane_offsets(self):
-        # Even cell counts are legal. The centre is the left/lower centre
-        # cell, so changing 4 to 5 does not unexpectedly move the origin.
-        n = self.inplane_cells.value()
-        return tuple(range(-(n // 2), n - n // 2))
+    def _cell_offsets(self):
+        atoms = getattr(self.draft.host, "atoms", self.draft.host)
+        return cell_ring_offsets(np.asarray(atoms.cell)[list(self._plane_axes())],
+                                 self.cell_rings.value())
+
+    def _visible_cells(self, *, whole=False):
+        cells = [self._cell_index(x, y) for x, y in self._cell_offsets()]
+        if whole and self.layer is not None:
+            fixed = self._fixed_axis()
+            count = min(2 * self.cell_rings.value() + 1, 5)
+            start = self.layer.value() - count // 2
+            cells = [tuple(value if i == fixed else cell[i] for i in range(3))
+                     for cell in cells for value in range(start, start + count)]
+        return cells
 
     def _refresh_cells(self, *_):
-        offsets = self._inplane_offsets()
-        size = len(offsets)
-        self._grid_updating = True
-        self.cells.blockSignals(True)
-        self.cells.setRowCount(size)
-        self.cells.setColumnCount(size)
-        self.cells.setHorizontalHeaderLabels([
-            str(self.origin_x.value() + x) for x in offsets
-        ])
-        self.cells.setVerticalHeaderLabels([
-            str(self.origin_y.value() + y) for y in reversed(offsets)
-        ])
-        # The grid only needs included/highlighted identities; avoid
-        # enumerating every atom of a large host in every visible cell.
-        for r in range(size):
-            for c in range(size):
-                cell = self._cell_index(offsets[c], offsets[size - 1 - r])
-                sites = [
-                    site for site in self.draft.entries
-                    if site.cell_index[:self.draft.dimension] == cell
-                ]
-                count = len(sites)
-                changed = any(self._is_modified(site) for site in sites)
-                highlighted = any(
-                    site.cell_index[:self.draft.dimension] == cell
-                    for site in self._highlighted
-                )
-                item = QTableWidgetItem("★" if changed else str(count) if count else "·")
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                item.setData(Qt.ItemDataRole.UserRole, cell)
-                # Selected cell and symmetry-related *other* cells have
-                # different semantics; never mark orbit members as selected.
-                if cell == self._selected_cell:
-                    item.setBackground(QBrush(QColor("#e5bd68")))
-                    item.setToolTip("Selected cell")
-                elif highlighted and self.symmetric.isChecked():
-                    item.setBackground(QBrush(QColor("#bba5e8")))
-                    item.setToolTip("Contains symmetry-equivalent sites")
-                elif changed:
-                    item.setBackground(QBrush(QColor("#f3bd81")))
-                elif count:
-                    item.setBackground(QBrush(QColor("#a2c9ed")))
-                self.cells.setItem(r, c, item)
-        cell = self._selected_cell
-        if self.draft.dimension == 3 and self.layer.value() != cell[2]:
-            self._selected_cell = (cell[0], cell[1], self.layer.value())
-            cell = self._selected_cell
-        rel_x = cell[0] - self.origin_x.value()
-        rel_y = cell[1] - self.origin_y.value()
-        if rel_x in offsets and rel_y in offsets:
-            self.cells.setCurrentCell(
-                size - 1 - offsets.index(rel_y), offsets.index(rel_x)
-            )
+        origin, cell = embedding_cell(self.draft.host)
+        axes = self._plane_axes()
+        if self.draft.dimension == 2:
+            first = cell[0] / np.linalg.norm(cell[0])
+            normal = np.cross(cell[0], cell[1])
+            normal /= np.linalg.norm(normal)
+            projection = np.column_stack((first, np.cross(normal, first)))
+            axis_labels = ("along a1", "in-plane transverse")
         else:
-            self.cells.clearSelection()
-        self.cells.blockSignals(False)
-        self._grid_updating = False
+            projection = np.eye(3)[:, axes]
+            axis_labels = tuple("xyz"[i] for i in axes)
+        dimension = self.draft.dimension
+        counts = Counter(site.cell_index[:dimension] for site in self.draft.entries)
+        modified = {site.cell_index[:dimension] for site in self.draft.entries
+                    if self._is_modified(site)}
+        equivalents = {site.cell_index[:dimension] for site in self._highlighted}
+        self.cells.set_cells(
+            self._visible_cells(), cell=cell, origin=origin, axes=axes,
+            projection=projection, axis_labels=axis_labels,
+            selected=self._selected_cell, counts=counts,
+            modified=modified, equivalents=equivalents,
+        )
+
     def _is_modified(self, site):
         entry = self.draft.entries.get(site)
         if entry is None:
@@ -362,26 +577,18 @@ class BuildEmbeddingDialog(QDialog):
         return (entry.occupation != site.occupation(self.draft.host)
                 or np.linalg.norm(entry.displacement) > 1e-8)
 
-    def _cell_changed(self, row, column, *_):
-        if self._grid_updating or row < 0 or column < 0:
-            return
+    def _cell_changed(self, cell):
         self._apply_pending_displacement()
-        item = self.cells.item(row, column)
-        if item is None:
-            return
-        cell = item.data(Qt.ItemDataRole.UserRole)
-        if cell is None:
-            return
         if (
             tuple(cell) != self._selected_cell
             and self._selected_site is not None
             and not self.occupation.is_valid()
         ):
-            # An unfinished mixture must not disappear when changing cells.
-            self._refresh_cells()
             return
+        self.undo_stack.end_edit()
         self._selected_cell = tuple(cell)
         self._selected_site = None
+        self._selected_sites.clear()
         self._occupation_overwrite_approval = None
         self._refresh_cells()
         self._refresh_sites()
@@ -394,67 +601,127 @@ class BuildEmbeddingDialog(QDialog):
         self.sites.setRowCount(len(self._site_rows))
         for row, site in enumerate(self._site_rows):
             entry = self.draft.entries.get(site)
+            name = f"#{site.original_site + 1}"
+            if len(site.cell_index) > self.draft.dimension:
+                name += f" · N5={site.cell_index}"
             labels = (
-                f"#{site.original_site + 1}",
+                name,
                 occupation_label(site.occupation(self.draft.host)),
                 occupation_label(entry.occupation) if entry else "—",
                 "Yes" if entry else "No",
             )
             for col, label in enumerate(labels):
                 self.sites.setItem(row, col, QTableWidgetItem(label))
+        self._selected_sites.intersection_update(self._site_rows)
         if self._site_rows:
-            if self._selected_site not in self._site_rows:
-                self._selected_site = self._site_rows[0]
-            self.sites.selectRow(self._site_rows.index(self._selected_site))
+            if not self._selected_sites:
+                self._selected_sites = {self._selected_site if self._selected_site in self._site_rows
+                                        else self._site_rows[0]}
+            if self._selected_site not in self._selected_sites:
+                self._selected_site = next(s for s in self._site_rows if s in self._selected_sites)
         else:
             self._selected_site = None
+        self._restore_table_selection()
         self.sites.blockSignals(False)
         self._site_updating = False
         self._display_site(preserve_occupation=preserve_occupation)
         self._update_symmetry_preview()
         self._refresh_summary()
 
+    def _restore_table_selection(self):
+        selection = QItemSelection()
+        model = self.sites.model()
+        for row, site in enumerate(self._site_rows):
+            if site in self._selected_sites:
+                selection.select(model.index(row, 0), model.index(row, 3))
+        self.sites.selectionModel().select(
+            selection, QItemSelectionModel.SelectionFlag.ClearAndSelect
+        )
+        if self._selected_site in self._site_rows:
+            self.sites.setCurrentCell(self._site_rows.index(self._selected_site), 0,
+                                     QItemSelectionModel.SelectionFlag.NoUpdate)
+
     def _site_changed(self):
         if self._site_updating:
             return
+        selected = {self._site_rows[index.row()]
+                    for index in self.sites.selectionModel().selectedRows()}
+        added = selected - self._selected_sites
         row = self.sites.currentRow()
-        if 0 <= row < len(self._site_rows):
-            # A pending displacement commit refreshes the site table. Preserve
-            # the user's intended *new* site across that refresh.
-            next_site = self._site_rows[row]
-            self._apply_pending_displacement()
-            if (
-                next_site != self._selected_site
-                and self._selected_site is not None
-                and not self.occupation.is_valid()
-            ):
-                # Do not silently discard invalid in-progress occupation rows.
-                if self._selected_site in self._site_rows:
-                    self.sites.blockSignals(True)
-                    self.sites.selectRow(self._site_rows.index(self._selected_site))
-                    self.sites.blockSignals(False)
-                return
-            if next_site != self._selected_site:
-                self._occupation_overwrite_approval = None
-            self._selected_site = next_site
-            if next_site in self._site_rows:
-                self.sites.blockSignals(True)
-                self.sites.selectRow(self._site_rows.index(next_site))
-                self.sites.blockSignals(False)
-            self._display_site()
-            self._update_symmetry_preview()
+        current = self._site_rows[row] if 0 <= row < len(self._site_rows) else None
+        if current in added or (not added and current in selected):
+            next_site = current
+        elif added:
+            next_site = next(s for s in self._site_rows if s in added)
+        else:
+            next_site = next((s for s in self._site_rows if s in selected), None)
+        self._apply_pending_displacement()
+        if selected != self._selected_sites and not self.occupation.is_valid():
+            self.sites.blockSignals(True)
+            self._restore_table_selection()
+            self.sites.blockSignals(False)
+            return
+        if selected != self._selected_sites:
+            self.undo_stack.end_edit()
+        self._selected_sites, self._selected_site = selected, next_site
+        self._occupation_overwrite_approval = None
+        self._display_site()
+        self._update_symmetry_preview()
+
+    def _current_site_changed(self, row, _column, *_):
+        if self._site_updating or not 0 <= row < len(self._site_rows):
+            return
+        site = self._site_rows[row]
+        if site not in self._selected_sites or site == self._selected_site:
+            return
+        self._apply_pending_displacement()
+        if not self.occupation.is_valid():
+            self.sites.blockSignals(True)
+            self._restore_table_selection()
+            self.sites.blockSignals(False)
+            return
+        self.undo_stack.end_edit()
+        self._selected_site = site
+        self._display_site()
+        self._schedule_local_render()
 
     def _display_site(self, *, preserve_occupation=False):
         site = self._selected_site
+        self.occupation_group.setEnabled(site is not None)
+        self.displacement_group.setEnabled(site is not None)
+        self.centre_button.setEnabled(len(self._selected_sites) == 1)
         if site is None:
+            self.occupation_info.show()
+            self.displacement_info.show()
+            self.occupation_info.setText("Select one or more sites")
+            self.displacement_info.setText("Select one or more sites")
             return
+        occupations = [self.draft.entries[s].occupation if s in self.draft.entries
+                       else s.occupation(self.draft.host) for s in self._selected_sites]
+        displacements = [self.draft.entries[s].displacement if s in self.draft.entries
+                         else np.zeros(3) for s in self._selected_sites]
+        count = len(self._selected_sites)
+        common = all(value == occupations[0] for value in occupations)
+        self.occupation_info.setVisible(not common)
+        self.occupation_info.setText(
+            f"{count} selected site(s)" + ("" if common else
+            f" · Different occupations; showing #{site.original_site + 1}. Edits apply to all.")
+        )
+        common = all(np.array_equal(value, displacements[0]) for value in displacements)
+        self.displacement_info.setVisible(not common)
+        self.displacement_info.setText(
+            f"{count} selected site(s)" + ("" if common else
+            f" · Different vectors; showing #{site.original_site + 1}. Edits apply to all.")
+        )
         entry = self.draft.entries.get(site)
         if not preserve_occupation:
+            self._occupation_edit_key = None
             self.occupation.set_occupation(
                 entry.occupation if entry else site.occupation(self.draft.host)
             )
             # The host occupation is the original value even when starting
-            # a brand-new embedded cluster. The shared widget owns Restore.
+            # a brand-new embedded cluster. Restore handles every target's
+            # own host occupation when several sites are selected.
             self.occupation.set_initial_occupation(site.occupation(self.draft.host))
         values = entry.displacement if entry else (0, 0, 0)
         for spin, value in zip(self.deltas, values):
@@ -463,50 +730,47 @@ class BuildEmbeddingDialog(QDialog):
             spin.blockSignals(False)
 
     def _targets(self):
-        site = self._selected_site
-        if site is None:
-            raise ValueError("Select a host site first")
-        return self.draft.targets(site, symmetric=self.symmetric.isChecked())
+        if not self._selected_sites:
+            raise ValueError("Select one or more host sites first")
+        return self.draft.targets(self._selected_sites, symmetric=self.symmetric.isChecked())
+
+    def _symmetry_changed(self, *_):
+        self._apply_pending_displacement()
+        self.undo_stack.end_edit()
+        self._occupation_overwrite_approval = None
+        self._update_symmetry_preview()
 
     def _update_symmetry_preview(self, *_):
-        # All equivalent sites are visible globally, independently of whether
-        # the edit-operation checkbox will apply to them.
         self._highlighted.clear()
-        if self._selected_site is not None:
-            try:
-                self._highlighted.update(
-                    self.draft.equivalents(self._selected_site)
-                )
-                targets = (
-                    self._highlighted if self.symmetric.isChecked()
-                    else {self._selected_site}
-                )
-            except (ValueError, IndexError) as exc:
-                self.symmetry_info.setText(f"Symmetry unavailable: {exc}")
-            else:
-                self.symmetry_info.setText(
-                    f"{len(self._highlighted)} equivalent sites; "
-                    f"edits affect {len(targets)} site(s)"
-                )
+        try:
+            self._highlighted.update(self.draft.equivalents(self._selected_sites))
+            targets = self._highlighted if self.symmetric.isChecked() else self._selected_sites
+        except (ValueError, IndexError) as exc:
+            self.symmetry_info.setText(f"Symmetry unavailable: {exc}")
+        else:
+            self.symmetry_info.setText(
+                f"{len(self._selected_sites)} selected; {len(self._highlighted)} equivalent sites; "
+                f"edits affect {len(targets)} site(s)"
+            )
         self._refresh_cells()
         self._schedule_global_render()
         self._schedule_local_render()
 
-    def _confirm_overwrite(self, targets, occupation=None):
+    def _confirm_occupation_overwrite(self, occupations):
         # Editing the selected site is intentional. Only overwriting independent
         # modifications of *other* symmetry-equivalent sites needs approval.
         conflicts = []
-        for site in targets:
-            if site == self._selected_site:
+        for site, occupation in occupations.items():
+            if site in self._selected_sites:
                 continue
             entry = self.draft.entries.get(site)
             if entry is None:
                 continue
-            if occupation is not None and entry.occupation != occupation and self._is_modified(site):
+            if entry.occupation != occupation and self._is_modified(site):
                 conflicts.append(site)
         if not conflicts:
             return True
-        key = (self._selected_site, frozenset(targets))
+        key = (frozenset(self._selected_sites), frozenset(occupations))
         if key == self._occupation_overwrite_approval:
             return True
         response = QMessageBox.question(
@@ -525,32 +789,37 @@ class BuildEmbeddingDialog(QDialog):
         self._apply_pending_displacement()
         def action():
             targets = self._targets()
-            self.draft.include(targets)
-            self._changed()
+            self._record_edit("Include sites", lambda: self.draft.include(targets))
         self._guard(action)
 
     def _exclude(self):
         self._apply_pending_displacement()
         def action():
             targets = self._targets()
-            self.draft.exclude(targets)
-            self._changed()
+            self._record_edit("Exclude sites", lambda: self.draft.exclude(targets))
         self._guard(action)
 
     def _set_centre(self):
         self._apply_pending_displacement()
         def action():
-            if self._selected_site is None:
-                raise ValueError("Select a site first")
-            self.draft.set_center(self._selected_site)
-            self._changed()
+            if len(self._selected_sites) != 1:
+                raise ValueError("Select exactly one site for the symmetry centre")
+            self._record_edit("Change centre", lambda: self.draft.set_center(self._selected_site))
         self._guard(action)
 
     def _occupation_edited(self):
         # Keystrokes during a mixed-occupation edit can have an incomplete
         # total. Keep them local, but never commit a partial physical state.
-        if self._selected_site is not None and self.occupation.is_valid():
-            self._assign_occupation()
+        if self._selected_site is not None:
+            self._occupation_edit_key = self._edit_key("occupation")
+            if self.occupation.is_valid():
+                self._assign_occupation()
+        self._update_history_actions()
+
+    def _occupation_validity_changed(self, _valid):
+        if self._has_occupation_buffer():
+            self._occupation_edit_key = self._edit_key("occupation")
+        self._update_history_actions()
 
     def _assign_occupation(self):
         self._apply_pending_displacement()
@@ -563,68 +832,147 @@ class BuildEmbeddingDialog(QDialog):
                 for site in targets
             ):
                 return
-            if not self._confirm_overwrite(targets, occupation):
+            if not self._confirm_occupation_overwrite({site: occupation for site in targets}):
                 # A rejected multi-site overwrite must not leave controls
                 # displaying an occupation different from the model.
                 self._display_site()
                 return
-            self.draft.set_occupation(targets, occupation)
             # Do not replace the live row controls while the user is typing.
-            self._changed(preserve_occupation=True)
+            self._record_edit(
+                "Edit occupation", lambda: self.draft.set_occupation(targets, occupation),
+                edit_key=self._occupation_edit_key, preserve_occupation=True,
+            )
         self._guard(action)
 
     def _restore_occupation(self):
-        """Compatibility entry point; the button now lives in OccupationEditor."""
-        self.occupation.restore_initial()
+        self._apply_pending_displacement()
+        def action():
+            targets = self._targets()
+            occupations = {site: site.occupation(self.draft.host) for site in targets}
+            if not self._confirm_occupation_overwrite(occupations):
+                return
+            self._record_edit("Restore occupations", lambda: self.draft.reset_occupation(targets))
+        self._guard(action)
 
     def _schedule_displacement(self, *_):
         if self._selected_site is not None:
+            self._pending_displacement = _PendingDisplacement(
+                tuple(self._selected_sites), np.array([spin.value() for spin in self.deltas]),
+                self.symmetric.isChecked(), self._edit_key("displacement"),
+            )
             self._displacement_timer.start()
+            self._update_history_actions()
+
+    def _finish_displacement_edit(self):
+        self._apply_pending_displacement()
+        self.undo_stack.end_edit()
 
     def _apply_pending_displacement(self):
-        if self._displacement_timer.isActive():
-            self._displacement_timer.stop()
-            self._assign_displacement()
+        if self._guard(self._commit_pending_displacement) is None:
+            self._display_site()
+            self._update_history_actions()
 
-    def _assign_displacement(self):
-        def action():
-            if self._selected_site is None:
-                return
-            values = np.asarray([spin.value() for spin in self.deltas])
-            targets = self._targets()
-            if not self.symmetric.isChecked() and all(
-                np.array_equal(
-                    self.draft.entries[site].displacement
-                    if site in self.draft.entries else np.zeros(3),
-                    values,
-                )
-                for site in targets
+    def _commit_pending_displacement(self):
+        self._displacement_timer.stop()
+        pending, self._pending_displacement = self._pending_displacement, None
+        if pending is not None:
+            if not pending.symmetric and all(
+                np.array_equal(self.draft.entries[site].displacement
+                               if site in self.draft.entries else np.zeros(3), pending.vector)
+                for site in pending.sites
             ):
-                return
-            self.draft.set_displacement(
-                self._selected_site, values, symmetric=self.symmetric.isChecked()
+                self._update_history_actions()
+                return True
+            self._record_edit(
+                "Edit displacement",
+                lambda: self.draft.set_displacement(
+                    pending.sites, pending.vector, symmetric=pending.symmetric,
+                ),
+                edit_key=pending.edit_key, preserve_occupation=True,
             )
-            self._changed(preserve_occupation=True)
-        self._guard(action)
+        return True
 
     def _add_radius(self):
         self._apply_pending_displacement()
-        self._guard(lambda: (self.draft.add_radius(self.radius.value()), self._changed()))
+        self._guard(lambda: self._record_edit(
+            "Expand by radius", lambda: self.draft.add_radius(self.radius.value()),
+        ))
 
     def _add_shells(self):
         self._apply_pending_displacement()
-        self._guard(lambda: (self.draft.add_shells(self.shells.value()), self._changed()))
+        self._guard(lambda: self._record_edit(
+            "Expand by shells", lambda: self.draft.add_shells(self.shells.value()),
+        ))
+
+    def _expansion_focus_changed(self, _old, widget):
+        mode = None
+        for name, controls in (("radius", (self.radius, self.add_radius_button)),
+                               ("shells", (self.shells, self.add_shells_button))):
+            if widget is not None and any(
+                widget is control or control.isAncestorOf(widget) for control in controls
+            ):
+                mode = name
+                break
+        if mode == self._expansion_mode:
+            return
+        self._expansion_mode = mode
+        self._expansion_key = None
+        self._expansion_sites.clear()
+        self.expansion_info.setVisible(mode is not None)
+        self._expansion_timer.stop()
+        if mode is not None:
+            self.expansion_info.setText("Updating expansion preview…")
+            self._schedule_expansion_preview()
+        self._schedule_local_render()
+        self._schedule_global_render()
+
+    def _schedule_expansion_preview(self, *_):
+        if self._expansion_mode is not None:
+            self._expansion_timer.start()
+
+    def _update_expansion_preview(self):
+        """Preview exactly the expansion selection without creating entries.
+
+        Geometry is cached while its mode, value and physical centre stay the
+        same; edits to occupations or inclusion only change the displayed count.
+        Preview errors stay inline instead of opening dialogs while typing.
+        """
+        if self._expansion_mode is None:
+            return
+        radius = self._expansion_mode == "radius"
+        value = self.radius.value() if radius else self.shells.value()
+        key = (self._expansion_mode, value, self.draft.center)
+        try:
+            if key != self._expansion_key:
+                sites = (self.draft.sites_within_radius(value) if radius
+                         else self.draft.sites_within_shells(value))
+                self._expansion_sites = set(sites)
+                self._expansion_key = key
+        except (ValueError, TypeError, IndexError) as exc:
+            self._expansion_sites.clear()
+            self._expansion_key = None
+            self.expansion_info.setText(f"Cannot preview expansion: {exc}")
+        else:
+            new = len(self._expansion_sites - self.draft.entries.keys())
+            name = "Radius" if radius else "Coordination-shell"
+            self.expansion_info.setText(
+                f"{name} preview: {len(self._expansion_sites)} sites; "
+                f"{new} new sites shown in green. Click Add to include them."
+            )
+        self._schedule_local_render()
+        self._schedule_global_render()
 
     def _changed(self, *, preserve_occupation=False):
         self._refresh_sites(preserve_occupation=preserve_occupation)
         self._refresh_summary()
         self._schedule_global_render()
         self._schedule_local_render()
+        self._schedule_expansion_preview()
 
     def _refresh_summary(self):
         center = self.draft.center
         self.centre_label.setText(
-            f"Centre: host site #{center.original_site + 1} in {center.cell_index}"
+            f"Symmetry / expansion centre: host site #{center.original_site + 1} in {center.cell_index}"
         )
         included = len(self.draft.entries)
         changed = sum(self._is_modified(site) for site in self.draft.entries)
@@ -646,52 +994,50 @@ class BuildEmbeddingDialog(QDialog):
         self._render_local()
         self._render_global()
 
-    def _site_colour(self, site, *, local=False):
-        if site == self._selected_site:
-            return "#d5a13b", 100
-        if site in self._highlighted:
-            return "#a081cf", 75
+    def _site_style(self, site, *, local=False):
         if self._is_modified(site):
-            return "#d88c49", 65
-        if site in self.draft.entries:
-            return "#4b92cf", 55
-        return "#a6aeb6", 23 if local else 12
+            color, size = "#d88c49", 65
+        elif site in self.draft.entries:
+            color, size = "#4b92cf", 55
+        elif site in self._expansion_sites:
+            color, size = "#69b88e", 45 if local else 30
+        else:
+            color, size = "#a6aeb6", 23 if local else 12
+        if site in self._selected_sites:
+            return color, max(size, 72), "#d5a13b", 2
+        if site in self._highlighted:
+            return color, max(size, 30), "#a081cf", 1.6
+        if site in self._expansion_sites and site not in self.draft.entries:
+            # Keep pending additions visible through the surrounding host,
+            # using the preview widget's foreground outline layer.
+            return color, size, "#329466", 1.6
+        return color, size, "#515961", .4
 
-    def _draw_sites(self, ax, canvas, sites, *, pick=False):
-        # Preserve the user's camera orientation across content updates.
-        elev, azim = ax.elev, ax.azim
-        ax.clear()
-        ax.view_init(elev=elev, azim=azim)
-        ax.set_axis_off()
-        points, colors, sizes = [], [], []
+    def _selected_cell_corners(self):
+        """Reference cell outline, with no leads or vacuum in the 2D detail."""
+        origin, cell = embedding_cell(self.draft.host)
+        atoms = getattr(self.draft.host, "atoms", self.draft.host)
+        shift = np.asarray(self._selected_cell) @ np.asarray(atoms.cell)[:self.draft.dimension]
+        return corner_indices.T @ cell + origin + shift
+
+    def _draw_sites(self, preview, sites, *, detail=False):
+        points, colors, sizes, outlines, widths = [], [], [], [], []
         for site in sites:
             entry = self.draft.entries.get(site)
             displacement = entry.displacement if entry is not None else 0
             points.append(site.position(self.draft.host) + displacement)
-            color, size = self._site_colour(site, local=pick)
+            color, size, outline, width = self._site_style(site, local=detail)
             colors.append(color)
             sizes.append(size)
-        scatter = None
-        if points:
-            coordinates = np.asarray(points)
-            scatter = ax.scatter(
-                coordinates[:, 0], coordinates[:, 1], coordinates[:, 2],
-                c=colors, s=sizes, depthshade=False,
-                **({"picker": 7} if pick else {}),
-            )
-            # Axes3D's implicit autoscaling can crop edge markers in a small
-            # Qt canvas, especially when the axis decorations are hidden.
-            # Fit all points in an equal-scale padded Cartesian cube.
-            lower = np.min(coordinates, axis=0)
-            upper = np.max(coordinates, axis=0)
-            centre = (lower + upper) / 2
-            halfwidth = max(1.0, float(np.max(upper - lower)) * 0.62)
-            ax.set_xlim(centre[0] - halfwidth, centre[0] + halfwidth)
-            ax.set_ylim(centre[1] - halfwidth, centre[1] + halfwidth)
-            ax.set_zlim(centre[2] - halfwidth, centre[2] + halfwidth)
-            ax.set_box_aspect((1, 1, 1), zoom=0.8)
-        canvas.draw_idle()
-        return scatter
+            outlines.append(outline)
+            widths.append(width)
+        preview.set_points(
+            points, colors, sizes, cell_corners=self._selected_cell_corners(),
+            labels=[f"#{site.original_site + 1}" for site in sites] if detail else (),
+            label_index=(sites.index(self._selected_site)
+                         if detail and self._selected_site in sites else None),
+            outlines=outlines, widths=widths,
+        )
 
     def _host_context_sites(self, *, allowed_only=False):
         """Finite viewport of the infinite host, independent of cluster size.
@@ -699,83 +1045,76 @@ class BuildEmbeddingDialog(QDialog):
         The in-plane cell grid controls how many periodic replicas are shown.
         For a bulk host we show a bounded stack of translated cells as well.
         Native 2D lead sites are visible in the whole-structure view but are
-        excluded from the clickable/embeddable layer.
+        excluded from the transition-region view and the editable cell.
         """
         host_atoms = getattr(self.draft.host, "atoms", self.draft.host)
         indices = (
             sorted(self.draft.allowed) if allowed_only
             else range(len(host_atoms))
         )
-        offsets = self._inplane_offsets()
-        xcells = [self.origin_x.value() + offset for offset in offsets]
-        ycells = [self.origin_y.value() + offset for offset in offsets]
-        if self.draft.dimension == 2:
-            cells = ((x, y) for x, y in product(xcells, ycells))
-        else:
-            # A finite viewport, not an attempt to materialize an infinite
-            # periodic host. Keep at most five consecutive bulk layers.
-            nz = min(len(offsets), 5)
-            start = self.layer.value() - nz // 2
-            cells = (
-                (x, y, z)
-                for x, y, z in product(xcells, ycells, range(start, start + nz))
-            )
-        return tuple(HostSite(i, cell) for cell in cells for i in indices)
+        return tuple(HostSite(i, cell) for cell in self._visible_cells(whole=True) for i in indices)
 
     def _render_local(self):
-        """Pick host sites in a selected periodic layer / 2D central region.
+        """Detail and site table always refer to the same selected cell.
 
-        A 2D host's entire central transition region belongs to one periodic
-        layer, even if it contains dozens of distinct atomic heights. A bulk
-        host uses the currently selected n3 cell-repetition index.
+        In 2D this is the complete transition region of one in-plane cell,
+        including every atomic height, without semi-infinite lead sites.
         """
-        if self.draft.dimension == 2:
-            self._local_sites = list(
-                self._host_context_sites(allowed_only=True)
-            )
-            region = "Transition region"
-        else:
-            self._local_sites = [
-                site for site in self._host_context_sites(allowed_only=True)
-                if site.cell_index[2] == self.layer.value()
-            ]
-            region = f"Host layer n3={self.layer.value()}"
-        # Exceptional native N5VEC entries remain editable in the site table
-        # but are not duplicated as ordinary periodic host replicas.
-        self._local_scatter = self._draw_sites(
-            self.local_axes, self.local_canvas, self._local_sites, pick=True
-        )
+        self._local_sites = list(self.draft.cell_sites(self._selected_cell))
+        self._draw_sites(self.local_preview, self._local_sites, detail=True)
+        region = "Transition region" if self.draft.dimension == 2 else "Host cell"
         self.local_info.setText(
-            f"{region} · {len(self._local_sites)} sites across "
-            f"{self.inplane_cells.value()}×{self.inplane_cells.value()} cells"
+            f"{region} {self._selected_cell} · {len(self._local_sites)} sites"
         )
 
     def _render_global(self):
         """Show complete displayed host context and every cluster site."""
         host_context = set(self._host_context_sites())
-        overlay = set(self.draft.entries) | self._highlighted
+        overlay = set(self.draft.entries) | self._highlighted | self._expansion_sites
         if self._selected_site is not None:
             overlay.add(self._selected_site)
         if self.global_scope.currentData() == "layer":
             if self.draft.dimension == 2:
-                # In 2D the selected 'layer' is the complete central region,
-                # excluding semi-infinite lead sites from the editing view.
+                # Keep every height of the transition region across cells,
+                # excluding semi-infinite lead sites from this context view.
                 host_context = set(
                     self._host_context_sites(allowed_only=True)
                 )
             else:
+                fixed = self._fixed_axis()
                 host_context = {
                     site for site in host_context
-                    if site.cell_index[2] == self.layer.value()
+                    if site.cell_index[fixed] == self.layer.value()
                 }
                 overlay = {
                     site for site in overlay
-                    if site.cell_index[2] == self.layer.value()
+                    if site.cell_index[fixed] == self.layer.value()
                 }
+        # A symmetry orbit can extend beyond the navigation box (especially
+        # for a sheared 2D basis). Show host surroundings there too, rather
+        # than drawing isolated highlighted atoms outside the finite host.
+        context_cells = {site.cell_index for site in host_context}
+        missing = {site.cell_index for site in overlay} - context_cells
+        axes = self._plane_axes()
+        extra_cells = set()
+        for cell in missing:
+            for x, y in product((-1, 0, 1), repeat=2):
+                neighbour = list(cell)
+                neighbour[axes[0]] += x
+                neighbour[axes[1]] += y
+                extra_cells.add(tuple(neighbour))
+        atoms = getattr(self.draft.host, "atoms", self.draft.host)
+        indices = (sorted(self.draft.allowed)
+                   if self.draft.dimension == 2 and self.global_scope.currentData() == "layer"
+                   else range(len(atoms)))
+        host_context.update(HostSite(i, cell) for cell in extra_cells for i in indices)
+        if self.draft.dimension == 2 and missing:
+            regular_cells = {site.cell_index for site in host_context if len(site.cell_index) == 2}
+            host_context.update(HostSite(i, cell)
+                                for cell in fill_cell_hull(regular_cells) for i in indices)
+        self._rendered_host_sites = host_context
         self._rendered_sites = sorted(host_context | overlay)
-        self._scatter = self._draw_sites(
-            self.axes, self.canvas, self._rendered_sites
-        )
+        self._draw_sites(self.global_preview, self._rendered_sites)
         included_shown = sum(
             site in self.draft.entries for site in self._rendered_sites
         )
@@ -786,11 +1125,8 @@ class BuildEmbeddingDialog(QDialog):
             f"Displayed: {len(self._rendered_sites)}"
         )
 
-    def _local_pick(self, event):
-        """Select any editable host site in the displayed atomic layer."""
-        if event.artist is not self._local_scatter or not len(event.ind):
-            return
-        index = int(event.ind[0])
+    def _select_local_site(self, index):
+        """Apply a preview selection through the same controls as the table."""
         if not 0 <= index < len(self._local_sites):
             return
         site = self._local_sites[index]
@@ -803,22 +1139,10 @@ class BuildEmbeddingDialog(QDialog):
         ):
             return
         self._apply_pending_displacement()
-        self._selected_cell = site.cell_index[:self.draft.dimension]
+        self.undo_stack.end_edit()
         self._selected_site = site
+        self._selected_sites = {site}
         self._occupation_overwrite_approval = None
-        offsets = self._inplane_offsets()
-        for coordinate, spin in zip(
-            site.cell_index[:2], (self.origin_x, self.origin_y)
-        ):
-            if coordinate - spin.value() not in offsets:
-                spin.blockSignals(True)
-                spin.setValue(coordinate)
-                spin.blockSignals(False)
-        if self.layer is not None:
-            self.layer.blockSignals(True)
-            self.layer.setValue(site.cell_index[2])
-            self.layer.blockSignals(False)
-        self._refresh_cells()
         self._refresh_sites()
 
     def _accept(self):

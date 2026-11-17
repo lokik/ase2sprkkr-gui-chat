@@ -52,6 +52,84 @@ dialog edits explicit host-site occupations and displacements, supports
 centre-preserving symmetry, and adds surrounding host sites by distance or
 coordination shell. Cancel does not change the current structure.
 
+The two previews have distinct scopes. The editable detail and the site table
+show the **selected host cell**. For a 2D host this includes the complete
+transition region of that one in-plane cell, excluding the left/right leads
+and vacuum. The context preview shows the surrounding periodic cells and the
+entire cluster, including cluster sites outside the displayed host box. Its
+scope can be restricted to the current **cell layer** in 3D (all basis sites
+with the fixed n1/n2/n3 index for the chosen map plane, not a single atomic plane),
+or to the repeated transition region in 2D. The bulk host box shows at most five layers;
+the underlying host remains infinite. When cluster sites or symmetry previews
+extend beyond this box, their host cells and neighbouring cells are also shown,
+so the highlighted sites are not detached markers outside the host context.
+For a 2D host the gaps between those cells are filled to produce a continuous
+host region, rather than separate patches surrounding individual markers.
+
+The map stays centred at **(0,0)**. **Wigner–Seitz rings** counts steps in the
+Voronoi adjacency graph of the actual translation lattice: two translation
+points are neighbours when their Wigner–Seitz cells share an edge, rather than
+just a vertex. Zero shows one cell; one shows seven cells for the triangular
+GeTe lattice, or five for an orthogonal lattice, including unequal rectangular
+axes. Successive rings add neighbours of the preceding rings. Neighbourhoods
+use the physical lattice metric, independently of the display projection;
+the drawn primitive cells remain their actual parallelograms. This is separate
+from **Use as symmetry centre**, which chooses a physical host site for point symmetry and
+radius/shell expansion. A cell can contain many inequivalent sites, so choosing
+that physical centre remains meaningful even within cell (0,0).
+
+Select a cell in the lattice map, then sites in its table or detail preview. The
+map preserves projected lattice angles and length ratios; the longer projected
+vector has length one. In 2D it uses an orthonormal basis of the surface plane.
+In 3D, **XY**, **XZ**, and **YZ** are Cartesian projections of cell planes varying
+respectively n1/n2, n1/n3, and n2/n3; the remaining index is controlled by the
+layer spinbox. Switching planes preserves the selected cell and site. An edge-on
+plane is identified explicitly instead of showing overlapping clickable cells.
+The 2D cell outline retains the central region's actual shear and its offset
+after the left lead, using the same Cartesian coordinates as the native atoms.
+Site numbers match between the table and detail; the outlined reference cell also
+locates the detail within the context. Gold and purple rings indicate the
+selected site and its symmetry preview, independently of blue/orange fills for
+included/modified cluster sites. Both previews support 3D rotation and
+Cartesian XY/XZ/YZ projections. Dragging rotates without changing the selected
+site; a click selects the nearest marker (the frontmost one if they overlap).
+The wheel zooms and a middle-button drag pans. For obscured sites, change
+projection or select the table row. The selected site's number is always shown;
+**All site numbers** labels the other sites as well. The vertical divider lets
+you enlarge the previews, and **Fit** restores their framing. Projection and
+Fit controls sit on the outer sides: left of the detail, right of the context.
+The orthographic
+camera fits the actual projected geometry to the full rectangular canvas on
+resize, preserving physical aspect without the unused 3D bounding cube.
+
+Focusing the radius, coordination-shell count, or its Add button previews that
+expansion in both views. New sites have green fills; already included sites keep
+their blue/orange fills. The expansion panel reports the candidate and new-site
+counts. Previewing uses the same site selection as Add and does not modify the
+cluster. Values update after a short debounce, and leaving these controls clears
+the preview. Oversized or invalid selections show an inline message.
+
+The site table supports Ctrl/Shift multiple selection. Occupation and
+displacement have independent frames; their edits apply to every selected site
+(and their symmetry targets when enabled). Mixed values are identified and the
+controls show the active site's values until edited. Displacement assigns the
+same Cartesian vector, rotated for symmetry targets; inconsistent overlapping
+orbits reject the entire edit. **Restore original** restores each target's own
+host occupation. A pending displacement is committed to its existing selection
+before selection changes.
+
+**Undo / Redo** in the footer keeps up to 100 cluster-edit steps, including
+occupations, displacements, inclusion/exclusion, expansions and centre changes.
+Repeated edits of the same field during one focus visit form a single step,
+even across preview updates. Enter, leaving the field, or changing the selected
+sites or symmetry starts a new group. A multi-site or symmetry edit is undone
+as a whole, including normalization of other occupation components. Standard
+Undo/Redo keyboard shortcuts also work inside the editing fields. Undo includes
+pending displacement values and cancels unfinished occupation input; a cancelled
+buffer alone does not undo an earlier unrelated command. History stores only
+editable cluster values, keeping the host and original radial data shared.
+Changing the view or previewing an expansion does not add history steps.
+
 Plain ASE host structures are sufficient to design a cluster, but native
 **Save Structure** exports a native CLUPOT only when the cluster references
 a host SPR-KKR Potential. Complete radial data are retained where supported;

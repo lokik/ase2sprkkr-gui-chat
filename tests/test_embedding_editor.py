@@ -6,18 +6,23 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLBACKEND", "Agg")
 
-import pytest
 import numpy as np
+import pytest
 from ase import Atoms
-from PyQt6.QtCore import Qt
+from matplotlib.backend_bases import MouseEvent
 from PyQt6.QtWidgets import QPushButton
 
 # The GUI is released independently of the still-unreleased embedding API.
 pytest.importorskip("ase2sprkkr.sprkkr.embedding_geometry")
 
 from ase2sprkkr.sprkkr.embedding_geometry import HostSite
+
 from ase2sprkkr_gui.ase.embedding import (
-    EmbeddingDraft, embedding_source, occupation_label, parse_occupation,
+    EmbeddingDraft,
+    cell_ring_offsets,
+    embedding_source,
+    occupation_label,
+    parse_occupation,
 )
 from ase2sprkkr_gui.gui.application.structure_snapshot import StructureSnapshot
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -29,6 +34,30 @@ from ase2sprkkr_gui.physics.lattice import detect_structure_kind
 
 def host():
     return Atoms("Cu", cell=[2., 2., 2.], positions=[[0, 0, 0]], pbc=True)
+
+
+def click_preview(preview, position, *, drag=(0, 0)):
+    """Deliver real Matplotlib mouse events at a projected Cartesian position."""
+    preview.canvas.draw()
+    point, _ = preview.project([position])
+    x, y = preview.axes.transData.transform(point[0])
+    events = [("button_press_event", 0, 0)]
+    if drag != (0, 0):
+        events.append(("motion_notify_event", *drag))
+    events.append(("button_release_event", *drag))
+    for name, dx, dy in events:
+        event = MouseEvent(name, preview.canvas, x + dx, y + dy, button=1)
+        preview.canvas.callbacks.process(name, event)
+
+
+def click_cell(dialog, cell):
+    view = dialog.cells
+    view.canvas.draw()
+    index = view._cells.index(cell)
+    point = view._polygons[index].mean(axis=0)
+    x, y = view.axes.transData.transform(point)
+    for name in ("button_press_event", "button_release_event"):
+        view.canvas.callbacks.process(name, MouseEvent(name, view.canvas, x, y, button=1))
 
 
 def test_occupation_input_is_exact_and_not_silently_renormalized():
@@ -50,7 +79,7 @@ def test_draft_creates_explicit_cluster_without_mutating_host():
     assert draft.entries == {}
     draft.include([center])
     draft.set_occupation([center], {"Fe": 1.0})
-    draft.set_displacement(center, [0.01, -0.02, 0.03])
+    draft.set_displacement([center], [0.01, -0.02, 0.03])
     result = draft.to_atoms()
     assert result.embedding_host is parent
     assert detect_structure_kind(result) == "0d"
@@ -66,7 +95,7 @@ def test_symmetry_preview_can_modify_real_host_sites():
     parent = host()
     draft = EmbeddingDraft(parent)
     site = HostSite(0, (1, 0, 0))
-    orbit = draft.targets(site, symmetric=True)
+    orbit = draft.targets([site], symmetric=True)
     assert len(orbit) == 6
     draft.set_occupation(orbit, {"Fe": 1.0})
     assert len(draft.entries) == 6
@@ -98,7 +127,7 @@ def test_radius_shells_and_edit_again_preserve_host_reference():
 def test_displacement_symmetry_rejects_noninvariant_direction_without_partial_edit():
     draft = EmbeddingDraft(host())
     with pytest.raises(ValueError, match="conflicts"):
-        draft.set_displacement(draft.center, [0.1, 0, 0], symmetric=True)
+        draft.set_displacement([draft.center], [0.1, 0, 0], symmetric=True)
     assert not draft.entries
 
 
@@ -107,7 +136,7 @@ def test_snapshot_restores_embedded_occupations_positions_and_host_reference():
     draft = EmbeddingDraft(parent)
     site = HostSite(0, (1, 0, 0))
     draft.set_occupation([site], {"Fe": 0.75, "Ni": 0.25})
-    draft.set_displacement(site, [0, 0, 0.1])
+    draft.set_displacement([site], [0, 0, 0.1])
     original = draft.to_atoms()
     snapshot = StructureSnapshot.capture(original)
     restored = snapshot.to_atoms()
@@ -185,6 +214,7 @@ def test_generic_structure_save_does_not_drop_embedding_without_host_potfil(
 def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_path):
     from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
     from ase2sprkkr.sprkkr.sprkkr_atoms import SPRKKRAtoms
+
     from ase2sprkkr_gui.gui.flows import files as file_flows
 
     class HostPotential:
@@ -244,6 +274,7 @@ def test_open_native_cluster_with_explicit_host_preserves_reference(
 ):
     from ase2sprkkr import Potential
     from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+
     from ase2sprkkr_gui.gui.flows import files as file_flows
 
     cluster_path = tmp_path / "sample.clu"
@@ -265,9 +296,6 @@ def test_open_native_cluster_with_explicit_host_preserves_reference(
         @property
         def atoms(self):
             return expected
-
-        def host_geometry_warning(self):
-            return None
 
         def host_geometry_warning(self):
             return None
@@ -307,6 +335,7 @@ def test_open_native_cluster_with_explicit_host_preserves_reference(
 def test_invalid_cluster_import_does_not_replace_workspace(monkeypatch, tmp_path):
     from ase2sprkkr import Potential
     from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+
     from ase2sprkkr_gui.gui.flows import files as file_flows
 
     initial = host()
@@ -333,8 +362,6 @@ def test_invalid_cluster_import_does_not_replace_workspace(monkeypatch, tmp_path
 
 
 def test_embedded_global_preview_shows_distant_sites_without_allowing_picking():
-    from types import SimpleNamespace
-
     dialog = BuildEmbeddingDialog(host())
     outside = HostSite(0, (15, -3, 2))
     dialog.draft.include([outside])
@@ -342,20 +369,16 @@ def test_embedded_global_preview_shows_distant_sites_without_allowing_picking():
     assert outside in dialog._rendered_sites
     assert outside not in dialog._local_sites
     selected_before = dialog._selected_site
-    dialog._local_pick(SimpleNamespace(artist=dialog._scatter, ind=[0]))
+    click_preview(dialog.global_preview, outside.position(dialog.draft.host))
     assert dialog._selected_site == selected_before
 
-    # Navigate to the distant cell; only its local preview becomes pickable.
-    for spin, value in ((dialog.origin_x, 15), (dialog.origin_y, -3),
-                        (dialog.layer, 2)):
-        spin.setValue(value)
-    dialog._selected_cell = outside.cell_index
-    dialog._refresh_cells()
-    dialog._refresh_sites()
+    # The map stays at the origin; increase its rings to reach a distant cell.
+    dialog.layer.setValue(2)
+    dialog.cell_rings.setValue(18)
+    click_cell(dialog, outside.cell_index)
     dialog._render()
     assert outside in dialog._local_sites
-    idx = dialog._local_sites.index(outside)
-    dialog._local_pick(SimpleNamespace(artist=dialog._local_scatter, ind=[idx]))
+    click_preview(dialog.local_preview, outside.position(dialog.draft.host))
     assert dialog._selected_site == outside
 
 
@@ -440,15 +463,12 @@ def test_embedding_snapshot_has_single_uncopied_host_link():
     assert snapshot.to_atoms().embedding_host is parent
 
 
-def test_inplane_cells_is_an_actual_cell_count():
+def test_cell_rings_are_wigner_seitz_rings_about_the_origin():
     dialog = BuildEmbeddingDialog(host())
-    dialog.inplane_cells.setValue(4)
-    assert dialog.cells.rowCount() == 4
-    assert dialog.cells.columnCount() == 4
-    assert dialog._inplane_offsets() == (-2, -1, 0, 1)
-    dialog.inplane_cells.setValue(5)
-    assert dialog.cells.rowCount() == 5
-    assert dialog._inplane_offsets() == (-2, -1, 0, 1, 2)
+    for rings, count in ((0, 1), (1, 5), (2, 13)):
+        dialog.cell_rings.setValue(rings)
+        assert len(dialog.cells._cells) == count
+        assert (0, 0, 0) in dialog.cells._cells
 
 
 def test_unchanged_embedding_editor_does_not_restart_workspace(monkeypatch):
@@ -471,7 +491,9 @@ def test_versioned_cluster_history_restores_native_file_using_same_host(
     tmp_path, monkeypatch
 ):
     from types import SimpleNamespace
+
     from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+
     from ase2sprkkr_gui.gui.application.historical_state import _restore_state_atoms
 
     parent = host()
@@ -508,9 +530,11 @@ def test_mismatched_host_requires_confirmation_before_workspace_replacement(
     monkeypatch, tmp_path
 ):
     from types import SimpleNamespace
+
     from ase2sprkkr import Potential
     from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
     from PyQt6.QtWidgets import QMessageBox
+
     from ase2sprkkr_gui.gui.flows import files as file_flows
 
     parent = host()
@@ -562,8 +586,9 @@ def test_active_cluster_potential_is_not_mistaken_for_a_periodic_host():
 
 def test_guided_cluster_scf_is_available_without_input_parameters():
     from ase2sprkkr import Potential, SPRKKRAtoms
-    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+
     from ase2sprkkr_gui.gui.workflow.model import RunTask, WorkflowSection
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
 
     native_host = Potential.from_atoms(host())
     cluster = SPRKKRAtoms.from_embedding(
@@ -586,15 +611,15 @@ def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
         dialog._render()
-        dialog.canvas.draw()
+        dialog.global_preview.canvas.draw()
 
     assert "Cluster: 1/1" in dialog.preview_info.text()
     assert "Displayed:" in dialog.preview_info.text()
-    assert "Host layer n3=0" in dialog.local_info.text()
-    assert dialog.axes.get_title() == ""
-    assert dialog.axes.get_xlabel() == ""
-    assert dialog.axes.get_ylabel() == ""
-    assert dialog.axes.get_zlabel() == ""
+    assert "Host cell (0, 0, 0)" in dialog.local_info.text()
+    axes = dialog.global_preview.axes
+    assert axes.get_title() == ""
+    assert axes.get_xlabel() == ""
+    assert axes.get_ylabel() == ""
     assert not any("Tight layout not applied" in str(w.message) for w in captured)
 
 
@@ -706,13 +731,14 @@ def test_global_preview_highlights_all_equivalents_not_only_selected_cell():
     selected = HostSite(0, (1, 0, 0))
     dialog._selected_cell = selected.cell_index
     dialog._selected_site = selected
+    dialog._selected_sites = {selected}
     dialog._update_symmetry_preview()
     dialog._render()
     assert len(dialog._highlighted) == 6
     assert set(dialog._highlighted) <= set(dialog._rendered_sites)
     assert any(site.cell_index != selected.cell_index
                for site in dialog._rendered_sites)
-    assert len(dialog._local_sites) == dialog.inplane_cells.value() ** 2
+    assert dialog._local_sites == [selected]
     dialog.global_scope.setCurrentIndex(1)  # Current layer
     dialog._render_global()
     assert all(site.cell_index[2] == dialog.layer.value()
@@ -790,9 +816,10 @@ def test_embedding_auto_occupation_overwrites_other_symmetry_sites_only_with_con
     selected = HostSite(0, (1, 0, 0))
     dialog._selected_cell = selected.cell_index
     dialog._selected_site = selected
+    dialog._selected_sites = {selected}
     dialog._refresh_sites()
     dialog.symmetric.setChecked(True)
-    orbit = dialog.draft.targets(selected, symmetric=True)
+    orbit = dialog.draft.targets([selected], symmetric=True)
     assert len(orbit) > 1
 
     dialog.occupation.rows[0]["elem"].setText("Fe")
@@ -854,20 +881,13 @@ def test_incomplete_occupation_is_not_discarded_by_selection_or_ok(monkeypatch):
 
 def test_clicked_grid_cell_matches_its_coordinates_and_not_a_symmetry_cell():
     dialog = BuildEmbeddingDialog(host())
-    # Grid labels are x columns and y rows, even though y increases upwards.
-    offsets = dialog._inplane_offsets()
-    column = offsets.index(0)
-    row = len(offsets) - 1 - offsets.index(-1)
-    dialog.cells.setCurrentCell(row, column)
+    click_cell(dialog, (0, -1, 0))
     assert dialog._selected_cell == (0, -1, 0)
     assert dialog._selected_site == HostSite(0, (0, -1, 0))
     assert HostSite(0, (-1, -1, 0)) not in dialog._highlighted
-    current = dialog.cells.item(row, column)
-    assert current.data(Qt.ItemDataRole.UserRole) == (0, -1, 0)
-    assert current.background().color().name() == "#e5bd68"
 
 
-def test_local_preview_contains_only_regular_sites_in_one_host_cell():
+def test_local_preview_contains_selected_cell_including_native_translation_entries():
     from ase2sprkkr import SPRKKRAtoms
 
     parent = Atoms(
@@ -883,8 +903,8 @@ def test_local_preview_contains_only_regular_sites_in_one_host_cell():
     assert special in dialog.draft.cell_sites((1, 0))  # still editable in table
     dialog._render_local()
     assert HostSite(0, (1, 0)) in dialog._local_sites
-    assert len(dialog._local_sites) == dialog.inplane_cells.value() ** 2
-    assert special not in dialog._local_sites
+    assert set(dialog._local_sites) == {HostSite(0, (1, 0)), special}
+    assert all(site.cell_index[:2] == (1, 0) for site in dialog._local_sites)
 
 
 def test_global_whole_mode_includes_all_cluster_sites_and_has_padded_bounds():
@@ -896,9 +916,12 @@ def test_global_whole_mode_includes_all_cluster_sites_and_has_padded_bounds():
     dialog._render_global()
     assert set(dialog.draft.entries).issubset(set(dialog._rendered_sites))
     assert "Cluster: 2/2" in dialog.preview_info.text()
-    bounds = [dialog.axes.get_xlim(), dialog.axes.get_ylim(), dialog.axes.get_zlim()]
+    axes = dialog.global_preview.axes
+    dialog.global_preview.canvas.draw()
+    bounds = [axes.get_xlim(), axes.get_ylim()]
     for site in (left, right):
-        position = site.position(dialog.draft.host)
+        projected, _ = dialog.global_preview.project([site.position(dialog.draft.host)])
+        position = projected[0]
         assert all(lo < coordinate < hi for coordinate, (lo, hi) in zip(position, bounds))
 
 
@@ -910,7 +933,7 @@ def test_cell_actions_are_adjacent_to_cell_grid():
     right_panel = dialog.sites.parentWidget()
     right_actions = right_panel.findChildren(QPushButton)
     assert {w.text() for w in right_actions} >= {
-        "Include", "Exclude", "Set centre"
+        "Include", "Exclude", "Use as symmetry centre"
     }
 
 
@@ -989,9 +1012,7 @@ def test_exclude_after_pending_displacement_does_not_reinclude_atom():
     assert site not in dialog.draft.entries
 
 
-def test_2d_multilayer_host_shows_full_repeated_structure_and_one_atomic_plane():
-    # A 40-site slab: the screenshot's earlier implementation rendered 40
-    # stacked atoms locally and just one marker in the empty global preview.
+def test_2d_multilayer_detail_contains_entire_transition_region_of_one_cell():
     atoms = Atoms(
         symbols=["Ge"] * 20 + ["Te"] * 20,
         positions=[[0., 0., float(i)] for i in range(40)],
@@ -1000,11 +1021,11 @@ def test_2d_multilayer_host_shows_full_repeated_structure_and_one_atomic_plane()
     )
     dialog = BuildEmbeddingDialog(atoms)
     dialog._render()
-    n_cells = dialog.inplane_cells.value() ** 2
+    n_cells = 13  # Two Wigner-Seitz rings of the square surface lattice
     assert len(dialog._site_rows) == 40  # Site table: one host unit cell
-    assert len(dialog._local_sites) == 40 * n_cells  # Full 2D transition region
+    assert len(dialog._local_sites) == 40  # Full transition region of one cell
     assert len(dialog._rendered_sites) == 40 * n_cells  # Whole host viewport
-    assert "Host: 1000" in dialog.preview_info.text()
+    assert "Host: 520" in dialog.preview_info.text()
     assert "Transition region" in dialog.local_info.text()
     assert "Cluster: 0/0" in dialog.preview_info.text()
 
@@ -1012,7 +1033,7 @@ def test_2d_multilayer_host_shows_full_repeated_structure_and_one_atomic_plane()
     # discarding the other 39 basis sites of the 2D transition region.
     dialog.sites.selectRow(30)
     dialog._render_local()
-    assert len(dialog._local_sites) == 40 * n_cells
+    assert len(dialog._local_sites) == 40
     assert HostSite(30, (0, 0)) in dialog._local_sites
 
     dialog.global_scope.setCurrentIndex(1)
@@ -1025,52 +1046,53 @@ def test_2d_multilayer_host_shows_full_repeated_structure_and_one_atomic_plane()
     assert len(dialog._rendered_sites) == 40 * n_cells
 
 
-def test_local_layer_picker_can_select_other_host_cells():
-    from types import SimpleNamespace
-
+def test_detail_follows_grid_selection_and_is_independent_of_viewport_size():
     dialog = BuildEmbeddingDialog(host())
     destination = HostSite(0, (1, -1, 0))
+    click_cell(dialog, destination.cell_index)
     dialog._render_local()
-    assert destination in dialog._local_sites
-    idx = dialog._local_sites.index(destination)
-    dialog._local_pick(SimpleNamespace(
-        artist=dialog._local_scatter, ind=[idx]
-    ))
+    assert dialog._local_sites == [destination]
     assert dialog._selected_cell == destination.cell_index
     assert dialog._selected_site == destination
-    assert dialog.cells.currentItem().data(
-        Qt.ItemDataRole.UserRole
-    ) == destination.cell_index
+    dialog.cell_rings.setValue(3)
+    dialog._render_local()
+    assert dialog._local_sites == [destination]
+
+
+def test_cell_map_stays_at_the_origin_after_selecting_another_cell():
+    dialog = BuildEmbeddingDialog(host())
+    before = set(dialog.cells._cells)
+    click_cell(dialog, (1, 1, 0))
+    assert dialog._selected_cell == (1, 1, 0)
+    assert set(dialog.cells._cells) == before
+    assert (0, 0, 0) in before
 
 
 def test_whole_global_preview_includes_host_even_before_any_cluster_site():
     dialog = BuildEmbeddingDialog(host())
     assert not dialog.draft.entries
     dialog._render_global()
-    expected = dialog.inplane_cells.value() ** 2 * min(
-        dialog.inplane_cells.value(), 5
-    )
+    expected = 13 * 5
     assert len(dialog._rendered_sites) == expected
     assert "Cluster: 0/0" in dialog.preview_info.text()
 
 
 def test_2d_transition_region_excludes_leads_but_whole_host_shows_them():
-    from types import SimpleNamespace
+    from ase2sprkkr.sprkkr.atoms_region import AtomsRegion
 
     atoms = Atoms(
         "Cu3", positions=[[0, 0, 0], [0, 0, 2], [0, 0, 4]],
         cell=[2, 2, 12], pbc=(True, True, False),
     )
     atoms.regions = {
-        "left": SimpleNamespace(ids=(0,)),
-        "central": SimpleNamespace(ids=(1,)),
-        "right": SimpleNamespace(ids=(2,)),
+        name: AtomsRegion(name, slice(i, i + 1), atoms.cell, atoms=atoms, add=False)
+        for i, name in enumerate(("left", "central", "right"))
     }
     dialog = BuildEmbeddingDialog(atoms)
     assert dialog.draft.allowed == frozenset({1})
     dialog._render()
-    cells = dialog.inplane_cells.value() ** 2
-    assert len(dialog._local_sites) == cells
+    cells = 13
+    assert dialog._local_sites == [HostSite(1, (0, 0))]
     assert all(site.original_site == 1 for site in dialog._local_sites)
     assert len(dialog._rendered_sites) == 3 * cells
 
@@ -1078,3 +1100,570 @@ def test_2d_transition_region_excludes_leads_but_whole_host_shows_them():
     dialog._render_global()
     assert len(dialog._rendered_sites) == cells
     assert all(site.original_site == 1 for site in dialog._rendered_sites)
+
+
+@pytest.mark.parametrize("dimension", [2, 3])
+@pytest.mark.parametrize("projection", range(4))
+def test_real_preview_click_selects_matching_table_site_and_edits_only_it(
+    dimension, projection,
+):
+    atoms = Atoms(
+        "Cu3", positions=[[0, 0, 0], [1.3, .4, 1.2], [.3, 1.5, .7]],
+        cell=[[2, 0, 0], [.5, 2, 0], [.2, .1, 4]],
+        pbc=(True, True, dimension == 3),
+    )
+    dialog = BuildEmbeddingDialog(atoms)
+    dialog._render()
+    preview = dialog.local_preview
+    preview.projection.setCurrentIndex(projection)
+    target = HostSite(2, (0,) * dimension)
+    click_preview(preview, target.position(atoms))
+    assert dialog._selected_site == target
+    assert dialog._site_rows[dialog.sites.currentRow()] == target
+    dialog.occupation.rows[0]["elem"].setText("Ni")
+    assert set(dialog.draft.entries) == {target}
+    assert dialog.draft.entries[target].occupation == {"Ni": 1.0}
+    assert atoms.get_chemical_symbols() == ["Cu"] * 3
+
+
+def test_preview_rotation_drag_does_not_select_another_site():
+    atoms = Atoms("Cu2", positions=[[0, 0, 0], [1, 1, 1]], cell=[2] * 3, pbc=True)
+    dialog = BuildEmbeddingDialog(atoms)
+    dialog._render()
+    selected = dialog._selected_site
+    click_preview(dialog.local_preview, atoms.positions[1], drag=(20, 0))
+    assert dialog._selected_site == selected
+
+
+def test_overlapping_projection_selects_frontmost_site():
+    atoms = Atoms("Cu2", positions=[[0, 0, 0], [0, 0, 2]], cell=[3] * 3, pbc=True)
+    dialog = BuildEmbeddingDialog(atoms)
+    dialog._render()
+    dialog.local_preview.projection.setCurrentIndex(1)  # XY: same screen position
+    click_preview(dialog.local_preview, atoms.positions[1])
+    assert dialog._selected_site == HostSite(1, (0, 0, 0))
+
+
+def test_reopened_cluster_starts_at_its_own_cell_and_native_site():
+    from ase2sprkkr import SPRKKRAtoms
+
+    parent = host()
+    target = HostSite(0, (15, -3, 102))
+    cluster = SPRKKRAtoms.from_embedding(parent, [(0, target.cell_index, "Ni")])
+    dialog = BuildEmbeddingDialog(cluster)
+    dialog._render()
+    assert dialog._selected_site == target
+    assert dialog._selected_cell == target.cell_index
+    assert dialog.layer.value() == 102
+    assert dialog._local_sites == [target]
+    assert (0, 0, 102) in dialog.cells._cells
+
+
+def test_layer_change_updates_detail_table_and_context_together():
+    dialog = BuildEmbeddingDialog(host())
+    dialog.layer.setValue(2)
+    dialog.global_scope.setCurrentIndex(1)
+    dialog._render()
+    target = HostSite(0, (0, 0, 2))
+    assert dialog._site_rows == dialog._local_sites == [target]
+    assert dialog._selected_site == target
+    assert all(site.cell_index[2] == 2 for site in dialog._rendered_sites)
+
+
+def test_2d_detail_fit_excludes_lead_positions_and_vacuum():
+    from ase2sprkkr.sprkkr.atoms_region import AtomsRegion
+
+    atoms = Atoms(
+        "Cu4", positions=[[0, 0, -100], [0, 0, 1], [0, 0, 3], [0, 0, 100]],
+        cell=[2, 2, 300], pbc=(True, True, False),
+    )
+    atoms.regions = {
+        "central": AtomsRegion("central", slice(1, 3), atoms.cell, atoms=atoms, add=False)
+    }
+    dialog = BuildEmbeddingDialog(atoms)
+    dialog._render()
+    assert dialog._local_sites == [HostSite(1, (0, 0)), HostSite(2, (0, 0))]
+    corners = dialog._selected_cell_corners()
+    assert set(corners[:, 2]) == {1, 3}
+    assert np.ptp(dialog.local_preview._positions[:, 2]) == 2
+    assert np.ptp(dialog.global_preview._positions[:, 2]) == 200
+
+
+def test_preview_keeps_zoom_and_orientation_when_editing_occupation():
+    dialog = BuildEmbeddingDialog(host())
+    dialog._render()
+    preview = dialog.local_preview
+    preview.canvas.draw()
+    preview.set_view(35, 20)
+    x, y = preview.axes.transData.transform((0, 0))
+    before = preview.axes.get_xlim()
+    event = MouseEvent("scroll_event", preview.canvas, x, y, button="up", step=2)
+    preview.canvas.callbacks.process("scroll_event", event)
+    zoomed = preview.axes.get_xlim()
+    assert np.ptp(zoomed) < np.ptp(before)
+    dialog.occupation.rows[0]["elem"].setText("Ni")
+    dialog._render_local()
+    assert preview.axes.get_xlim() == zoomed
+    assert preview.view_angles == (35, 20)
+
+
+@pytest.fixture
+def gete_host():
+    from pathlib import Path
+
+    import ase2sprkkr
+    from ase2sprkkr import Potential
+
+    path = Path(ase2sprkkr.__file__).parent / "potentials/examples/GeTe.pot"
+    return Potential.from_file(path).atoms
+
+
+@pytest.mark.parametrize("cell_index", [(0, 0), (1, 1), (2, 0)])
+def test_gete_transition_cell_outline_encloses_its_native_sites(gete_host, cell_index):
+    from ase2sprkkr_gui.ase.embedding import embedding_cell
+
+    dialog = BuildEmbeddingDialog(gete_host)
+    click_cell(dialog, cell_index)
+    dialog._render()
+    origin, cell = embedding_cell(gete_host)
+    np.testing.assert_allclose(origin, gete_host.regions["left"].cell[2])
+    np.testing.assert_allclose(cell, gete_host.regions["central"].cell)
+    corner = dialog._selected_cell_corners()[0]
+    np.testing.assert_allclose(corner, origin + np.asarray(cell_index) @ gete_host.cell[:2])
+    # Native basis sites remain in their actual host cell; no modulo/wrapping
+    # of atom positions may disguise an incorrectly drawn cell boundary.
+    positions = np.array([site.position(gete_host) for site in dialog._local_sites])
+    fractions = np.linalg.solve(cell.T, (positions - corner).T).T
+    assert fractions.min() >= -1e-8
+    assert fractions.max() <= 1 + 1e-8
+    assert len(positions) == 40
+
+
+def test_gete_symmetry_preview_has_real_host_surroundings_outside_navigation_box(gete_host):
+    dialog = BuildEmbeddingDialog(gete_host)
+    click_cell(dialog, (2, 0))
+    dialog.sites.selectRow(dialog._site_rows.index(HostSite(24, (2, 0))))
+    dialog._render()
+    assert len(dialog._highlighted) == 6
+    assert not dialog.draft.entries  # Previewing an orbit does not include it
+    assert any(site.cell_index not in dialog.cells._cells for site in dialog._highlighted)
+    centre = dialog.draft.center.position(gete_host)
+    radii = [np.linalg.norm(site.position(gete_host) - centre) for site in dialog._highlighted]
+    np.testing.assert_allclose(radii, radii[0])
+    for site in dialog._highlighted:
+        # Every previewed site is part of a complete host cell, rather than
+        # an extra floating marker outside the materialized host structure.
+        assert all(HostSite(i, site.cell_index) in dialog._rendered_host_sites
+                   for i in range(len(gete_host)))
+        rendered = dialog.global_preview._positions[dialog._rendered_sites.index(site)]
+        np.testing.assert_allclose(rendered, site.position(gete_host))
+
+
+def test_oblique_cell_map_preserves_angles_lengths_and_click_coordinates():
+    dialog = BuildEmbeddingDialog(Atoms(
+        "Cu", positions=[[0, 0, 0]], cell=[[4, 0, 0], [1, 2, 0], [0, 0, 4]],
+        pbc=(True, True, False),
+    ))
+    view = dialog.cells
+    view.canvas.draw()
+    polygon = view._polygons[view._cells.index((0, 0))]
+    # Longest projected vector is one; a2 keeps its actual slope and scale.
+    np.testing.assert_allclose(polygon, [[0, 0], [1, 0], [1.25, .5], [.25, .5]])
+    pixels = view.axes.transData.transform(polygon)
+    first, second = pixels[1] - pixels[0], pixels[3] - pixels[0]
+    assert np.linalg.norm(second) / np.linalg.norm(first) == pytest.approx(np.sqrt(5) / 4)
+    assert np.dot(first, second) / (np.linalg.norm(first) * np.linalg.norm(second)) == pytest.approx(1 / np.sqrt(5))
+    # Click a known physical location inside cell (1, 1), independently of
+    # the widget's polygon-to-cell bookkeeping.
+    x, y = view.axes.transData.transform((1.875, .75))
+    for name in ("button_press_event", "button_release_event"):
+        view.canvas.callbacks.process(name, MouseEvent(name, view.canvas, x, y, button=1))
+    assert dialog._selected_cell == (1, 1)
+    assert dialog._selected_site == HostSite(0, (1, 1))
+
+
+@pytest.mark.parametrize("plane,axes,fixed", [(0, (0, 1), 2), (1, (0, 2), 1), (2, (1, 2), 0)])
+def test_3d_cell_map_planes_keep_selection_and_navigate_correct_indices(plane, axes, fixed):
+    dialog = BuildEmbeddingDialog(host())
+    dialog.cell_rings.setValue(4)
+    dialog.layer.setValue(2)
+    click_cell(dialog, (1, -1, 2))
+    selected = dialog._selected_site
+    dialog.cell_plane.setCurrentIndex(plane)
+    assert dialog.cell_plane.currentText() == ("XY", "XZ", "YZ")[plane]
+    assert dialog._selected_site == selected
+    assert dialog._selected_cell == selected.cell_index
+    assert dialog.layer.value() == selected.cell_index[fixed]
+    destination = list(selected.cell_index)
+    destination[axes[0]] += 1
+    destination[axes[1]] -= 1
+    click_cell(dialog, tuple(destination))
+    dialog.global_scope.setCurrentIndex(1)
+    dialog._render()
+    assert dialog._selected_cell == tuple(destination)
+    assert dialog._local_sites == [HostSite(0, tuple(destination))]
+    assert all(site.cell_index[fixed] == destination[fixed] for site in dialog._rendered_sites)
+
+
+def test_cell_map_navigation_does_not_discard_unfinished_occupation():
+    dialog = BuildEmbeddingDialog(host())
+    dialog.occupation.rows[0]["occ"].setValue(.5)
+    click_cell(dialog, (1, 1, 0))
+    assert dialog._selected_cell == (0, 0, 0)
+    assert dialog.occupation.rows[0]["occ"].value() == .5
+
+
+def test_symmetry_preview_rings_do_not_override_cluster_membership():
+    dialog = BuildEmbeddingDialog(host())
+    click_cell(dialog, (1, 0, 0))
+    site = dialog._selected_site
+    color, _, edge, _ = dialog._site_style(site)
+    assert color == "#a6aeb6"  # A selected host atom is still outside the cluster
+    assert edge == "#d5a13b"
+    dialog._include()
+    assert dialog._site_style(site)[0] == "#4b92cf"
+    dialog.occupation.rows[0]["elem"].setText("Ni")
+    assert dialog._site_style(site)[0] == "#d88c49"
+
+
+@pytest.mark.parametrize("size", [(300, 750), (850, 280), (600, 600)])
+def test_projected_fit_uses_full_canvas_without_cropping_on_resize(gete_host, size):
+    from PyQt6.QtWidgets import QApplication
+
+    from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
+
+    dialog = BuildEmbeddingDialog(gete_host)
+    positions = gete_host.positions[sorted(dialog.draft.allowed)]
+    corners = dialog._selected_cell_corners()
+    preview = EmbeddingPreview()
+    preview.set_points(positions, ["gray"] * len(positions), [23] * len(positions), cell_corners=corners)
+    preview.resize(*size)
+    preview.show()
+    QApplication.processEvents()
+    for angles in ((25, -60), (75, 10), (90, -90), (-45, 30)):
+        preview.set_view(*angles)
+        preview._fit()
+        preview.canvas.draw()
+        projected, _ = preview.project(np.concatenate((positions, corners)))
+        pixels = preview.axes.transData.transform(projected)
+        width, height = preview.figure.bbox.width, preview.figure.bbox.height
+        assert pixels[:, 0].min() >= 20
+        assert pixels[:, 0].max() <= width - 20
+        assert pixels[:, 1].min() >= 20
+        assert pixels[:, 1].max() <= height - 20
+        assert max(np.ptp(pixels[:, 0]) / width, np.ptp(pixels[:, 1]) / height) > .7
+        np.testing.assert_allclose(preview.axes.get_position().bounds, (0, 0, 1, 1))
+
+
+def test_gete_overview_fills_gaps_between_symmetry_surroundings(gete_host):
+    dialog = BuildEmbeddingDialog(gete_host)
+    click_cell(dialog, (-1, 0))
+    dialog.sites.selectRow(17)  # Screenshot's #22 site
+    dialog._render()
+    cells = {site.cell_index for site in dialog._rendered_host_sites}
+    for y in {cell[1] for cell in cells}:
+        xvalues = sorted(x for x, row in cells if row == y)
+        assert xvalues == list(range(min(xvalues), max(xvalues) + 1))
+
+
+def select_table_rows(dialog, rows):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication
+
+    dialog.show()
+    QApplication.processEvents()
+    for i, row in enumerate(rows):
+        item = dialog.sites.item(row, 0)
+        dialog.sites.scrollToItem(item)
+        QTest.mouseClick(dialog.sites.viewport(), Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.ControlModifier if i else Qt.KeyboardModifier.NoModifier,
+                         dialog.sites.visualItemRect(item).center())
+
+
+def three_site_host():
+    return Atoms("CuNiFe", positions=[[0, 0, 0], [1, 1, 1], [.5, 1.5, .3]],
+                 cell=[3, 3, 3], pbc=True)
+
+
+def test_occupation_and_displacement_have_frames_separate_from_site_table():
+    dialog = BuildEmbeddingDialog(three_site_host())
+    assert dialog.occupation.parentWidget() is dialog.occupation_group
+    assert all(spin.parentWidget() is dialog.displacement_group for spin in dialog.deltas)
+    assert dialog.sites.parentWidget() not in (dialog.occupation_group, dialog.displacement_group)
+
+
+def test_multiselection_occupation_restore_and_include_exclude_keep_all_rows():
+    dialog = BuildEmbeddingDialog(three_site_host())
+    select_table_rows(dialog, (0, 1))
+    selected = {HostSite(0, (0, 0, 0)), HostSite(1, (0, 0, 0))}
+    assert dialog._selected_sites == selected
+    assert "Different occupations" in dialog.occupation_info.text()
+    assert not dialog.centre_button.isEnabled()
+    assert not dialog.draft.entries
+    dialog.occupation.rows[0]["elem"].setText("Co")
+    assert set(dialog.draft.entries) == selected
+    assert all(entry.occupation == {"Co": 1.} for entry in dialog.draft.entries.values())
+    assert len(dialog.sites.selectionModel().selectedRows()) == 2
+    dialog.occupation.restore_btn.click()
+    assert dialog.draft.entries[HostSite(0, (0, 0, 0))].occupation == {"Cu": 1.}
+    assert dialog.draft.entries[HostSite(1, (0, 0, 0))].occupation == {"Ni": 1.}
+    dialog._exclude()
+    assert not dialog.draft.entries
+    assert dialog._selected_sites == selected
+    dialog._include()
+    assert set(dialog.draft.entries) == selected
+
+
+def test_multiselection_pending_displacement_applies_before_selecting_other_row():
+    dialog = BuildEmbeddingDialog(three_site_host())
+    select_table_rows(dialog, (0, 1))
+    dialog.deltas[0].setValue(.12)
+    select_table_rows(dialog, (2,))
+    assert dialog._selected_sites == {HostSite(2, (0, 0, 0))}
+    assert len(dialog.draft.entries) == 2
+    for index in (0, 1):
+        np.testing.assert_allclose(dialog.draft.entries[HostSite(index, (0, 0, 0))].displacement,
+                                   [.12, 0, 0])
+    assert HostSite(2, (0, 0, 0)) not in dialog.draft.entries
+
+
+def test_shift_selection_keeps_range_and_uses_clicked_site_as_active():
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    dialog = BuildEmbeddingDialog(three_site_host())
+    select_table_rows(dialog, (0,))
+    item = dialog.sites.item(2, 0)
+    QTest.mouseClick(dialog.sites.viewport(), Qt.MouseButton.LeftButton,
+                     Qt.KeyboardModifier.ShiftModifier, dialog.sites.visualItemRect(item).center())
+    assert dialog._selected_sites == set(dialog._site_rows)
+    assert dialog._selected_site == dialog._site_rows[2]
+
+
+def test_restore_respects_independent_edits_of_other_symmetry_sites(monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    dialog = BuildEmbeddingDialog(host())
+    click_cell(dialog, (1, 0, 0))
+    selected = dialog._selected_site
+    dialog.symmetric.setChecked(True)
+    other = next(site for site in dialog._highlighted if site != selected)
+    dialog.draft.set_occupation([selected], {"Fe": 1.})
+    dialog.draft.set_occupation([other], {"Co": 1.})
+    dialog._changed()
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Cancel)
+    dialog.occupation.restore_btn.click()
+    assert dialog.draft.entries[selected].occupation == {"Fe": 1.}
+    assert dialog.draft.entries[other].occupation == {"Co": 1.}
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    dialog.occupation.restore_btn.click()
+    assert all(entry.occupation == {"Cu": 1.} for entry in dialog.draft.entries.values())
+
+
+def test_lattice_map_axis_labels_remain_inside_resized_canvas():
+    dialog = BuildEmbeddingDialog(host())
+    view = dialog.cells
+    view.resize(350, 500)
+    view.canvas.resize(350, 500)
+    view.canvas.draw()
+    renderer = view.canvas.get_renderer()
+    for label in (view.axes.xaxis.label, view.axes.yaxis.label):
+        bounds = label.get_window_extent(renderer)
+        assert bounds.x0 >= 0
+        assert bounds.y0 >= 0
+        assert bounds.x1 <= view.figure.bbox.width
+        assert bounds.y1 <= view.figure.bbox.height
+
+
+def test_multisite_symmetry_displacement_rejects_conflicting_orbits_atomically():
+    draft = EmbeddingDraft(host())
+    with pytest.raises(ValueError, match="conflicts"):
+        draft.set_displacement([HostSite(0, (1, 0, 0)), HostSite(0, (0, 1, 0))],
+                               [.1, 0, 0], symmetric=True)
+    assert not draft.entries
+
+
+@pytest.mark.parametrize("rings,count", [(0, 1), (1, 7), (2, 19), (3, 37)])
+def test_gete_cell_rings_have_six_neighbours_and_remain_centred(gete_host, rings, count):
+    offsets = set(cell_ring_offsets(gete_host.cell[:2], rings))
+    assert len(offsets) == count
+    assert (0, 0) in offsets
+    assert all((-x, -y) in offsets for x, y in offsets)
+
+
+@pytest.mark.parametrize("basis", [
+    [[1., 0.], [0., 1.]],  # A vertex contact must not add diagonal neighbours.
+    [[1., 0.], [0., 3.]],  # Longer-axis neighbours are still Voronoi neighbours.
+    [[1., 0.], [.5, np.sqrt(3) / 2]],
+    [[1., 0.], [-.5, np.sqrt(3) / 2]],
+    [[1., 0.], [.3, 1.7]],  # Six neighbours at unequal physical distances.
+    [[1., 0.], [7., 1.]],  # Rectangular lattice in a skewed primitive basis.
+    [[1., 0.], [8.35, .7]],  # Neighbours can have large original indices.
+])
+def test_cell_rings_match_independent_voronoi_adjacency(basis):
+    from scipy.spatial import Voronoi
+
+    basis = np.asarray(basis)
+    indices = np.array([(x, y) for x in range(-16, 17) for y in range(-16, 17)])
+    diagram = Voronoi(indices @ basis)
+    origin = np.flatnonzero(np.all(indices == 0, axis=1))[0]
+    neighbours = set()
+    for points, vertices in zip(diagram.ridge_points, diagram.ridge_vertices):
+        if origin not in points:
+            continue
+        assert -1 not in vertices  # The sampled lattice encloses the origin.
+        edge = diagram.vertices[vertices]
+        if np.linalg.norm(edge[0] - edge[1]) > 1e-9:
+            other = points[1] if points[0] == origin else points[0]
+            neighbours.add(tuple(indices[other]))
+
+    vectors = np.column_stack((basis, np.zeros(2)))
+    assert set(cell_ring_offsets(vectors, 1)) == neighbours | {(0, 0)}
+    # Ring two is graph distance two, not the second distinct distance shell.
+    expected = neighbours | {(0, 0)}
+    expected |= {(x + dx, y + dy) for x, y in list(expected) for dx, dy in neighbours}
+    assert set(cell_ring_offsets(vectors, 2)) == expected
+
+
+@pytest.mark.parametrize("scale", [1e-9, 1., 1e9])
+def test_cell_rings_use_the_physical_metric_independent_of_rotation_and_scale(scale):
+    vectors = np.array([[1., 0., 0.], [.3, 1.7, 0.]])
+    # Tilt the lattice away from Cartesian XY, preserving its physical metric.
+    tilted = vectors @ np.array([[1., 0., 0.], [0., .6, .8], [0., -.8, .6]]) * scale
+    original = tilted.copy()
+    assert cell_ring_offsets(tilted, 3) == cell_ring_offsets(vectors, 3)
+    np.testing.assert_array_equal(tilted, original)
+
+
+@pytest.mark.parametrize("vectors", [
+    np.zeros((2, 3)), [[1., 0., 0.], [2., 0., 0.]],
+    [[1., 0., 0.], [0., np.nan, 0.]], [[1., 0., 0.], [0., np.inf, 0.]],
+])
+def test_cell_rings_reject_degenerate_or_nonfinite_lattices(vectors):
+    with pytest.raises(ValueError, match="Cell-map vectors"):
+        cell_ring_offsets(vectors, 1)
+
+
+def focus_embedding_control(dialog, control):
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication
+
+    dialog.show()
+    dialog.activateWindow()
+    control.setFocus()
+    QApplication.processEvents()
+    for _ in range(30):
+        QTest.qWait(20)  # Wait for focus activation and the debounced preview.
+        if not dialog._expansion_timer.isActive():
+            break
+    assert not dialog._expansion_timer.isActive()
+    dialog._render()
+
+
+def test_preview_controls_are_on_the_outer_sides_of_the_canvases():
+    from PyQt6.QtCore import QPoint
+
+    dialog = BuildEmbeddingDialog(host())
+    focus_embedding_control(dialog, dialog.cell_rings)
+    for preview, right in ((dialog.local_preview, False), (dialog.global_preview, True)):
+        canvas_left = preview.canvas.mapTo(preview, QPoint()).x()
+        canvas_right = canvas_left + preview.canvas.width()
+        for control in (preview.projection, preview.fit_button):
+            x = control.mapTo(preview, QPoint()).x()
+            if right:
+                assert x >= canvas_right
+            else:
+                assert x + control.width() <= canvas_left
+        preview.projection.setCurrentIndex(1)
+        assert preview.view_angles == (90., -90.)
+        preview._zoom_factor = 2.
+        preview.fit_button.click()
+        assert preview._zoom_factor == 1.
+
+
+@pytest.mark.parametrize("mode", ["radius", "shells"])
+def test_focused_expansion_previews_the_exact_addition_without_mutating_entries(mode):
+    dialog = BuildEmbeddingDialog(host())
+    centre = dialog.draft.center
+    dialog.draft.set_occupation([centre], {"Fe": 1.})
+    dialog.draft.set_displacement([centre], [.1, 0., 0.])
+    dialog.cell_rings.setValue(0)  # The preview must reach beyond the viewport.
+    dialog.radius.setValue(2.01)
+    control = dialog.radius if mode == "radius" else dialog.shells
+    focus_embedding_control(dialog, control)
+    assert dialog._expansion_mode == mode
+    expected = (dialog.draft.sites_within_radius(2.01) if mode == "radius"
+                else dialog.draft.sites_within_shells(1))
+    assert dialog._expansion_sites == set(expected)
+    assert len(expected) == 7
+    assert set(expected) <= set(dialog._rendered_sites)
+    assert "6 new sites" in dialog.expansion_info.text()
+    assert len(dialog.draft.entries) == 1
+    assert dialog.draft.entries[centre].occupation == {"Fe": 1.}
+    np.testing.assert_array_equal(dialog.draft.entries[centre].displacement, [.1, 0., 0.])
+    for site in set(expected) - {centre}:
+        assert dialog._site_style(site)[0] == "#69b88e"
+        assert dialog._site_style(site)[2:] == ("#329466", 1.6)
+
+    button = dialog.add_radius_button if mode == "radius" else dialog.add_shells_button
+    focus_embedding_control(dialog, button)
+    assert dialog._expansion_sites == set(expected)
+    button.click()
+    dialog._update_expansion_preview()
+    assert set(dialog.draft.entries) == set(expected)
+    assert "0 new sites" in dialog.expansion_info.text()
+    assert dialog.draft.entries[centre].occupation == {"Fe": 1.}
+    np.testing.assert_array_equal(dialog.draft.entries[centre].displacement, [.1, 0., 0.])
+    assert all(dialog._site_style(site)[0] == "#4b92cf" for site in set(expected) - {centre})
+
+
+def test_expansion_preview_tracks_mode_value_and_centre_and_clears_on_focus_out():
+    dialog = BuildEmbeddingDialog(host())
+    dialog.radius.setValue(0.)
+    focus_embedding_control(dialog, dialog.radius)
+    assert dialog._expansion_sites == {dialog.draft.center}
+    focus_embedding_control(dialog, dialog.shells)
+    assert len(dialog._expansion_sites) == 7
+    dialog.shells.setValue(0)
+    focus_embedding_control(dialog, dialog.shells)
+    assert dialog._expansion_sites == {dialog.draft.center}
+    new_centre = HostSite(0, (3, 0, 0))
+    dialog.draft.set_center(new_centre)
+    dialog._changed()
+    focus_embedding_control(dialog, dialog.shells)
+    assert dialog._expansion_sites == {new_centre}
+    assert new_centre in dialog._rendered_sites
+    assert not dialog.draft.entries
+    dialog.shells.setValue(1)  # Queue a preview then leave before it executes.
+    focus_embedding_control(dialog, dialog.cell_rings)
+    assert dialog._expansion_mode is None
+    assert not dialog._expansion_sites
+    assert not dialog._expansion_timer.isActive()
+    assert dialog.expansion_info.isHidden()
+
+
+def test_invalid_expansion_preview_is_inline_and_does_not_leave_old_candidates(monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    dialog = BuildEmbeddingDialog(host())
+    dialog.radius.setValue(2.01)
+    focus_embedding_control(dialog, dialog.radius)
+    assert len(dialog._expansion_sites) == 7
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
+    dialog.radius.setValue(1000.)
+    focus_embedding_control(dialog, dialog.radius)
+    assert not dialog._expansion_sites
+    assert "Cannot preview expansion" in dialog.expansion_info.text()
+    assert not warnings
+    assert not dialog.draft.entries
+
+
+def test_expansion_preview_uses_only_the_gete_transition_region(gete_host):
+    dialog = BuildEmbeddingDialog(gete_host)
+    focus_embedding_control(dialog, dialog.radius)
+    assert dialog._expansion_sites == set(dialog.draft.sites_within_radius(5.))
+    assert all(site.original_site in dialog.draft.allowed for site in dialog._expansion_sites)
+    assert dialog._expansion_sites <= set(dialog._rendered_sites)
+    assert not dialog.draft.entries
