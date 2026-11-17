@@ -54,6 +54,7 @@ def structure_facts(atoms, *, kind=None, status=None) -> str:
     lines = [
         f"Type: {structure_kind_label(kind) or 'Unknown structure'}",
         f"Composition: {structure_formula(atoms)}",
+        "Elements: " + ", ".join(sorted(set(atoms.get_chemical_symbols()))),
         f"Sites: {len(atoms)}",
         f"Periodicity: {_periodicity(atoms)}",
     ]
