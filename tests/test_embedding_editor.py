@@ -565,3 +565,23 @@ def test_guided_cluster_scf_is_available_without_input_parameters():
     calculation = plan.group(WorkflowSection.CALCULATE)
     assert calculation is not None
     assert RunTask("scf") in [action.command for action in calculation.actions]
+
+
+def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
+    import warnings
+
+    dialog = BuildEmbeddingDialog(host())
+    dialog.draft.include([dialog.draft.center])
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        dialog._render()
+        dialog.canvas.draw()
+
+    assert "Host layer 0" in dialog.preview_info.text()
+    assert "Cluster: 1 sites" in dialog.preview_info.text()
+    assert "Displayed:" in dialog.preview_info.text()
+    assert dialog.axes.get_title() == ""
+    assert dialog.axes.get_xlabel() == ""
+    assert dialog.axes.get_ylabel() == ""
+    assert dialog.axes.get_zlabel() == ""
+    assert not any("Tight layout not applied" in str(w.message) for w in captured)
