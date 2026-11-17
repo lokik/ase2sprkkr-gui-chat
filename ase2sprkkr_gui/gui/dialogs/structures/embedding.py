@@ -740,15 +740,9 @@ class BuildEmbeddingDialog(QDialog):
             site for site in self._host_context_sites(allowed_only=True)
             if self._on_current_layer(site, normal, height)
         ]
-        # Existing native N5VEC cluster sites can be picked if they actually
-        # lie in this plane; otherwise they remain available in the site table.
-        for site in self.draft.entries:
-            if (
-                site not in self._local_sites
-                and self._on_current_layer(site, normal, height)
-            ):
-                self._local_sites.append(site)
-        self._local_sites.sort()
+        # Exceptional native N5VEC entries remain editable in the site table.
+        # In particular they must not duplicate atoms of the regular host
+        # layer when the host does not define a separate native lead vector.
         self._local_scatter = self._draw_sites(
             self.local_axes, self.local_canvas, self._local_sites, pick=True
         )
