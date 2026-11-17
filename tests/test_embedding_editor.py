@@ -9,6 +9,8 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 import pytest
 import numpy as np
 from ase import Atoms
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QPushButton
 
 # The GUI is released independently of the still-unreleased embedding API.
 pytest.importorskip("ase2sprkkr.sprkkr.embedding_geometry")
@@ -586,7 +588,7 @@ def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
         dialog._render()
         dialog.canvas.draw()
 
-    assert "Cluster: 1 sites" in dialog.preview_info.text()
+    assert "Included: 1/1" in dialog.preview_info.text()
     assert "Displayed:" in dialog.preview_info.text()
     assert "Cell (0, 0, 0)" in dialog.local_info.text()
     assert dialog.axes.get_title() == ""
@@ -770,3 +772,113 @@ def test_incomplete_occupation_is_not_discarded_by_selection_or_ok(monkeypatch):
     dialog._accept()
     assert dialog.result_atoms is None
     assert warnings
+
+
+def test_clicked_grid_cell_matches_its_coordinates_and_not_a_symmetry_cell():
+    dialog = BuildEmbeddingDialog(host())
+    # Grid labels are x columns and y rows, even though y increases upwards.
+    offsets = dialog._inplane_offsets()
+    column = offsets.index(0)
+    row = len(offsets) - 1 - offsets.index(-1)
+    dialog.cells.setCurrentCell(row, column)
+    assert dialog._selected_cell == (0, -1, 0)
+    assert dialog._selected_site == HostSite(0, (0, -1, 0))
+    assert HostSite(0, (-1, -1, 0)) not in dialog._highlighted
+    current = dialog.cells.item(row, column)
+    assert current.data(Qt.ItemDataRole.UserRole) == (0, -1, 0)
+    assert current.background().color().name() == "#e5bd68"
+
+
+def test_local_preview_contains_only_regular_sites_in_one_host_cell():
+    from ase2sprkkr import SPRKKRAtoms
+
+    parent = Atoms(
+        "Cu", positions=[[0, 0, 0]], cell=[2, 2, 12],
+        pbc=(True, True, False)
+    )
+    special = HostSite(0, (1, 0, 0, 0, 1))
+    cluster = SPRKKRAtoms.from_embedding(
+        parent, [(special.original_site, special.cell_index, "Fe")]
+    )
+    dialog = BuildEmbeddingDialog(cluster)
+    dialog._selected_cell = (1, 0)
+    assert special in dialog.draft.cell_sites((1, 0))  # still editable in table
+    dialog._render_local()
+    assert dialog._local_sites == [HostSite(0, (1, 0))]
+    assert special not in dialog._local_sites
+
+
+def test_global_whole_mode_includes_all_cluster_sites_and_has_padded_bounds():
+    dialog = BuildEmbeddingDialog(host())
+    left = HostSite(0, (-3, 1, 0))
+    right = HostSite(0, (4, -2, 1))
+    dialog.draft.include([left, right])
+    dialog.global_scope.setCurrentIndex(0)
+    dialog._render_global()
+    assert set(dialog.draft.entries).issubset(set(dialog._rendered_sites))
+    assert "Included: 2/2" in dialog.preview_info.text()
+    bounds = [dialog.axes.get_xlim(), dialog.axes.get_ylim(), dialog.axes.get_zlim()]
+    for site in (left, right):
+        position = site.position(dialog.draft.host)
+        assert all(lo < coordinate < hi for coordinate, (lo, hi) in zip(position, bounds))
+
+
+def test_cell_actions_are_adjacent_to_cell_grid():
+    dialog = BuildEmbeddingDialog(host())
+    panel = dialog.cells.parentWidget()
+    actions = panel.findChildren(QPushButton)
+    assert {w.text() for w in actions} >= {"Include", "Exclude", "Set centre"}
+
+
+def test_displacement_is_debounced_and_flushed_before_changing_selected_site():
+    dialog = BuildEmbeddingDialog(
+        Atoms("Cu2", positions=[[0, 0, 0], [1, 1, 1]],
+              cell=[2, 2, 2], pbc=True)
+    )
+    original = dialog._selected_site
+    assert original == dialog._site_rows[0]
+    dialog.deltas[0].setValue(0.12)
+    assert dialog._displacement_timer.isActive()
+    assert original not in dialog.draft.entries
+    dialog.sites.selectRow(1)
+    assert not dialog._displacement_timer.isActive()
+    assert dialog.draft.entries[original].displacement[0] == pytest.approx(0.12)
+    assert dialog._selected_site == dialog._site_rows[1]
+
+
+def test_restore_occupation_is_shared_and_hidden_when_none():
+    from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
+    control = OccupationEditor(require_full=True)
+    assert not control.restore_btn.isVisible()
+    control.set_occupation({"Fe": 1.0})
+    control.set_initial_occupation({"Cu": 1.0})
+    assert not control.restore_btn.isHidden()
+    control.restore_initial()
+    assert control.occupation() == {"Cu": 1.0}
+
+
+def test_embedding_restore_original_occupation_is_in_shared_widget():
+    dialog = BuildEmbeddingDialog(host())
+    assert not dialog.occupation.restore_btn.isHidden()
+    dialog.occupation.rows[0]["elem"].setText("Fe")
+    assert dialog.draft.entries[dialog.draft.center].occupation == {"Fe": 1.0}
+    dialog.occupation.restore_btn.click()
+    assert dialog.draft.entries[dialog.draft.center].occupation == {"Cu": 1.0}
+
+
+def test_bulk_restore_original_occupation_restores_model_values():
+    from ase2sprkkr_gui.gui.dialogs.structures.element_assignment import (
+        ElementAssignmentDialog,
+    )
+
+    parent = host()
+    parent.info["occupancy"] = {"0": {"Cu": 1.0}}
+    parent.set_array("spacegroup_kinds", np.array([0]))
+    editor = ElementAssignmentDialog()
+    editor.setup(parent)
+    row = editor._letter_widgets[0]
+    assert not row.occupation_editor.restore_btn.isHidden()
+    row.occupation_editor.rows[0]["elem"].setText("Fe")
+    assert editor._draft.sites[0].occupancies[0].symbol == "Fe"
+    row.occupation_editor.restore_initial()
+    assert editor._draft.sites[0].occupancies[0].symbol == "Cu"
