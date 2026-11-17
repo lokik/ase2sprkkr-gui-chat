@@ -408,6 +408,7 @@ def test_guided_save_structure_writes_normal_atoms_without_running(tmp_path, mon
     from ase2sprkkr_gui.gui.flows import files as file_flows
     from ase2sprkkr_gui.gui.workflow.model import WorkflowSection
 
+    _application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
     structure = Atoms("Fe", cell=[2.87] * 3, pbc=True)
     window.controller.replace_structure(structure)

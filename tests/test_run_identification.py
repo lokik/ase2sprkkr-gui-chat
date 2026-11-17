@@ -178,7 +178,7 @@ def test_execution_dialog_requires_working_directory_and_can_browse(
     dialog.close()
 
 
-def test_profile_dialog_prepare_only_changes_confirmation_label(tmp_path):
+def test_profile_dialog_prepare_only_changes_confirmation_label(application, tmp_path):
     from ase2sprkkr_gui.gui.dialogs.profiles import ProfileSelectionDialog
 
     dialog = ProfileSelectionDialog(directory=str(tmp_path))
