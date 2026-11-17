@@ -21,6 +21,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     RunTask,
+    SaveStructure,
     StartOver,
     UpdateEmptySpheres,
     UseForNewCalculation,
@@ -136,6 +137,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         lambda kind, path: events.append(("recent", kind, path)),
     )
     monkeypatch.setattr(window, "_visualize_structure", lambda: events.append("view"))
+    monkeypatch.setattr(window, "_save_structure", lambda: events.append("save"))
     monkeypatch.setattr(
         window, "_use_for_new_calculation", lambda: events.append("new-calculation")
     )
@@ -157,6 +159,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         Load(LoadKind.OUTPUT),
         ContinueRecent("output", "/tmp/result.out"),
         VisualizeStructure(),
+        SaveStructure(),
         UseForNewCalculation(),
         StartOver(),
     )
@@ -179,6 +182,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         "load-output",
         ("recent", "output", "/tmp/result.out"),
         "view",
+        "save",
         "new-calculation",
         "reset",
     ]

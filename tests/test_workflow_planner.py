@@ -26,6 +26,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     RunTask,
+    SaveStructure,
     StartOver,
     UpdateEmptySpheres,
     UseForNewCalculation,
@@ -179,6 +180,8 @@ def test_current_structure_plan_has_canonical_group_order_without_output_loader(
         WorkflowSection.OTHER,
     )
     assert plan.group(WorkflowSection.LOAD) is None
+    assert plan.group(WorkflowSection.VIEW).title == "Structure"
+    assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
     assert all(
         command != Load(LoadKind.OUTPUT)
         for group in plan.groups
@@ -359,14 +362,38 @@ def test_workflow_plan_rejects_duplicate_sections():
         WorkflowPlan("subtitle", (first, second))
 
 
-def test_embedded_structure_plan_is_editable_without_periodic_scf_actions():
-    # The GUI must not offer a periodic SCF calculation for a finite cluster.
+def test_embedded_structure_plan_offers_cluster_scf_and_save_without_host_potential():
     class EmbeddingWorkspace(Workspace):
         def can_build_embedding(self):
             return True
 
+        def can_run_embedding(self):
+            return False
+
     plan = WorkflowPlanner().for_workspace(
         EmbeddingWorkspace(atoms=FormulaAtoms(), kind="0d", build_2d=False)
     )
-    assert plan.group(WorkflowSection.CALCULATE) is None
+    assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
+    assert "host POTFIL" in plan.group(WorkflowSection.CALCULATE).actions[0].description
     assert _commands(plan, WorkflowSection.CREATE) == (BuildEmbedding(),)
+    assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
+
+
+def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
+    from types import SimpleNamespace
+    from ase2sprkkr_gui.gui.workflow import planner as planning
+
+    fake_registry = {
+        "SCF": SimpleNamespace(executable="kkrscf", supports_embedded_cluster=True),
+        "DOS": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=True),
+        "XAS": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
+        "ARPES": SimpleNamespace(executable="kkrspec", supports_embedded_cluster=False),
+        "BSFEK": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
+        "JXC": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
+    }
+    monkeypatch.setattr(planning.InputParameters, "task_registry", fake_registry)
+    for stage, expected in ((WorkflowStage.SCF, ("scf",)),
+                            (WorkflowStage.POST_SCF, ("dos",))):
+        filtered = tuple(d.backend_task for d in workflow_tasks(stage)
+                         if planning._cluster_task_supported(d))
+        assert filtered == expected

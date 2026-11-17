@@ -136,6 +136,7 @@ class WorkflowActionsWidget(QWidget):
             ActionIcon.FILE: QStyle.StandardPixmap.SP_FileIcon,
             ActionIcon.RESULT: QStyle.StandardPixmap.SP_FileDialogContentsView,
             ActionIcon.VIEW: QStyle.StandardPixmap.SP_FileDialogContentsView,
+            ActionIcon.SAVE: QStyle.StandardPixmap.SP_DialogSaveButton,
             ActionIcon.CONTINUE: QStyle.StandardPixmap.SP_ArrowForward,
             ActionIcon.RESET: QStyle.StandardPixmap.SP_BrowserReload,
         }

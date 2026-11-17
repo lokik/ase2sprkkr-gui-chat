@@ -39,6 +39,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     UpdateEmptySpheres,
     UseForNewCalculation,
     VisualizeStructure,
+    SaveStructure,
     WorkflowCommand,
     WorkflowPlan,
     WorkflowSection,
@@ -113,10 +114,11 @@ def _recent_menu(
 
 
 def _cluster_task_supported(definition):
-    """Use backend executable metadata rather than a parallel GUI task list."""
+    """Require explicit task support, not merely a shared cluster executable."""
     try:
         task = InputParameters.task_registry[definition.backend_task.upper()]
-        return executables[task.executable].cluster_variant is not None
+        return (task.supports_embedded_cluster
+                and executables[task.executable].cluster_variant is not None)
     except (AttributeError, KeyError):
         return False
 
@@ -256,10 +258,10 @@ class WorkflowPlanner:
         stage = WorkflowStage.POST_SCF if converged else WorkflowStage.SCF
         supported_tasks = workflow_tasks(stage)
         if is_cluster:
-            supported_tasks = (
-                tuple(d for d in supported_tasks if _cluster_task_supported(d))
-                if getattr(workspace, "can_run_embedding", lambda: False)()
-                else ()
+            # Show supported cluster tasks even before a host POTFIL is attached:
+            # the Guided action offers to select a matching host.
+            supported_tasks = tuple(
+                d for d in supported_tasks if _cluster_task_supported(d)
             )
         for definition in supported_tasks:
             title = definition.workflow.label
@@ -273,6 +275,8 @@ class WorkflowPlanner:
                     )
                 elif workspace.structure_kind() == "2d":
                     description = "Converge bulk region(s), then the interaction zone"
+            if is_cluster and not getattr(workspace, "can_run_embedding", lambda: False)():
+                description += " (requires a matching host POTFIL)"
             calculate.append(
                 _action(
                     RunTask(definition.backend_task),
@@ -295,7 +299,7 @@ class WorkflowPlanner:
         groups.append(
             AvailableActionGroup(
                 WorkflowSection.VIEW,
-                "View",
+                "Structure",
                 (
                     _action(
                         VisualizeStructure(),
@@ -303,6 +307,13 @@ class WorkflowPlanner:
                         "Open the current structure in the configured ASE viewer",
                         "neutral",
                         ActionIcon.VIEW,
+                    ),
+                    _action(
+                        SaveStructure(),
+                        "Save Structure",
+                        "Write the current structure to a file without calculating",
+                        "neutral",
+                        ActionIcon.SAVE,
                     ),
                 ),
             )

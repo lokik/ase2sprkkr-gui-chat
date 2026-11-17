@@ -57,6 +57,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     UpdateEmptySpheres,
     UseForNewCalculation,
     VisualizeStructure,
+    SaveStructure,
     WorkflowCommand,
     WorkflowPlan,
 )
@@ -289,6 +290,9 @@ class WorkflowWindow(QMainWindow):
         if isinstance(command, VisualizeStructure):
             self._visualize_structure()
             return
+        if isinstance(command, SaveStructure):
+            self._save_structure()
+            return
         if isinstance(command, UseForNewCalculation):
             self._use_for_new_calculation()
             return
@@ -385,6 +389,9 @@ class WorkflowWindow(QMainWindow):
 
     def _visualize_structure(self) -> None:
         visualization_flow.visualize_structure(self.controller, self.settings, self)
+
+    def _save_structure(self) -> None:
+        file_flows.save_structure(self.controller, self.recent_history, self)
 
     def _open_settings(self) -> None:
         edit_settings(self.settings, self)

@@ -48,6 +48,7 @@ class ActionIcon(Enum):
     EMBEDDING = auto()
     RESULT = auto()
     VIEW = auto()
+    SAVE = auto()
     CONTINUE = auto()
     NEW_CALCULATION = auto()
     RESET = auto()
@@ -111,6 +112,12 @@ class VisualizeStructure:
 
 
 @dataclass(frozen=True)
+class SaveStructure:
+    """Write the current structure without requiring a calculation."""
+
+
+
+@dataclass(frozen=True)
 class UseForNewCalculation:
     pass
 
@@ -129,6 +136,7 @@ WorkflowCommand = Union[
     Load,
     ContinueRecent,
     VisualizeStructure,
+    SaveStructure,
     UseForNewCalculation,
     StartOver,
 ]
