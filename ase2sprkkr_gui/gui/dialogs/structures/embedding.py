@@ -9,14 +9,15 @@ from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton,
     QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ase2sprkkr_gui.ase.embedding import (
-    EmbeddingDraft, HostSite, embedding_source, occupation_label, parse_occupation,
+    EmbeddingDraft, HostSite, embedding_source, occupation_label,
 )
+from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
 
 
 class BuildEmbeddingDialog(QDialog):
@@ -141,11 +142,11 @@ class BuildEmbeddingDialog(QDialog):
         sym_row.addWidget(equivalents)
         right_v.addLayout(sym_row)
 
-        form = QFormLayout()
-        self.occupation = QLineEdit()
-        self.occupation.setPlaceholderText("Fe  or  Fe:0.7, Ni:0.3")
-        form.addRow("Occupation", self.occupation)
-        right_v.addLayout(form)
+        right_v.addWidget(QLabel("Occupation"))
+        self.occupation = OccupationEditor(
+            right, require_full=True, allow_duplicates=False
+        )
+        right_v.addWidget(self.occupation)
         edit_row = QHBoxLayout()
         assign = QPushButton("Apply occupation")
         assign.clicked.connect(self._assign_occupation)
@@ -361,9 +362,9 @@ class BuildEmbeddingDialog(QDialog):
         if site is None:
             return
         entry = self.draft.entries.get(site)
-        self.occupation.setText(occupation_label(
+        self.occupation.set_occupation(
             entry.occupation if entry else site.occupation(self.draft.host)
-        ))
+        )
         values = entry.displacement if entry else (0, 0, 0)
         for spin, value in zip(self.deltas, values):
             spin.setValue(float(value))
@@ -439,7 +440,7 @@ class BuildEmbeddingDialog(QDialog):
 
     def _assign_occupation(self):
         def action():
-            occupation = parse_occupation(self.occupation.text())
+            occupation = self.occupation.occupation()
             targets = self._targets()
             if not self._confirm_overwrite(targets, occupation):
                 return
