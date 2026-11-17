@@ -14,7 +14,6 @@ from ase2sprkkr_gui.gui.application.recent_files import RecentFiles, RecentKind
 from ase2sprkkr_gui.gui.application.result_loading import (
     LoadedResult,
     PotentialVersionChanged,
-    is_embedded_cluster_file,
     load_potential_atoms,
     load_result_file,
 )
@@ -29,6 +28,8 @@ from ase2sprkkr_gui.gui.misc.structure_wait import document_change_applied
 
 
 _POTENTIAL_SUFFIXES = {".pot", ".pot_new"}
+
+
 def _read_structure_file(path: Path):
     """Read a structure, keeping a POT file's potential authoritative in atoms."""
     if path.suffix.lower() in _POTENTIAL_SUFFIXES and path.exists():
