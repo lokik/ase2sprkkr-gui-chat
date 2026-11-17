@@ -6,7 +6,7 @@ embedding supplies detached OccupancyEntry rows and commits valid edits as they 
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 
 from PyQt6.QtCore import QEvent, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -36,6 +36,7 @@ class OccupationEditor(QWidget):
         on_symbol: Callable[[OccupancyEntry, str], None] | None = None,
         on_value: Callable[[OccupancyEntry, float], None] | None = None,
         on_normalize: Callable[[], None] | None = None,
+        on_restore: Callable[[list[OccupancyEntry]], Iterable[OccupancyEntry]] | None = None,
         on_validation: Callable[[str | None], None] | None = None,
         on_focus: Callable[[], None] | None = None,
         selector: Callable | None = select_element,
@@ -48,6 +49,8 @@ class OccupationEditor(QWidget):
         self._on_symbol = on_symbol
         self._on_value = on_value
         self._on_normalize = on_normalize
+        self._on_restore = on_restore
+        self._initial_entries: list[OccupancyEntry] | None = None
         self._on_validation = on_validation
         self._on_focus = on_focus
         self._selector = selector
@@ -61,6 +64,11 @@ class OccupationEditor(QWidget):
         self.normalize_btn = QPushButton("Normalize")
         self.normalize_btn.clicked.connect(self.normalize)
         controls.addWidget(self.normalize_btn)
+        self.restore_btn = QPushButton("Restore original")
+        self.restore_btn.setToolTip("Restore the original occupation for this site")
+        self.restore_btn.setVisible(False)
+        self.restore_btn.clicked.connect(self.restore_initial)
+        controls.addWidget(self.restore_btn)
         layout.addLayout(controls)
         self.rows_box = QVBoxLayout()
         layout.addLayout(self.rows_box)
@@ -87,6 +95,39 @@ class OccupationEditor(QWidget):
             OccupancyEntry("Vc" if key in ("X", "Vc") else str(key), float(value))
             for key, value in occupation.items()
         ])
+
+    def set_initial_occupation(
+        self, occupation: Mapping[str, float] | Iterable[OccupancyEntry] | None
+    ) -> None:
+        """Supply the site's original occupation for an optional Restore action."""
+        if occupation is None:
+            self._initial_entries = None
+        elif isinstance(occupation, Mapping):
+            self._initial_entries = [
+                OccupancyEntry("Vc" if str(k) in ("X", "Vc") else str(k), float(v))
+                for k, v in occupation.items()
+            ]
+        else:
+            self._initial_entries = [
+                OccupancyEntry(entry.symbol, entry.value) for entry in occupation
+            ]
+        self.restore_btn.setVisible(bool(
+            self._initial_entries
+            and any(e.symbol.strip() for e in self._initial_entries)
+        ))
+
+    def restore_initial(self) -> None:
+        """Restore the original values through the same data-model ownership."""
+        if self._initial_entries is None:
+            return
+        entries = [
+            OccupancyEntry(entry.symbol, entry.value)
+            for entry in self._initial_entries
+        ]
+        if self._on_restore is not None:
+            entries = list(self._on_restore(entries))
+        self.set_entries(entries)
+        self.occupationEdited.emit()
 
     def add_row(self) -> None:
         entry = self._on_add() if self._on_add is not None else OccupancyEntry("", 0.0)
