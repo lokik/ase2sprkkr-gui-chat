@@ -256,12 +256,12 @@ def test_native_cluster_result_requires_and_reuses_original_host(tmp_path, monke
 
 
 def test_native_pot_extension_cluster_is_detected_by_header(tmp_path):
-    from ase2sprkkr_gui.gui.application.result_loading import is_embedded_cluster_file
+    from ase2sprkkr import Potential
 
     periodic = tmp_path / "bulk.pot"
     embedded = tmp_path / "cluster.pot_new"
     periodic.write_text("HEADER\\nNQ 1\\n", encoding="utf-8")
     embedded.write_text("HEADER\\nNQCLU 3\\n", encoding="utf-8")
-    assert not is_embedded_cluster_file(periodic)
-    assert is_embedded_cluster_file(embedded)
-    assert not is_embedded_cluster_file(tmp_path / "missing.pot")
+    assert not Potential.is_cluster_file(periodic)
+    assert Potential.is_cluster_file(embedded)
+    assert not Potential.is_cluster_file(tmp_path / "missing.pot")
