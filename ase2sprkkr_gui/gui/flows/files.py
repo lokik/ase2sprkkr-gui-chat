@@ -109,16 +109,19 @@ def load_structure(
 
 
 def _current_host_potential(controller: WorkspaceController):
-    """Use the active host POTFIL without changing or copying the Atoms object."""
+    """Use only a genuine periodic host Potential, not a ClusterPotential."""
+    from ase2sprkkr import Potential
+
     atoms = controller.atoms
     if atoms is None:
         return None
     embedded_host = getattr(atoms, "embedding_host", None)
-    if embedded_host is not None and hasattr(embedded_host, "LATTICE"):
+    if isinstance(embedded_host, Potential):
         return embedded_host
     checker = getattr(atoms, "has_potential", None)
     if callable(checker) and checker():
-        return atoms.potential
+        potential = atoms.potential
+        return potential if isinstance(potential, Potential) else None
     return None
 
 
