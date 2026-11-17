@@ -532,7 +532,12 @@ def save_embedded_cluster(
         # Let the backend preserve complete radial data in ITERATING
         # CLUPOT. For a newly edited structure it naturally emits START.
         # Partial radial datasets raise instead of being silently discarded.
-        ClusterPotential.from_atoms(atoms).save_to_file(path)
+        if atoms.has_potential() and isinstance(atoms.potential, ClusterPotential):
+            # Preserve optional native sections and the original SCF status.
+            potential = atoms.potential
+        else:
+            potential = ClusterPotential.from_atoms(atoms)
+        potential.save_to_file(path)
     except (OSError, ValueError, TypeError, NotImplementedError) as exc:
         QMessageBox.critical(
             parent, "Save Embedded Cluster Failed",
