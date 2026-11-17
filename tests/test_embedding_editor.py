@@ -535,3 +535,15 @@ def test_mismatched_host_requires_confirmation_before_workspace_replacement(
     assert controller.atoms is original
     assert controller.structure_generation == before
     assert len(prompts) == 1
+
+
+def test_active_cluster_potential_is_not_mistaken_for_a_periodic_host():
+    from ase2sprkkr_gui.gui.flows.files import _current_host_potential
+
+    base = host()
+    draft = EmbeddingDraft(base)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    cluster._potential = object()  # Simulate an attached non-periodic potential.
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    assert _current_host_potential(controller) is None
