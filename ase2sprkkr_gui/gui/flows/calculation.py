@@ -277,6 +277,15 @@ def configure_and_run_task(
 
     if parameters is None:
         return None
+    if controller.structure_kind() == "0d" and not controller.can_run_embedding():
+        # The Guided SCF command remains visible for clusters built from ASE
+        # geometry. Resolve the external native host only after the user has
+        # accepted the parameter editor, without launching a periodic binary.
+        from ase2sprkkr_gui.gui.flows.files import ensure_embedded_host_potential
+
+        if not ensure_embedded_host_potential(controller, parent):
+            return None
+        structure_generation = controller.structure_generation
     if not document_change_applied(
         parent,
         controller.replace_input_parameters(

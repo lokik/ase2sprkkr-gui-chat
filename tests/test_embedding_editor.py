@@ -233,6 +233,8 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
             filename.write_text("HOST POT", encoding="utf-8")
 
     host_potential = HostPotential()
+    from ase2sprkkr import Potential
+    monkeypatch.setattr(Potential, "from_atoms", lambda _source: host_potential)
     cluster = SPRKKRAtoms.from_embedding(
         host_potential, [(0, (0, 0, 0), "Fe")]
     )
@@ -249,7 +251,8 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
             filename.write_text("CLUPOT", encoding="utf-8")
 
     def make_writer(atoms):
-        assert atoms is cluster
+        assert atoms is not cluster
+        assert atoms.embedding_host is host_potential
         return Writer()
 
     monkeypatch.setattr(ClusterPotential, "from_atoms", staticmethod(make_writer))
@@ -653,6 +656,33 @@ def test_guided_cluster_scf_is_available_without_input_parameters():
     calculation = plan.group(WorkflowSection.CALCULATE)
     assert calculation is not None
     assert RunTask("scf") in [action.command for action in calculation.actions]
+
+
+def test_guided_host_attachment_keeps_embedded_site_mapping(monkeypatch, tmp_path):
+    from ase2sprkkr import Potential
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    draft = EmbeddingDraft(host())
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    potential = Potential.from_atoms(host())
+    path = tmp_path / "host.pot"
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getOpenFileName",
+        lambda *_args: (str(path), "SPR-KKR host POTFIL (*.pot *.pot_new)"),
+    )
+    monkeypatch.setattr(Potential, "from_file", lambda _path: potential)
+    monkeypatch.setattr(file_flows, "run_modal_task",
+                        lambda _parent, work, **_kw: work())
+    assert file_flows.ensure_embedded_host_potential(controller, None)
+    assert controller.can_run_embedding()
+    assert controller.atoms is not cluster
+    assert controller.atoms.embedding_host is potential
+    np.testing.assert_array_equal(
+        controller.atoms.arrays["sprkkr_embedding"],
+        cluster.arrays["sprkkr_embedding"],
+    )
 
 
 def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
