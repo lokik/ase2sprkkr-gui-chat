@@ -7,7 +7,7 @@ from pathlib import Path
 from ase.io import read as ase_read
 from ase.io import write as ase_write
 from ase.io.formats import ioformats
-from ase2sprkkr import InputParameters
+from ase2sprkkr import InputParameters, Potential
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles, RecentKind
@@ -29,14 +29,6 @@ from ase2sprkkr_gui.gui.misc.structure_wait import document_change_applied
 
 
 _POTENTIAL_SUFFIXES = {".pot", ".pot_new"}
-_CLUSTER_SUFFIXES = {".clu"}
-
-
-def _is_cluster_potential(path: Path) -> bool:
-    """Single format definition shared with calculation result loading."""
-    return is_embedded_cluster_file(path)
-
-
 def _read_structure_file(path: Path):
     """Read a structure, keeping a POT file's potential authoritative in atoms."""
     if path.suffix.lower() in _POTENTIAL_SUFFIXES and path.exists():
@@ -90,7 +82,7 @@ def load_structure(
     directory_generation = controller.directory_generation
     path = Path(file_path).resolve()
     try:
-        if _is_cluster_potential(path):
+        if path.suffix.lower() in {*_POTENTIAL_SUFFIXES, ".clu"} and Potential.is_cluster_file(path):
             return load_embedded_cluster(controller, recent_files, path, parent)
     except OSError as exc:
         QMessageBox.critical(parent, "Load Error", str(exc))
@@ -170,9 +162,13 @@ def load_embedded_cluster(
             return False
     try:
         from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
-        cluster = run_modal_task(
+        def read_cluster():
+            potential = ClusterPotential.from_file(path, host=host)
+            return potential.atoms, potential.host_geometry_warning()
+
+        cluster, geometry_warning = run_modal_task(
             parent,
-            lambda: ClusterPotential.from_file(path, host=host).atoms,
+            read_cluster,
             title="Loading Embedded Cluster",
             label="Reading CLUPOT…",
         )
@@ -181,6 +177,13 @@ def load_embedded_cluster(
     except Exception as exc:  # noqa: BLE001 - native file validation boundary
         QMessageBox.critical(parent, "Embedded Cluster Load Error", str(exc))
         return False
+
+    if geometry_warning:
+        QMessageBox.warning(
+            parent, "Host Potential May Not Match",
+            geometry_warning + "\n\nThe embedded cluster was loaded using this host. "
+            "Check the selected host POTFIL before calculating.",
+        )
 
     change = controller.replace_structure(
         cluster,
