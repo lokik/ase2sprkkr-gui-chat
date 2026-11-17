@@ -40,6 +40,7 @@ from ase2sprkkr_gui.gui.input_parameters.validation import (
     validate_setup,
 )
 from ase2sprkkr_gui.gui.misc.resources import icon_path
+from ase2sprkkr_gui.gui.presentation import structure_kind_label
 from ase2sprkkr_gui.gui.style import (
     SPACE_LG,
     SPACE_MD,
@@ -129,6 +130,16 @@ class GuidedInputParametersDialog(QDialog):
         title.setObjectName("guidedDialogTitle")
         title.setFont(heading_font(title.font(), "dialog"))
         root.addWidget(title)
+        kind_label = structure_kind_label(detect_structure_kind(self.atoms))
+        if kind_label is not None:
+            self.structure_type_label = QLabel(f"Structure type: {kind_label}", self)
+            self.structure_type_label.setObjectName("guidedStructureType")
+            self.structure_type_label.setStyleSheet(
+                secondary_text_stylesheet(self.palette())
+            )
+            root.addWidget(self.structure_type_label)
+        else:
+            self.structure_type_label = None
         intro = QLabel(self.spec.intro or (
             "Configure the most useful task parameters. Quick setup mirrors a small selection "
             "from the detailed categories; all remaining parameters are available in Expert settings."
