@@ -106,7 +106,7 @@ class QLetterRow(QWidget):
         # their occupation. Keep this bulk-only action outside the shared widget.
         self.break_btn = QPushButton("Break symmetry")
         self.break_btn.setVisible(bool(site.can_split))
-        if site.can_split and callable(self._on_break):
+        if callable(self._on_break):
             self.break_btn.clicked.connect(lambda: self._on_break(self.site))
         self.vbox.addWidget(
             self.break_btn, alignment=Qt.AlignmentFlag.AlignRight
@@ -291,12 +291,3 @@ class QLetterRow(QWidget):
     def is_valid(self) -> bool:
         return self.draft.is_site_valid(self.site)
 
-    def _on_symbol_changed(self, row: Dict[str, Any], text: str) -> None:
-        self.draft.set_occupancy_symbol(self.site, row['entry'], text)
-        self._validate_row(row)
-
-    def _on_occupancy_changed(
-        self, row: Dict[str, Any], value: float
-    ) -> None:
-        self.draft.set_occupancy_value(self.site, row['entry'], value)
-        self._validate_totals()
