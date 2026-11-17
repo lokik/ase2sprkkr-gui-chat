@@ -588,7 +588,7 @@ def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
         dialog._render()
         dialog.canvas.draw()
 
-    assert "Included: 1/1" in dialog.preview_info.text()
+    assert "Cluster: 1/1" in dialog.preview_info.text()
     assert "Displayed:" in dialog.preview_info.text()
     assert "Cell (0, 0, 0)" in dialog.local_info.text()
     assert dialog.axes.get_title() == ""
@@ -636,7 +636,7 @@ def test_global_preview_highlights_all_equivalents_not_only_selected_cell():
     assert set(dialog._highlighted) <= set(dialog._rendered_sites)
     assert any(site.cell_index != selected.cell_index
                for site in dialog._rendered_sites)
-    assert len(dialog._local_sites) == 1
+    assert len(dialog._local_sites) == dialog.inplane_cells.value() ** 2
     dialog.global_scope.setCurrentIndex(1)  # Current layer
     dialog._render_global()
     assert all(site.cell_index[2] == dialog.layer.value()
@@ -816,7 +816,7 @@ def test_global_whole_mode_includes_all_cluster_sites_and_has_padded_bounds():
     dialog.global_scope.setCurrentIndex(0)
     dialog._render_global()
     assert set(dialog.draft.entries).issubset(set(dialog._rendered_sites))
-    assert "Included: 2/2" in dialog.preview_info.text()
+    assert "Cluster: 2/2" in dialog.preview_info.text()
     bounds = [dialog.axes.get_xlim(), dialog.axes.get_ylim(), dialog.axes.get_zlim()]
     for site in (left, right):
         position = site.position(dialog.draft.host)
@@ -827,7 +827,12 @@ def test_cell_actions_are_adjacent_to_cell_grid():
     dialog = BuildEmbeddingDialog(host())
     panel = dialog.cells.parentWidget()
     actions = panel.findChildren(QPushButton)
-    assert {w.text() for w in actions} >= {"Include", "Exclude", "Set centre"}
+    assert not {w.text() for w in actions} & {"Include", "Exclude", "Set centre"}
+    right_panel = dialog.sites.parentWidget()
+    right_actions = right_panel.findChildren(QPushButton)
+    assert {w.text() for w in right_actions} >= {
+        "Include", "Exclude", "Set centre"
+    }
 
 
 def test_displacement_is_debounced_and_flushed_before_changing_selected_site():
@@ -903,3 +908,66 @@ def test_exclude_after_pending_displacement_does_not_reinclude_atom():
     dialog._exclude()
     assert not dialog._displacement_timer.isActive()
     assert site not in dialog.draft.entries
+
+
+def test_2d_multilayer_host_shows_full_repeated_structure_and_one_atomic_plane():
+    # A 40-site slab: the screenshot's earlier implementation rendered 40
+    # stacked atoms locally and just one marker in the empty global preview.
+    atoms = Atoms(
+        symbols=["Ge"] * 20 + ["Te"] * 20,
+        positions=[[0., 0., float(i)] for i in range(40)],
+        cell=[2.5, 2.5, 80.0],
+        pbc=(True, True, False),
+    )
+    dialog = BuildEmbeddingDialog(atoms)
+    dialog._render()
+    n_cells = dialog.inplane_cells.value() ** 2
+    assert len(dialog._site_rows) == 40  # Site table: one host unit cell
+    assert len(dialog._local_sites) == n_cells  # Layer: across all visible cells
+    assert len(dialog._rendered_sites) == 40 * n_cells  # Whole host viewport
+    assert "Host: 1000" in dialog.preview_info.text()
+    assert "Cluster: 0/0" in dialog.preview_info.text()
+
+    # Choosing another basis atom chooses another physical atomic plane.
+    dialog.sites.selectRow(30)
+    dialog._render_local()
+    assert len(dialog._local_sites) == n_cells
+    assert all(site.original_site == 30 for site in dialog._local_sites)
+
+    dialog.global_scope.setCurrentIndex(1)
+    dialog._render_global()
+    assert len(dialog._rendered_sites) == n_cells
+    assert all(site.original_site == 30 for site in dialog._rendered_sites)
+
+    dialog.global_scope.setCurrentIndex(0)
+    dialog._render_global()
+    assert len(dialog._rendered_sites) == 40 * n_cells
+
+
+def test_local_layer_picker_can_select_other_host_cells():
+    from types import SimpleNamespace
+
+    dialog = BuildEmbeddingDialog(host())
+    destination = HostSite(0, (1, -1, 0))
+    dialog._render_local()
+    assert destination in dialog._local_sites
+    idx = dialog._local_sites.index(destination)
+    dialog._local_pick(SimpleNamespace(
+        artist=dialog._local_scatter, ind=[idx]
+    ))
+    assert dialog._selected_cell == destination.cell_index
+    assert dialog._selected_site == destination
+    assert dialog.cells.currentItem().data(
+        Qt.ItemDataRole.UserRole
+    ) == destination.cell_index
+
+
+def test_whole_global_preview_includes_host_even_before_any_cluster_site():
+    dialog = BuildEmbeddingDialog(host())
+    assert not dialog.draft.entries
+    dialog._render_global()
+    expected = dialog.inplane_cells.value() ** 2 * min(
+        dialog.inplane_cells.value(), 5
+    )
+    assert len(dialog._rendered_sites) == expected
+    assert "Cluster: 0/0" in dialog.preview_info.text()
