@@ -141,9 +141,6 @@ class BuildEmbeddingDialog(QDialog):
         self.symmetry_info = QLabel()
         self.symmetry_info.setWordWrap(True)
         sym_row.addWidget(self.symmetry_info, 1)
-        equivalents = QPushButton("Show equivalents")
-        equivalents.clicked.connect(self._show_equivalents)
-        sym_row.addWidget(equivalents)
         right_v.addLayout(sym_row)
 
         right_v.addWidget(QLabel("Occupation"))
@@ -411,7 +408,10 @@ class BuildEmbeddingDialog(QDialog):
                 self._highlighted.update(
                     self.draft.equivalents(self._selected_site)
                 )
-                targets = self._targets()
+                targets = (
+                    self._highlighted if self.symmetric.isChecked()
+                    else {self._selected_site}
+                )
             except (ValueError, IndexError) as exc:
                 self.symmetry_info.setText(f"Symmetry unavailable: {exc}")
             else:
@@ -422,19 +422,6 @@ class BuildEmbeddingDialog(QDialog):
         self._refresh_cells()
         self._schedule_global_render()
         self._schedule_local_render()
-
-    def _show_equivalents(self):
-        def action():
-            if self._selected_site is None:
-                raise ValueError("Select a site first")
-            self._highlighted = set(self.draft.equivalents(self._selected_site))
-            self.symmetry_info.setText(
-                f"{len(self._highlighted)} symmetry-equivalent site(s) highlighted"
-            )
-            self._refresh_cells()
-            self._schedule_global_render()
-            self._schedule_local_render()
-        self._guard(action)
 
     def _confirm_overwrite(self, targets, occupation=None):
         conflicts = []
