@@ -43,6 +43,14 @@ def test_periodicity_and_cell_data_are_physical_properties():
     assert "Periodicity: None (finite cluster)" in finite_facts
     assert "Cell (Å)" not in finite_facts
 
+    from ase2sprkkr.sprkkr.build import semiinfinite_system
+
+    slab = semiinfinite_system(bulk("Cu", "sc", a=2.0), (0, 0))
+    slab_facts = structure_facts(slab)
+    assert "Type: 2D structure" in slab_facts
+    assert "Periodicity: x, y (2D)" in slab_facts
+    assert "Cell (Å)" in slab_facts
+
 
 def test_overview_shows_separate_host_and_cluster_information(application):
     host = SPRKKRAtoms.promote_ase_atoms(bulk("Fe", "bcc", a=2.87)).potential
