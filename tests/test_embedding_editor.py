@@ -476,6 +476,98 @@ def test_read_only_clupot_does_not_prompt_to_save_on_quit(monkeypatch, tmp_path)
     assert gui.request_exit()
 
 
+def test_cancelling_host_attachment_preserves_read_only_clupot(
+    monkeypatch, tmp_path,
+):
+    from types import SimpleNamespace
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    path = tmp_path / "incomplete.clu"
+    path.write_text("CLUPOT")
+    controller = WorkspaceController(WorkspaceState())
+    monkeypatch.setattr(
+        ClusterPotential, "from_file",
+        lambda *_args, **_kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(file_flows, "run_modal_task",
+                        lambda _parent, task, **_kwargs: task())
+    monkeypatch.setattr(file_flows.QMessageBox, "information", lambda *_a: None)
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getOpenFileName",
+        lambda *_args: ("", ""),
+    )
+
+    class Recent:
+        def remember(self, *_args):
+            pass
+
+    recent = Recent()
+    assert file_flows.load_embedded_cluster(controller, recent, path, None)
+    potential = controller.unresolved_cluster
+    assert not file_flows.load_host_potential(controller, recent, None)
+    assert controller.unresolved_cluster is potential
+    assert controller.atoms is None
+    assert not controller.has_unsaved_structure
+    controller.reset()
+    assert controller.unresolved_cluster is None
+    assert controller.unresolved_cluster_path is None
+
+
+def test_creating_host_for_unresolved_clupot_uses_explicit_structure(
+    monkeypatch, tmp_path,
+):
+    from types import SimpleNamespace
+    from ase2sprkkr import Potential
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+    from ase2sprkkr_gui.gui.flows import structure_candidates
+
+    path = tmp_path / "unpaired.clu"
+    path.write_text("CLUPOT")
+    controller = WorkspaceController(WorkspaceState())
+    periodic = host()
+    host_pot = Potential.from_atoms(periodic)
+    draft = EmbeddingDraft(host_pot)
+    draft.include([draft.center])
+    cluster_atoms = draft.to_atoms()
+    calls = []
+
+    def read_cluster(filename, *, host=None):
+        if host is None:
+            return SimpleNamespace()
+        calls.append(("read", filename, host))
+        return SimpleNamespace(
+            atoms=cluster_atoms,
+            host_geometry_warning=lambda: None,
+        )
+
+    monkeypatch.setattr(ClusterPotential, "from_file", read_cluster)
+    monkeypatch.setattr(Potential, "from_atoms",
+                        lambda _atoms: calls.append(("create", _atoms)) or host_pot)
+    monkeypatch.setattr(
+        structure_candidates, "create_structure_candidate",
+        lambda *_args, **_kwargs: SimpleNamespace(atoms=periodic),
+    )
+    # The file flow imports this function directly.
+    monkeypatch.setattr(file_flows, "run_modal_task",
+                        lambda _parent, task, **_kwargs: task())
+    monkeypatch.setattr(file_flows.QMessageBox, "information", lambda *_a: None)
+    class Recent:
+        def remember(self, *_a):
+            pass
+    recent = Recent()
+
+    assert file_flows.load_embedded_cluster(controller, recent, path, None)
+    assert file_flows.create_host_potential(controller, recent, None)
+    assert calls == [
+        ("create", periodic),
+        ("read", path, host_pot),
+    ]
+    assert controller.unresolved_cluster is None
+    assert controller.atoms is cluster_atoms
+
+
 def test_cluster_file_detection_distinguishes_host_potfil(tmp_path):
     from ase2sprkkr import Potential
 
