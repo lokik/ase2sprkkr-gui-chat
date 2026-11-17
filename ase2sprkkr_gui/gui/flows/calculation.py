@@ -1,6 +1,7 @@
 """Stateless Qt workflow for running and recording a calculation."""
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -14,6 +15,7 @@ from ase2sprkkr_gui.gui.application.result_loading import PotentialVersionChange
 from ase2sprkkr_gui.gui.application.window_geometry import window_placement
 from ase2sprkkr_gui.gui.application.workspace_controller import (
     CalculationNotReady,
+    CalculationRequest,
     WorkspaceController,
 )
 from ase2sprkkr_gui.gui.dialogs.expert_input import edit_input_parameters
@@ -125,6 +127,8 @@ def run_calculation(
     restore_run_directory: bool = False,
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
+    request_override: CalculationRequest | None = None,
+    on_result_loaded: Callable | None = None,
 ) -> SprkkrRunWindow | None:
     """Choose execution, run a task and record its immutable provenance.
 
@@ -134,6 +138,31 @@ def run_calculation(
     worker starts; standalone callers that omit it retain ordinary parent
     ownership.
     """
+    # Guided actions are not the only entry point (Expert Mode also calls this
+    # function). Never submit an embedded run against a START periodic host.
+    # A partially converged host is permitted only after explicit confirmation.
+    if request_override is None and controller.structure_kind() == "0d" and controller.can_run_embedding():
+        host_status = controller.embedding_host_scf_status()
+        if host_status == "START":
+            QMessageBox.information(
+                parent, "Host SCF Required",
+                "The periodic host potential has not been calculated. "
+                "Run Converge Host SCF before starting an embedded calculation.",
+            )
+            return None
+        if host_status != "CONVERGED":
+            answer = QMessageBox.warning(
+                parent, "Host SCF Not Converged",
+                "The periodic host potential is not SCF-converged "
+                f"(status: {host_status or 'unknown'}). "
+                "Embedding results obtained with this host may be unreliable. "
+                "Continue with the embedded calculation?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return None
+
     identification = initial_identification
     project_id = controller.active_project_id
     prepare_only = False
@@ -142,7 +171,7 @@ def run_calculation(
         # execution setup must not change the workspace.
         if (
             controller.atoms is None
-            or controller.input_parameters is None
+            or (controller.input_parameters is None and request_override is None)
             or controller.structure_id is None
             or controller.state_id is None
         ):
@@ -151,7 +180,8 @@ def run_calculation(
         project_generation = controller.active_project_generation
         selection = _select_profile(
             parent,
-            input_parameters=controller.input_parameters,
+            input_parameters=(request_override.input_parameters if request_override is not None
+                              else controller.input_parameters),
             directory=controller.directory,
             project_repository=project_repository,
             active_project_id=project_id,
@@ -178,7 +208,9 @@ def run_calculation(
             return None
 
     try:
-        request = controller.create_calculation_request()
+        request = (replace(request_override, directory=controller.directory)
+                   if request_override is not None
+                   else controller.create_calculation_request())
     except CalculationNotReady:
         return None
     _apply_run_identification(request.input_parameters, identification)
@@ -213,10 +245,9 @@ def run_calculation(
             )
 
     def finished(loaded) -> None:
-        adoption = controller.adopt_calculation_result(
-            loaded,
-            request=request,
-        )
+        adoption = (controller.adopt_calculation_result(loaded, request=request)
+                    if on_result_loaded is None else
+                    on_result_loaded(loaded, request))
         adoption_completed(adoption)
 
     try:
@@ -238,6 +269,8 @@ def run_calculation(
             restore_run_directory=True,
             track_launch_monitor=track_launch_monitor,
             project_repository=project_repository,
+            request_override=request_override,
+            on_result_loaded=on_result_loaded,
         )
 
     window = SprkkrRunWindow(
@@ -325,6 +358,109 @@ def configure_and_run_task(
         position_like_window="guided-input",
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+    )
+
+
+def configure_and_run_host_scf(
+    controller: WorkspaceController,
+    recent_files: RecentFiles,
+    parent: QWidget,
+    *,
+    dataset_default_mode: str,
+    restart_host_scf: bool = False,
+    track_launch_monitor: LaunchMonitorTracker | None = None,
+    project_repository: ProjectRepository | None = None,
+) -> SprkkrRunWindow | None:
+    """Run periodic host SCF without replacing the embedded cluster workspace.
+
+    On completion, adopt the host Potential into the *current* cluster if it
+    still refers to the host used for the launch, even if cluster sites have
+    been edited meanwhile. The independent periodic result is also recorded.
+    """
+    from ase2sprkkr import Potential
+
+    cluster = controller.atoms
+    host = getattr(cluster, "embedding_host", None)
+    if controller.structure_kind() != "0d" or not isinstance(host, Potential):
+        QMessageBox.warning(
+            parent, "Host Potential Required",
+            "Attach a periodic SPR-KKR host potential before calculating its SCF.",
+        )
+        return None
+    if restart_host_scf and controller.embedding_host_scf_status() == "START":
+        QMessageBox.information(
+            parent, "Host SCF Not Started",
+            "The host has no previous SCF cycle to restart. "
+            "Use Converge Host SCF instead.",
+        )
+        return None
+
+    try:
+        parameters = select_guided_input_parameters(
+            "scf", parent=parent, atoms=host.atoms,
+            dataset_default_mode=dataset_default_mode,
+            dataset_prefix="host_",
+        )
+    except GuidedTaskUnavailable as exc:
+        QMessageBox.critical(parent, "Task Unavailable", str(exc))
+        return None
+    if parameters is None:
+        return None
+
+    request = CalculationRequest(
+        atoms=host.atoms,
+        potential=host,
+        input_parameters=parameters,
+        directory=controller.directory or "",
+        structure_id=controller.structure_id,
+        state_id=controller.state_id,
+        restart_scf=restart_host_scf,
+    )
+
+    def adopt_host_result(loaded, _request):
+        # The host SCF is a separate periodic calculation, not a cluster
+        # result. Keep its own result lineage in the project history.
+        adoption = controller.adopt_external_result(loaded)
+        try:
+            # Result atoms need not carry a Potential attached to themselves.
+            # Read the native result instead; a missing/invalid host must never
+            # silently replace the cluster's last usable host.
+            new_host = loaded.result.potential
+            if not isinstance(new_host, Potential):
+                raise TypeError("SCF result does not contain a periodic Potential.")
+        except Exception as exc:  # noqa: BLE001 - missing or corrupt POTFIL
+            QMessageBox.warning(
+                parent, "Host Potential Not Loaded",
+                "The host calculation has finished, but its resulting potential "
+                "could not be loaded. The embedded cluster still uses its "
+                f"previous host potential.\n{exc}",
+            )
+            return adoption
+        try:
+            adopted = controller.replace_embedding_host_if_current(host, new_host)
+        except Exception as exc:  # noqa: BLE001 - reject incomplete/incompatible POTFIL
+            QMessageBox.warning(
+                parent, "Cannot Update Embedded Host",
+                "The new host potential was saved in the result history, but "
+                f"could not be attached to the embedded cluster:\n{exc}",
+            )
+            return adoption
+        if not adopted:
+            QMessageBox.information(
+                parent, "Host SCF Result Saved",
+                "The host calculation finished, but the active cluster now uses "
+                "a different host (or is no longer open). The result is available "
+                "in the calculation history and has not replaced that host.",
+            )
+        return adoption
+
+    return run_calculation(
+        controller, recent_files, parent,
+        position_like_window="guided-input",
+        track_launch_monitor=track_launch_monitor,
+        project_repository=project_repository,
+        request_override=request,
+        on_result_loaded=adopt_host_result,
     )
 
 

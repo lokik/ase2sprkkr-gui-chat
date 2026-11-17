@@ -70,6 +70,13 @@ class RunTask:
 
 
 @dataclass(frozen=True)
+class ConvergeHostScf:
+    """Converge the periodic host, optionally restarting its SCF cycle."""
+
+    restart_scf: bool = False
+
+
+@dataclass(frozen=True)
 class UpdateEmptySpheres:
     pass
 
@@ -139,6 +146,7 @@ class StartOver:
 
 WorkflowCommand = Union[
     RunTask,
+    ConvergeHostScf,
     UpdateEmptySpheres,
     CreateStructure,
     Build2D,
