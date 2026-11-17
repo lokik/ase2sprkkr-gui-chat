@@ -133,43 +133,42 @@ class WorkflowPlanner:
         recent: RecentHistorySnapshot | None = None,
     ) -> WorkflowPlan:
         create_actions = (
-
-                _action(
-                    CreateStructure(CreateStructureKind.THREE_D),
-                    "Create a 3D Structure",
-                    "Build a periodic bulk crystal",
-                    "structure",
-                    ActionIcon.BULK_CRYSTAL,
-                ),
-                _action(
-                    CreateStructure(CreateStructureKind.PROTOTYPE),
-                    "Create Structure from Prototype Database",
-                    "Start from a crystallographic structure prototype",
-                    "structure",
-                    ActionIcon.DATABASE,
-                ),
-                _action(
-                    CreateStructure(CreateStructureKind.SHELL),
-                    "Create by Python Shell",
-                    "Build an ASE structure interactively in Python",
-                    "structure",
-                    ActionIcon.SHELL,
-                ),
-                _action(
-                    CreateStructure(CreateStructureKind.SURFACE),
-                    "Create a 2D Surface",
-                    "Build a surface with vacuum on one side",
-                    "structure",
-                    ActionIcon.SURFACE,
-                ),
-                _action(
-                    CreateStructure(CreateStructureKind.TWO_D),
-                    "Create a 2D Structure",
-                    "Build an interface or transitional layer",
-                    "structure",
-                    ActionIcon.INTERFACE,
-                ),
-            )
+            _action(
+                CreateStructure(CreateStructureKind.THREE_D),
+                "Create a 3D Structure",
+                "Build a periodic bulk crystal",
+                "structure",
+                ActionIcon.BULK_CRYSTAL,
+            ),
+            _action(
+                CreateStructure(CreateStructureKind.PROTOTYPE),
+                "Create Structure from Prototype Database",
+                "Start from a crystallographic structure prototype",
+                "structure",
+                ActionIcon.DATABASE,
+            ),
+            _action(
+                CreateStructure(CreateStructureKind.SHELL),
+                "Create by Python Shell",
+                "Build an ASE structure interactively in Python",
+                "structure",
+                ActionIcon.SHELL,
+            ),
+            _action(
+                CreateStructure(CreateStructureKind.SURFACE),
+                "Create a 2D Surface",
+                "Build a surface with vacuum on one side",
+                "structure",
+                ActionIcon.SURFACE,
+            ),
+            _action(
+                CreateStructure(CreateStructureKind.TWO_D),
+                "Create a 2D Structure",
+                "Build an interface or transitional layer",
+                "structure",
+                ActionIcon.INTERFACE,
+            ),
+        )
         create = AvailableActionGroup(
             WorkflowSection.CREATE, "Create structure", create_actions
         )
@@ -244,6 +243,7 @@ class WorkflowPlanner:
         calculate: list[AvailableAction] = []
 
         is_cluster = workspace.structure_kind() == "0d"
+        invalid_cluster = is_cluster and getattr(atoms, "embedding_host", None) is None
         if not is_cluster and not converged and not workspace.structure_change_requires_scf_restart():
             empty_spheres = workspace.empty_spheres_action()
             if empty_spheres is not None:
@@ -260,11 +260,11 @@ class WorkflowPlanner:
         stage = WorkflowStage.POST_SCF if converged else WorkflowStage.SCF
         supported_tasks = workflow_tasks(stage)
         if is_cluster:
-            # Show supported cluster tasks even before a host POTFIL is attached:
-            # the Guided action offers to select a matching host.
-            supported_tasks = tuple(
+            # Only a cluster with a known host geometry can be configured.
+            # Missing host identity is a corrupt document, not a pending task.
+            supported_tasks = (() if invalid_cluster else tuple(
                 d for d in supported_tasks if _cluster_task_supported(d)
-            )
+            ))
         for definition in supported_tasks:
             title = definition.workflow.label
             description = definition.workflow.description
@@ -340,7 +340,7 @@ class WorkflowPlanner:
                 ),
             ))
         # Some test/third-party workspace adapters predate this capability.
-        if getattr(workspace, "can_build_embedding", lambda: False)():
+        if not invalid_cluster and getattr(workspace, "can_build_embedding", lambda: False)():
             derived.append(_action(
                 BuildEmbedding(),
                 "Edit Embedded Cluster" if is_cluster else "Build Embedded Cluster",
@@ -349,7 +349,7 @@ class WorkflowPlanner:
                 ActionIcon.EMBEDDING,
             ))
         missing_native_host = (
-            is_cluster
+            is_cluster and not invalid_cluster
             and not getattr(workspace, "can_run_embedding", lambda: False)()
         )
         if missing_native_host:
@@ -402,9 +402,10 @@ class WorkflowPlanner:
 
         formula = structure_formula(atoms)
         return WorkflowPlan(
-            (
-                f"Current structure: {formula}  •  "
-                f"SCF status: {scf_progress_label(progress, status)}"
-            ),
+            ("Invalid embedded structure: the host reference is missing. "
+             "Reload or rebuild it from the original host structure."
+             if invalid_cluster else
+             f"Current structure: {formula}  •  "
+             f"SCF status: {scf_progress_label(progress, status)}"),
             tuple(groups),
         )

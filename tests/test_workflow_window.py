@@ -20,6 +20,8 @@ from ase2sprkkr_gui.gui.workflow.model import (
     CreateStructureKind,
     Load,
     LoadKind,
+    LoadHostPotential,
+    CreateHostPotential,
     RunTask,
     SaveStructure,
     StartOver,
@@ -139,6 +141,14 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
     monkeypatch.setattr(window, "_visualize_structure", lambda: events.append("view"))
     monkeypatch.setattr(window, "_save_structure", lambda: events.append("save"))
     monkeypatch.setattr(
+        workflow_module.file_flows, "load_host_potential",
+        lambda *_args: events.append("load-host"),
+    )
+    monkeypatch.setattr(
+        workflow_module.file_flows, "create_host_potential",
+        lambda *_args: events.append("create-host"),
+    )
+    monkeypatch.setattr(
         window, "_use_for_new_calculation", lambda: events.append("new-calculation")
     )
     monkeypatch.setattr(window, "_start_over", lambda: events.append("reset"))
@@ -160,6 +170,8 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         ContinueRecent("output", "/tmp/result.out"),
         VisualizeStructure(),
         SaveStructure(),
+        LoadHostPotential(),
+        CreateHostPotential(),
         UseForNewCalculation(),
         StartOver(),
     )
@@ -183,6 +195,8 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         ("recent", "output", "/tmp/result.out"),
         "view",
         "save",
+        "load-host",
+        "create-host",
         "new-calculation",
         "reset",
     ]

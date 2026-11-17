@@ -273,7 +273,10 @@ class WorkspaceController(QObject):
 
     def can_build_embedding(self) -> bool:
         """A 3D/2D host or existing embedded cluster can open the editor."""
-        return self.structure_kind() in {"3d", "2d", "0d"}
+        kind = self.structure_kind()
+        return (kind in {"3d", "2d"}
+                or (kind == "0d" and
+                    getattr(self.atoms, "embedding_host", None) is not None))
 
     def scf_status(self) -> str | None:
         return self.structure_state.scf_status()

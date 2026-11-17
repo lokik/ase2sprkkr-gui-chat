@@ -372,8 +372,10 @@ def test_embedded_structure_plan_offers_cluster_scf_and_save_without_host_potent
         def can_run_embedding(self):
             return False
 
+    atoms = FormulaAtoms()
+    atoms.embedding_host = object()  # Geometry exists, but POTFIL is not attached.
     plan = WorkflowPlanner().for_workspace(
-        EmbeddingWorkspace(atoms=FormulaAtoms(), kind="0d", build_2d=False)
+        EmbeddingWorkspace(atoms=atoms, kind="0d", build_2d=False)
     )
     assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
     assert "host POTFIL" in plan.group(WorkflowSection.CALCULATE).actions[0].description
@@ -381,6 +383,38 @@ def test_embedded_structure_plan_offers_cluster_scf_and_save_without_host_potent
         LoadHostPotential(), CreateHostPotential(), BuildEmbedding(),
     )
     assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
+
+
+def test_no_host_recovery_action_for_an_invalid_orphan_cluster():
+    class CorruptCluster(Workspace):
+        def can_build_embedding(self):
+            return False
+
+        def can_run_embedding(self):
+            return False
+
+    plan = WorkflowPlanner().for_workspace(
+        CorruptCluster(atoms=FormulaAtoms(), kind="0d")
+    )
+    assert plan.group(WorkflowSection.CREATE) is None
+    assert _commands(plan, WorkflowSection.CALCULATE) == ()
+    assert "host" in plan.subtitle.lower()
+
+
+def test_native_host_does_not_offer_redundant_attachment():
+    class ReadyCluster(Workspace):
+        def can_build_embedding(self):
+            return True
+
+        def can_run_embedding(self):
+            return True
+
+    atoms = FormulaAtoms()
+    atoms.embedding_host = object()
+    plan = WorkflowPlanner().for_workspace(
+        ReadyCluster(atoms=atoms, kind="0d")
+    )
+    assert _commands(plan, WorkflowSection.CREATE) == (BuildEmbedding(),)
 
 
 def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):

@@ -245,6 +245,7 @@ def test_embedded_structure_missing_host_cannot_silently_export_as_ase(
 
     assert not file_flows.save_structure(controller, None, None)
     assert messages and "Host of embedded structure is missing" in messages[0][2]
+    assert not hasattr(file_flows, "save_orphan_cluster")
     assert not (tmp_path / "cluster.xyz").exists()
 
 
@@ -339,6 +340,43 @@ def test_saved_cluster_automatically_loads_companion_host(monkeypatch, tmp_path)
             assert path == cluster_path
     assert file_flows.load_embedded_cluster(controller, Recent(), cluster_path, None)
     assert chosen == [str(host_path.resolve())]
+
+
+def test_orphan_clupot_loading_requires_host_and_does_not_change_workspace(
+    monkeypatch, tmp_path,
+):
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    path = tmp_path / "unpaired.clu"
+    path.write_text("native CLUPOT")
+    original = host()
+    controller = WorkspaceController(WorkspaceState(atoms=original))
+    warning = []
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getOpenFileName",
+        lambda *_args: ("", ""),
+    )
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "warning",
+        lambda *args: warning.append(args),
+    )
+    monkeypatch.setattr(
+        file_flows, "run_modal_task",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Must not construct/edit a cluster without a host"
+        ),
+    )
+
+    class Recent:
+        def remember(self, *_args):
+            pytest.fail("Rejected cluster cannot enter recent files")
+
+    assert not file_flows.load_embedded_cluster(
+        controller, Recent(), path, None,
+    )
+    assert controller.atoms is original
+    assert warning and warning[0][1] == "Host Potential Required"
+    assert not hasattr(controller, "pending_embedded_cluster")
 
 
 def test_cluster_file_detection_distinguishes_host_potfil(tmp_path):

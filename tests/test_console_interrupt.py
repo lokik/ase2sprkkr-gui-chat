@@ -12,7 +12,7 @@ from ase2sprkkr_gui.gui.flows import files as file_flows
 from ase2sprkkr_gui.main import GuiApplication
 
 
-def test_console_interrupt_wakes_qt_once_and_restores_handler():
+def test_console_interrupt_wakes_qt_once_and_restores_handler(capfd):
     app = QApplication.instance()
     previous_handler = signal.getsignal(signal.SIGINT)
     received = []
@@ -20,6 +20,7 @@ def test_console_interrupt_wakes_qt_once_and_restores_handler():
     try:
         assert signal.getsignal(signal.SIGINT) != previous_handler
         interrupt._mark_interrupt(signal.SIGINT, None)
+        assert "Ctrl+C: requesting GUI shutdown" in capfd.readouterr().err
         interrupt._writer.send(bytes([2]))
         app.processEvents()
         assert received == [True]
@@ -150,11 +151,16 @@ def test_second_ctrl_c_force_exits_while_first_handler_is_running(monkeypatch):
         raise SystemExit(code)
 
     monkeypatch.setattr(bridge.os, "_exit", forced_exit)
+    clock = [10.0]
+    monkeypatch.setattr(bridge, "monotonic", lambda: clock[0])
     interrupt = None
 
     def shutdown():
         events.append("shutdown")
-        interrupt._mark_interrupt(signal.SIGINT, None)
+        clock[0] = 10.2
+        interrupt._mark_interrupt(signal.SIGINT, None)  # Accidental repeat.
+        clock[0] = 10.51
+        interrupt._mark_interrupt(signal.SIGINT, None)  # Deliberate force.
 
     interrupt = ConsoleInterrupt(shutdown, parent=app)
     try:
@@ -173,6 +179,8 @@ def test_second_ctrl_c_force_exits_before_qt_consumes_first(monkeypatch):
 
     app = QApplication.instance() or QApplication([])
     called = []
+    clock = [0.0]
+    monkeypatch.setattr(bridge, "monotonic", lambda: clock[0])
     monkeypatch.setattr(
         bridge.os, "_exit",
         lambda code: (_ for _ in ()).throw(SystemExit(code)),
@@ -180,8 +188,37 @@ def test_second_ctrl_c_force_exits_before_qt_consumes_first(monkeypatch):
     interrupt = ConsoleInterrupt(lambda: called.append(True), parent=app)
     try:
         interrupt._mark_interrupt(signal.SIGINT, None)
+        clock[0] = 0.49
+        interrupt._mark_interrupt(signal.SIGINT, None)  # Ignored.
+        clock[0] = 0.51
         with pytest.raises(SystemExit, match="130"):
             interrupt._mark_interrupt(signal.SIGINT, None)
         assert not called
+    finally:
+        interrupt.close()
+
+
+def test_ctrl_c_after_cancelled_shutdown_starts_fresh_request(monkeypatch):
+    from ase2sprkkr_gui.gui.application import console_interrupt as bridge
+
+    app = QApplication.instance() or QApplication([])
+    clock = [1.0]
+    monkeypatch.setattr(bridge, "monotonic", lambda: clock[0])
+    calls = []
+    monkeypatch.setattr(
+        bridge.os, "_exit",
+        lambda code: (_ for _ in ()).throw(AssertionError(f"forced exit: {code}")),
+    )
+    interrupt = ConsoleInterrupt(lambda: calls.append("requested"), parent=app)
+    try:
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        clock[0] = 1.12
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        interrupt._on_readable()  # The user cancels the save prompt.
+        assert calls == ["requested"]
+        clock[0] = 5.0
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        interrupt._on_readable()
+        assert calls == ["requested", "requested"]
     finally:
         interrupt.close()
