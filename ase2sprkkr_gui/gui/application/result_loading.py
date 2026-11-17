@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from pathlib import Path
 from typing import Any
 
@@ -41,26 +40,10 @@ class LoadedResult:
     persistent_ref: str | None = None
 
 
-def is_embedded_cluster_file(file_path: str | Path) -> bool:
-    """Detect a CLUPOT before passing it to the periodic Potential parser.
-
-    A native cluster may use .clu, .pot or .pot_new; inspect the native
-    NQCLU header for ambiguous extensions. Missing paths are handled by
-    the regular file loader rather than raising during a format probe.
-    """
-    path = Path(file_path)
-    if path.suffix.lower() == ".clu":
-        return True
-    if path.suffix.lower() not in {".pot", ".pot_new"} or not path.is_file():
-        return False
-    with path.open("r", encoding="utf-8") as handle:
-        return bool(re.search(r"(?m)^\\s*NQCLU\\s+\\d+\\b", handle.read(16384)))
-
-
 def load_potential_atoms(file_path: str | Path, *, embedding_host=None) -> Any:
     """Read a periodic POTFIL or CLUPOT, preserving native radial information."""
     path = Path(file_path).resolve()
-    if is_embedded_cluster_file(path):
+    if Potential.is_cluster_file(path):
         if embedding_host is None:
             raise ValueError(
                 f"Embedded cluster {path} requires a host SPR-KKR Potential"
@@ -131,7 +114,17 @@ def load_result(
     except OSError as exc:
         atoms, potential_error = None, exc
     else:
-        atoms, potential_error = _load_potential(potential, embedding_host=embedding_host)
+        if getattr(result, "is_embedded", False) and potential is not None:
+            # The result's cluster potential loader resolves its own native
+            # host POTFIL; it must not be treated as a periodic potential.
+            try:
+                atoms, potential_error = result.potential.atoms, None
+            except Exception as exc:  # noqa: BLE001 - corrupted native file
+                atoms, potential_error = None, exc
+        else:
+            atoms, potential_error = _load_potential(
+                potential, embedding_host=embedding_host
+            )
     input_parameters, input_parameters_error = _load_input_parameters(result)
     directory = str(output.parent.resolve()) if output is not None else None
     return LoadedResult(
