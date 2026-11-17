@@ -204,7 +204,10 @@ class BuildEmbeddingDialog(QDialog):
 
         preview_splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
-        local_group = QGroupBox("Host layer · click to select a site", preview_splitter)
+        local_group = QGroupBox(
+            "Host layer · click to select" if self.draft.dimension == 3
+            else "Transition region · click to select", preview_splitter
+        )
         local_layout = QVBoxLayout(local_group)
         self.local_info = QLabel()
         local_layout.addWidget(self.local_info)
@@ -212,7 +215,7 @@ class BuildEmbeddingDialog(QDialog):
         self.local_figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
         self.local_canvas = FigureCanvas(self.local_figure)
         self.local_axes = self.local_figure.add_subplot(111, projection="3d")
-        self.local_axes.view_init(elev=89, azim=-90)
+        self.local_axes.view_init(elev=25, azim=-60)
         self.local_canvas.mpl_connect("pick_event", self._local_pick)
         local_layout.addWidget(self.local_canvas, 1)
         preview_splitter.addWidget(local_group)
@@ -225,7 +228,11 @@ class BuildEmbeddingDialog(QDialog):
         global_header.addStretch(1)
         self.global_scope = QComboBox()
         self.global_scope.addItem("Whole displayed structure", "whole")
-        self.global_scope.addItem("Current layer", "layer")
+        self.global_scope.addItem(
+            "Current layer" if self.draft.dimension == 3
+            else "Transition region",
+            "layer",
+        )
         self.global_scope.currentIndexChanged.connect(self._schedule_global_render)
         global_header.addWidget(self.global_scope)
         global_layout.addLayout(global_header)
@@ -715,64 +722,58 @@ class BuildEmbeddingDialog(QDialog):
             )
         return tuple(HostSite(i, cell) for cell in cells for i in indices)
 
-    def _layer_reference(self):
-        """Normal and physical height of the selected atomic plane (Å)."""
-        host = getattr(self.draft.host, "atoms", self.draft.host)
-        a, b = np.asarray(host.cell, dtype=float)[:2]
-        normal = np.cross(a, b)
-        length = float(np.linalg.norm(normal))
-        if length < 1e-10:
-            raise ValueError("The host has no defined in-plane lattice normal")
-        normal /= length
-        reference = self._selected_site or self.draft.center
-        height = float(np.dot(reference.position(self.draft.host), normal))
-        return normal, height
-
-    def _on_current_layer(self, site, normal, height):
-        # Adjacent atoms in a slightly buckled plane may have subtly
-        # different heights. Do not include the entire multilayer slab.
-        return abs(float(np.dot(site.position(self.draft.host), normal)) - height) <= 0.35
-
     def _render_local(self):
-        """Clickable physical atomic layer across the visible host-cell grid."""
-        normal, height = self._layer_reference()
-        self._local_sites = [
-            site for site in self._host_context_sites(allowed_only=True)
-            if self._on_current_layer(site, normal, height)
-        ]
-        # Exceptional native N5VEC entries remain editable in the site table.
-        # In particular they must not duplicate atoms of the regular host
-        # layer when the host does not define a separate native lead vector.
+        """Pick host sites in a selected periodic layer / 2D central region.
+
+        A 2D host's entire central transition region belongs to one periodic
+        layer, even if it contains dozens of distinct atomic heights. A bulk
+        host uses the currently selected n3 cell-repetition index.
+        """
+        if self.draft.dimension == 2:
+            self._local_sites = list(
+                self._host_context_sites(allowed_only=True)
+            )
+            region = "Transition region"
+        else:
+            self._local_sites = [
+                site for site in self._host_context_sites(allowed_only=True)
+                if site.cell_index[2] == self.layer.value()
+            ]
+            region = f"Host layer n3={self.layer.value()}"
+        # Exceptional native N5VEC entries remain editable in the site table
+        # but are not duplicated as ordinary periodic host replicas.
         self._local_scatter = self._draw_sites(
             self.local_axes, self.local_canvas, self._local_sites, pick=True
         )
         self.local_info.setText(
-            f"Layer at {height:.2f} Å · "
-            f"{len(self._local_sites)} visible sites in "
+            f"{region} · {len(self._local_sites)} sites across "
             f"{self.inplane_cells.value()}×{self.inplane_cells.value()} cells"
         )
 
     def _render_global(self):
-        """Display all host replicas in the viewport with the entire cluster.
-
-        The host is infinite, so 'whole' means the entire displayed viewport
-        plus all explicit included sites and symmetry-related selections,
-        even when those sites are outside the viewport.
-        """
+        """Show complete displayed host context and every cluster site."""
         host_context = set(self._host_context_sites())
         overlay = set(self.draft.entries) | self._highlighted
         if self._selected_site is not None:
             overlay.add(self._selected_site)
         if self.global_scope.currentData() == "layer":
-            normal, height = self._layer_reference()
-            host_context = {
-                site for site in host_context
-                if self._on_current_layer(site, normal, height)
-            }
-            overlay = {
-                site for site in overlay
-                if self._on_current_layer(site, normal, height)
-            }
+            if self.draft.dimension == 2:
+                # In 2D the selected 'layer' is the complete central region,
+                # excluding semi-infinite lead sites from the editing view.
+                host_context = set(
+                    self._host_context_sites(allowed_only=True)
+                )
+            else:
+                host_context = {
+                    site for site in host_context
+                    if site.cell_index[2] == self.layer.value()
+                }
+                overlay = {
+                    site for site in overlay
+                    if site.cell_index[:3] == (
+                        *site.cell_index[:2], self.layer.value()
+                    )
+                }
         self._rendered_sites = sorted(host_context | overlay)
         self._scatter = self._draw_sites(
             self.axes, self.canvas, self._rendered_sites
