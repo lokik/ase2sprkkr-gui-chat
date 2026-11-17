@@ -14,6 +14,7 @@ from ase2sprkkr_gui.gui.application.recent_files import RecentFiles, RecentKind
 from ase2sprkkr_gui.gui.application.result_loading import (
     LoadedResult,
     PotentialVersionChanged,
+    is_embedded_cluster_file,
     load_potential_atoms,
     load_result_file,
 )
@@ -32,15 +33,8 @@ _CLUSTER_SUFFIXES = {".clu"}
 
 
 def _is_cluster_potential(path: Path) -> bool:
-    """Identify native cluster potentials without parsing a periodic POTFIL."""
-    if path.suffix.lower() in _CLUSTER_SUFFIXES:
-        return True
-    if path.suffix.lower() not in _POTENTIAL_SUFFIXES or not path.is_file():
-        # Let the normal structure loader report missing files. In particular,
-        # the type probe must not fail before a custom/virtual loader can run.
-        return False
-    with path.open("r", encoding="utf-8") as handle:
-        return bool(re.search(r"(?m)^\\s*NQCLU\\s+\\d+\\b", handle.read(4096)))
+    """Single format definition shared with calculation result loading."""
+    return is_embedded_cluster_file(path)
 
 
 def _read_structure_file(path: Path):
