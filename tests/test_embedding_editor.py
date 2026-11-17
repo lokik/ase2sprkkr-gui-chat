@@ -975,6 +975,19 @@ def test_embedding_footer_equal_buttons_and_compact_scope_labels():
     assert dialog.cells.canvas in dialog._plot_hints
     assert dialog.local_preview.canvas in dialog._plot_hints
     assert dialog.global_preview.canvas in dialog._plot_hints
+    for canvas, outline_type in (
+        (dialog.cells.canvas, "Borders:"),
+        (dialog.local_preview.canvas, "Rings:"),
+        (dialog.global_preview.canvas, "Rings:"),
+    ):
+        lines = dialog._plot_hints[canvas].splitlines()
+        assert lines[0] == "Fill:"
+        assert outline_type in lines
+        assert all(" — " in line for line in lines if not line.endswith(":"))
+        assert any(line.startswith("Blue — ") for line in lines)
+        assert any(line.startswith("Bright orange — ") for line in lines)
+        assert any(line.startswith("Dark orange — ") for line in lines)
+        assert any(line.startswith("Purple — ") for line in lines)
     assert not hasattr(dialog, "preview_legend")
 
 

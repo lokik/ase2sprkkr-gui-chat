@@ -346,16 +346,26 @@ class BuildEmbeddingDialog(QDialog):
         body.setSizes([350, 450])
 
         atom_hint = (
-            "Fill: blue = included in cluster; orange = modified; "
-            "green = expansion preview; gray = host. "
-            "Rings: bright orange = selected site; dark orange = symmetry-related "
-            "sites when actions apply to them; purple = symmetry preview."
+            "Fill:\n"
+            "Blue — included in cluster\n"
+            "Orange — modified site\n"
+            "Green — expansion preview\n"
+            "Gray — host site\n"
+            "Rings:\n"
+            "Bright orange — selected site\n"
+            "Dark orange — symmetry-related site (actions enabled)\n"
+            "Purple — symmetry preview (actions disabled)"
         )
         self._plot_hints = {
             self.cells.canvas: (
-                "Fill: blue = included sites; orange = modified. "
-                "Borders: bright orange = selected cell; dark orange = symmetry-related "
-                "cells when actions apply to them; purple = symmetry preview."
+                "Fill:\n"
+                "Blue — cell containing included sites\n"
+                "Orange — cell containing modified sites\n"
+                "Gray — other host cell\n"
+                "Borders:\n"
+                "Bright orange — selected cell\n"
+                "Dark orange — symmetry-related cell (actions enabled)\n"
+                "Purple — symmetry preview (actions disabled)"
             ),
             self.local_preview.canvas: atom_hint,
             self.global_preview.canvas: atom_hint,
