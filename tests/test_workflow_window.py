@@ -402,3 +402,27 @@ def test_expert_exit_menu_uses_shared_shutdown(tmp_path):
     assert not expert.isVisible()
     assert not workflow.isVisible()
     assert gui._project_browser is None or not gui._project_browser.isVisible()
+
+
+def test_guided_save_structure_writes_normal_atoms_without_running(tmp_path, monkeypatch):
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+    from ase2sprkkr_gui.gui.workflow.model import WorkflowSection
+
+    _gui, window = _workflow(tmp_path)
+    structure = Atoms("Fe", cell=[2.87] * 3, pbc=True)
+    window.controller.replace_structure(structure)
+    expected = tmp_path / "bulk.xyz"
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getSaveFileName",
+        lambda *_args: (str(expected), "XYZ (*.xyz)"),
+    )
+    commands = tuple(
+        action.command
+        for action in window.workflow_plan.group(WorkflowSection.VIEW).actions
+    )
+    assert commands == (VisualizeStructure(), SaveStructure())
+    window.execute_workflow_command(SaveStructure())
+    assert expected.is_file()
+    assert not window.controller.has_unsaved_structure
+    assert window.controller.atoms is structure
+    window.close()

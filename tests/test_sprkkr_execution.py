@@ -330,3 +330,25 @@ def test_embedded_execution_forwards_original_host_to_result_reader(
     execution.run()
     assert calls[0]["embedding_host"] is host
     assert calls[0]["fallback_directory"] == str(tmp_path)
+
+
+def test_prepare_only_uses_save_input_without_creating_a_runner(monkeypatch, tmp_path):
+    captured = {}
+
+    class Calculator:
+        def save_input(self, **kwargs):
+            captured.update(kwargs)
+            return ("parameters", "input.inp", "host.pot", None)
+
+        def create_run(self, **kwargs):
+            raise AssertionError("Preparing files must not launch a runner")
+
+    execution = SprkkrExecution(_request(tmp_path, restart_scf=True), _Cancellation())
+    monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
+    assert execution.prepare_files() == ("parameters", "input.inp", "host.pot", None)
+    assert captured["directory"] == str(tmp_path)
+    assert captured["empty_spheres"] is False
+    assert captured["restart_scf"] is True
+    assert captured["output_file"] is False
+    assert captured["input_file"] == "%a_%T.inp"
+    assert captured["potential_file"] == "%a.pot"
