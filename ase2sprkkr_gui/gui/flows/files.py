@@ -1,8 +1,12 @@
 """Qt file orchestration around the workspace document controller."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import numpy as np
 
 from ase.io import read as ase_read
 from ase.io import write as ase_write
@@ -28,6 +32,12 @@ from ase2sprkkr_gui.gui.misc.structure_wait import document_change_applied
 
 
 _POTENTIAL_SUFFIXES = {".pot", ".pot_new"}
+
+
+def _companion_host_path(cluster_path: str | Path) -> Path:
+    """GUI convention; native SPR-KKR binds files through input CONTROL fields."""
+    path = Path(cluster_path)
+    return path.with_name(f"{path.stem}.host.pot")
 
 
 def _read_structure_file(path: Path):
@@ -143,6 +153,8 @@ def load_embedded_cluster(
     structure_generation = controller.structure_generation
     directory_generation = controller.directory_generation
     path = Path(file_path).expanduser().resolve()
+    if host_path is None and _companion_host_path(path).is_file():
+        host_path = _companion_host_path(path)
     host = None if host_path is not None else _current_host_potential(controller)
     if host is None:
         if host_path is None:
@@ -505,54 +517,142 @@ def save_embedded_cluster(
     recent_files: RecentFiles,
     parent: QWidget,
 ) -> bool:
-    """Write native CLUPOT rather than silently drop embedding provenance.
+    """Save the native cluster and a companion host potential.
 
-    An ASE .cif/.xyz export loses original-site and translation mapping. A
-    CLUPOT instead requires a converged host POTFIL, which is not synthesized
-    from plain host geometry by this editor.
+    Even a cluster constructed before host SCF can be saved: a START host
+    POTFIL is generated from its geometry. Both files are staged before either
+    is moved to its requested destination. The cluster remains attached to
+    its original host object in the workspace.
     """
     atoms = controller.atoms
-    host = getattr(atoms, "embedding_host", None)
-    if host is None or not hasattr(host, "LATTICE"):
+    source_host = getattr(atoms, "embedding_host", None)
+    if source_host is None:
         QMessageBox.warning(
             parent, "Cannot Save Embedded Cluster",
-            "A native CLUPOT requires a host SPR-KKR Potential. The cluster "
-            "geometry is kept in this workspace, but cannot be saved as a "
-            "standalone ASE structure without losing embedding metadata. "
-            "Please create/load a host POTFIL first.",
+            "An embedded cluster must reference its host structure.",
         )
         return False
     generation = controller.structure_generation
     file_path, _ = QFileDialog.getSaveFileName(
         parent,
-        "Save Embedded Cluster (POTFIL_CLU)",
+        "Save Embedded Cluster and Host Potential",
         "",
         "SPR-KKR cluster potential (*.clu *.pot);;All Files (*)",
     )
     if not file_path:
         return False
     path = Path(file_path).expanduser().resolve()
+    if not path.suffix:
+        path = path.with_suffix(".clu")
+    host_path = _companion_host_path(path)
+    if host_path == path:
+        raise ValueError("Host and cluster potential paths must be distinct")
+    if host_path.exists():
+        response = QMessageBox.question(
+            parent, "Overwrite Host Potential?",
+            f"Saving the cluster also writes its host potential:\\n{host_path}\\n\\n"
+            "Overwrite the existing host potential?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return False
     try:
         from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
-        # Let the backend preserve complete radial data in ITERATING
-        # CLUPOT. For a newly edited structure it naturally emits START.
-        # Partial radial datasets raise instead of being silently discarded.
-        if atoms.has_potential() and isinstance(atoms.potential, ClusterPotential):
-            # Preserve optional native sections and the original SCF status.
+
+        host_potential = (
+            source_host if isinstance(source_host, Potential)
+            else Potential.from_atoms(source_host)
+        )
+        if host_potential is source_host:
+            cluster_atoms = atoms
+        else:
+            # Do not replace the host of the authoritative workspace atoms.
+            cluster_atoms = atoms.copy()
+            cluster_atoms.embedding_host = host_potential
+        if (host_potential is source_host and atoms.has_potential()
+                and isinstance(atoms.potential, ClusterPotential)):
+            # Retain converged radial data and original native sections.
             potential = atoms.potential
         else:
-            potential = ClusterPotential.from_atoms(atoms)
-        potential.save_to_file(path)
-    except (OSError, ValueError, TypeError, NotImplementedError) as exc:
+            potential = ClusterPotential.from_atoms(cluster_atoms)
+
+        with TemporaryDirectory(dir=path.parent, prefix=".cluster-save-") as staged:
+            staging_dir = Path(staged)
+            staged_host = staging_dir / host_path.name
+            staged_cluster = staging_dir / path.name
+            host_potential.save_to_file(staged_host)
+            potential.save_to_file(staged_cluster)
+            # Stage both before replacing either. A crash between these two
+            # renames can still leave one newer file; save is not a filesystem
+            # transaction across distinct paths.
+            os.replace(staged_host, host_path)
+            os.replace(staged_cluster, path)
+    except Exception as exc:  # noqa: BLE001 - native writers may raise varied errors
         QMessageBox.critical(
             parent, "Save Embedded Cluster Failed",
-            f"Could not write the cluster potential:\\n{exc}",
+            f"Could not save the cluster and its host potential:\\n{exc}",
         )
         return False
     controller.mark_structure_saved(generation)
-    # Recent loading will resolve the host from the workspace or ask for POTFIL.
     recent_files.remember("structure", path)
     return True
+
+
+def ensure_embedded_host_potential(
+    controller: WorkspaceController,
+    parent: QWidget,
+) -> bool:
+    """Attach a matching host POTFIL before a Guided embedded calculation.
+
+    The atom-site identities are relative to the original host, so accepting
+    an unrelated host would silently calculate the wrong impurity geometry.
+    """
+    if controller.can_run_embedding():
+        return True
+    cluster = controller.atoms
+    old_host = getattr(cluster, "embedding_host", None)
+    if old_host is None:
+        QMessageBox.warning(parent, "Host Potential Required",
+                            "The embedded structure has no host reference.")
+        return False
+
+    directory = controller.directory or ""
+    path, _ = QFileDialog.getOpenFileName(
+        parent, "Select Host SPR-KKR Potential", directory,
+        "SPR-KKR host POTFIL (*.pot *.pot_new);;All Files (*)",
+    )
+    if not path:
+        return False
+    try:
+        host_potential = run_modal_task(
+            parent, lambda: Potential.from_file(path),
+            title="Loading Host Potential", label="Reading host POTFIL…",
+        )
+        original_atoms = getattr(old_host, "atoms", old_host)
+        replacement_atoms = host_potential.atoms
+        if (len(original_atoms) != len(replacement_atoms)
+                or not np.allclose(original_atoms.cell, replacement_atoms.cell,
+                                   atol=1e-3, rtol=0)
+                or not np.allclose(original_atoms.positions,
+                                   replacement_atoms.positions, atol=1e-3, rtol=0)):
+            raise ValueError(
+                "The selected host POTFIL has different site ordering, "
+                "positions or lattice vectors. Select the matching host potential."
+            )
+        generation = controller.structure_generation
+
+        def attach(candidate):
+            candidate.embedding_host = host_potential
+            return candidate
+
+        change = controller.apply_structure_edit(
+            attach, expected_structure_generation=generation,
+        )
+        return bool(change is not None and document_change_applied(parent, change))
+    except Exception as exc:  # noqa: BLE001 - invalid host file is a user error
+        QMessageBox.warning(parent, "Cannot Attach Host Potential", str(exc))
+        return False
 
 
 def save_input_parameters(

@@ -190,24 +190,31 @@ def test_flow_acceptance_creates_new_structure_and_clears_periodic_run_capabilit
     assert not controller.can_calculate()
 
 
-def test_generic_structure_save_does_not_drop_embedding_without_host_potfil(
-    monkeypatch,
-):
+def test_uncomputed_embedded_structure_saves_cluster_and_generated_host(monkeypatch, tmp_path):
     from ase2sprkkr_gui.gui.flows import files as file_flows
 
-    parent = host()
-    draft = EmbeddingDraft(parent)
+    draft = EmbeddingDraft(host())
     draft.include([draft.center])
     cluster = draft.to_atoms()
     controller = WorkspaceController(WorkspaceState(atoms=cluster))
-    messages = []
+    path = tmp_path / "cluster.clu"
     monkeypatch.setattr(
-        file_flows.QMessageBox, "warning",
-        lambda *args: messages.append(args),
+        file_flows.QFileDialog, "getSaveFileName",
+        lambda *_args: (str(path), "SPR-KKR cluster potential (*.clu *.pot)"),
     )
-    assert file_flows.save_structure(controller, None, None) is False
-    assert messages
+
+    class Recent:
+        def remember(self, kind, location):
+            assert kind == "structure"
+            assert location == path
+
+    assert file_flows.save_structure(controller, Recent(), None)
+    assert path.is_file()
+    assert (tmp_path / "cluster.host.pot").is_file()
     assert controller.atoms is cluster
+    assert cluster.embedding_host is draft.host
+    assert not controller.has_unsaved_structure
+
 
 
 def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_path):
@@ -222,6 +229,9 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
         def __init__(self):
             self.atoms = host()
 
+        def save_to_file(self, filename):
+            filename.write_text("HOST POT", encoding="utf-8")
+
     host_potential = HostPotential()
     cluster = SPRKKRAtoms.from_embedding(
         host_potential, [(0, (0, 0, 0), "Fe")]
@@ -235,7 +245,7 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
 
     class Writer:
         def save_to_file(self, filename):
-            assert filename == output
+            assert filename.name == output.name
             filename.write_text("CLUPOT", encoding="utf-8")
 
     def make_writer(atoms):
@@ -251,7 +261,50 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
 
     assert file_flows.save_structure(controller, Recent(), None) is True
     assert output.read_text() == "CLUPOT"
+    assert (tmp_path / "cluster.host.pot").read_text() == "HOST POT"
     assert not controller.has_unsaved_structure
+
+
+def test_saved_cluster_automatically_loads_companion_host(monkeypatch, tmp_path):
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    cluster_path = tmp_path / "impurity.clu"
+    host_path = tmp_path / "impurity.host.pot"
+    cluster_path.write_text("CLUPOT")
+    host_path.write_text("HOST")
+    controller = WorkspaceController(WorkspaceState(atoms=host()))
+    chosen = []
+
+    class HostPotential:
+        pass
+
+    class ClusterReader:
+        @classmethod
+        def from_file(cls, path, host=None):
+            assert path == cluster_path
+            assert isinstance(host, HostPotential)
+            return cls()
+
+        @property
+        def atoms(self):
+            return host()
+
+        def host_geometry_warning(self):
+            return None
+
+    from ase2sprkkr import Potential
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    monkeypatch.setattr(Potential, "from_file",
+                        lambda path: chosen.append(path) or HostPotential())
+    monkeypatch.setattr(ClusterPotential, "from_file", ClusterReader.from_file)
+    monkeypatch.setattr(file_flows, "run_modal_task",
+                        lambda _parent, operation, **_kw: operation())
+    class Recent:
+        def remember(self, kind, path):
+            assert kind == "structure"
+            assert path == cluster_path
+    assert file_flows.load_embedded_cluster(controller, Recent(), cluster_path, None)
+    assert chosen == [str(host_path.resolve())]
 
 
 def test_cluster_file_detection_distinguishes_host_potfil(tmp_path):
