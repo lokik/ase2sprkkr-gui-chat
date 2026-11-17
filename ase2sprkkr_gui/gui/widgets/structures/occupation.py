@@ -203,6 +203,9 @@ class OccupationEditor(QWidget):
         nonempty = [entry for entry in self.entries if entry.symbol.strip()]
         if not nonempty:
             return "At least one element is required"
+        if any(not entry.symbol.strip() and entry.value > 1e-6
+               for entry in self.entries):
+            return "An element is required for every occupied component"
         symbols = [
             "Vc" if entry.symbol.strip() == "X" else entry.symbol.strip()
             for entry in nonempty
