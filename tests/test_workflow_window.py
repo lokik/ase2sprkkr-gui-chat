@@ -97,6 +97,62 @@ def test_workspace_signals_refresh_semantic_plan(tmp_path):
     window.close()
 
 
+def test_python_bulk_keeps_embedding_action_reachable_in_small_window(tmp_path, monkeypatch):
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QPushButton, QScrollArea
+
+    from ase2sprkkr_gui.gui.application.shell_history import PythonReplHistory, ShellHistory
+    from ase2sprkkr_gui.gui.dialogs.structures import shell
+
+    application = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.StandardButton.Discard
+    )
+    _gui, window = _workflow(tmp_path)
+
+    def select_from_python(parent, **kwargs):
+        dialog = shell.StructureShellDialog(
+            parent, **kwargs,
+            history=ShellHistory(tmp_path / "shell.json"),
+            python_history=PythonReplHistory(tmp_path / "python_history"),
+        )
+        QTimer.singleShot(0, lambda: dialog.console.process_input(
+            "use(bulk('Fe', 'bcc', a=2.87, cubic=True))"
+        ))
+        assert dialog.exec() == dialog.DialogCode.Accepted
+        return dialog.candidate
+
+    monkeypatch.setattr(shell, "select_shell_structure", select_from_python)
+    try:
+        window.show()
+        window.execute_workflow_command(CreateStructure(CreateStructureKind.SHELL))
+        application.processEvents()
+        assert window.controller.structure_kind() == "3d"
+        assert BuildEmbedding() in _commands(window)
+
+        window.resize(1120, 600)
+        application.processEvents()
+        assert window.height() == 600
+        scroll = window.findChild(QScrollArea, "workflowActionScrollArea")
+        assert scroll is not None
+        buttons = window._actions.findChildren(QPushButton)
+        embedding = next(b for b in buttons if b.accessibleName() == "Build Embedded Cluster")
+        assert scroll.verticalScrollBar().maximum() > 0
+        scroll.ensureWidgetVisible(embedding, 0, 0)
+        application.processEvents()
+        top_left = embedding.mapTo(scroll.viewport(), embedding.rect().topLeft())
+        assert scroll.viewport().rect().contains(top_left)
+        assert scroll.viewport().rect().contains(
+            embedding.mapTo(scroll.viewport(), embedding.rect().bottomRight())
+        )
+        # Scrolling must preserve complete cards and their spacing inside a group.
+        siblings = embedding.parentWidget().findChildren(QPushButton)
+        for above, below in zip(siblings, siblings[1:]):
+            assert above.geometry().bottom() < below.geometry().top()
+    finally:
+        window.close()
+
+
 def test_typed_commands_are_dispatched_without_title_interpretation(
     tmp_path, monkeypatch
 ):

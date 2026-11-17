@@ -393,6 +393,7 @@ def build_embedding_structure(
     from ase2sprkkr_gui.gui.dialogs.structures.embedding import (
         select_build_embedding_structure,
     )
+    from ase2sprkkr_gui.ase.embedding import prepare_embedding_source
 
     generation = controller.structure_generation
     source = controller.atoms
@@ -401,7 +402,8 @@ def build_embedding_structure(
         # Potential identity: generic ASE copy() can discard the attached POTFIL.
         # apply_structure_edit still checks the workspace generation atomically.
         def edit_embedding(_candidate):
-            result = select_build_embedding_structure(source, parent)
+            prepared = prepare_embedding_source(source)
+            result = select_build_embedding_structure(prepared, parent)
             # Closing an unchanged editor must not create a restarted state.
             return None if result is source else result
 

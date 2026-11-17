@@ -172,22 +172,28 @@ def test_flow_cancellation_leaves_workspace_unmodified(monkeypatch):
     assert controller.structure_generation == revision
 
 
-def test_flow_acceptance_creates_new_structure_and_clears_periodic_run_capability(
+def test_flow_acceptance_creates_cluster_with_native_host(
     monkeypatch,
 ):
     parent = host()
     controller = WorkspaceController(WorkspaceState(atoms=parent, input_parameters=object()))
-    generated = EmbeddingDraft(parent)
-    generated.set_occupation([generated.center], {"Fe": 1.0})
+    def accept_cluster(candidate, _parent):
+        native_host, existing = embedding_source(candidate)
+        generated = EmbeddingDraft(native_host, existing)
+        generated.set_occupation([generated.center], {"Fe": 1.0})
+        return generated.to_atoms()
+
     monkeypatch.setattr(
         "ase2sprkkr_gui.gui.dialogs.structures.embedding.select_build_embedding_structure",
-        lambda candidate, _parent: generated.to_atoms(),
+        accept_cluster,
     )
     result = structure_flows.build_embedding_structure(controller, None)
     assert result is controller.atoms
-    assert result.embedding_host is parent
+    assert result.embedding_host.atoms is not parent
+    np.testing.assert_allclose(result.embedding_host.atoms.positions, parent.positions)
     assert controller.structure_kind() == "0d"
-    assert not controller.can_calculate()
+    assert controller.can_run_embedding()
+    assert controller.can_calculate()
 
 
 def test_uncomputed_embedded_structure_saves_cluster_and_generated_host(monkeypatch, tmp_path):
@@ -785,7 +791,9 @@ def test_cell_rings_are_wigner_seitz_rings_about_the_origin():
 
 
 def test_unchanged_embedding_editor_does_not_restart_workspace(monkeypatch):
-    parent = host()
+    from ase2sprkkr import SPRKKRAtoms
+
+    parent = SPRKKRAtoms.promote_ase_atoms(host()).potential
     draft = EmbeddingDraft(parent)
     draft.include([draft.center])
     cluster = draft.to_atoms()
@@ -914,6 +922,45 @@ def test_guided_cluster_scf_is_available_without_input_parameters():
     calculation = plan.group(WorkflowSection.CALCULATE)
     assert calculation is not None
     assert RunTask("scf") in [action.command for action in calculation.actions]
+
+
+@pytest.mark.parametrize("dimension", [2, 3])
+@pytest.mark.parametrize("host_status", ["START", "CONVERGED"])
+def test_building_cluster_from_regular_potential_offers_scf(
+    monkeypatch, gete_host, dimension, host_status,
+):
+    from ase2sprkkr import SPRKKRAtoms
+
+    from ase2sprkkr_gui.gui.workflow.model import RunTask, WorkflowSection
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+
+    potential = (gete_host.potential if dimension == 2
+                 else SPRKKRAtoms.promote_ase_atoms(host()).potential)
+    potential.SCF_INFO.SCFSTATUS = host_status
+    controller = WorkspaceController(WorkspaceState(atoms=potential.atoms))
+
+    def accept_cluster(source, _parent):
+        native_host, existing = embedding_source(source)
+        assert native_host is potential
+        assert existing is None
+        draft = EmbeddingDraft(native_host)
+        draft.include([draft.center])
+        return draft.to_atoms()
+
+    monkeypatch.setattr(
+        "ase2sprkkr_gui.gui.dialogs.structures.embedding.select_build_embedding_structure",
+        accept_cluster,
+    )
+    result = structure_flows.build_embedding_structure(controller, None)
+    assert result is controller.atoms
+    assert result.embedding_host is potential
+    assert controller.can_run_embedding()
+    assert not controller.is_scf_converged()
+    plan = WorkflowPlanner().for_workspace(controller)
+    calculation = plan.group(WorkflowSection.CALCULATE)
+    assert calculation is not None
+    assert [action.command for action in calculation.actions] == [RunTask("scf")]
+    assert potential.SCF_INFO.SCFSTATUS() == host_status
 
 
 def test_guided_host_attachment_keeps_embedded_site_mapping(monkeypatch, tmp_path):

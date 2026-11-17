@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QScrollArea,
     QStyle,
     QSizePolicy,
     QSplitter,
@@ -138,9 +139,14 @@ class WorkflowWindow(QMainWindow):
 
         self._actions = WorkflowActionsWidget(content)
         self._actions.commandRequested.connect(self.execute_workflow_command)
-        content_layout.addWidget(self._actions)
+        action_scroll = QScrollArea(content)
+        action_scroll.setObjectName("workflowActionScrollArea")
+        action_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        action_scroll.setWidgetResizable(True)
+        action_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        action_scroll.setWidget(self._actions)
+        content_layout.addWidget(action_scroll, 1)
 
-        content_layout.addStretch(1)
         splitter.addWidget(content)
 
         # The sidebar is only a layout container: the result view and the

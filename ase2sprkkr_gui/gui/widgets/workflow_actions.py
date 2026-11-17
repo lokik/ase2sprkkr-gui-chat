@@ -1,10 +1,11 @@
 """Qt renderer for an already-resolved Guided workflow plan."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QSize, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QPalette
 from PyQt6.QtWidgets import (
     QLabel,
+    QLayout,
     QMenu,
     QPushButton,
     QStyle,
@@ -30,6 +31,10 @@ class WorkflowActionsWidget(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(SPACE_LG)
+        self._layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Propagate each new plan's minimum height to the enclosing scroll area.
+        # Otherwise Qt can compress groups below their cards' minimum heights.
+        self._layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
     @property
     def plan(self) -> WorkflowPlan | None:

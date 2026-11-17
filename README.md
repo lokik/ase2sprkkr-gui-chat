@@ -136,15 +136,18 @@ buffer alone does not undo an earlier unrelated command. History stores only
 editable cluster values, keeping the host and original radial data shared.
 Changing the view or previewing an expansion does not add history steps.
 
-Plain ASE host structures are sufficient to design a cluster, but native
-**Save Structure** exports a native CLUPOT only when the cluster references
-a host SPR-KKR Potential. Complete radial data are retained where supported;
+When building an embedded cluster from a plain ASE structure, the GUI creates
+a START host Potential before opening the editor. An existing host Potential
+is reused with its radial data; every newly built cluster references its native
+host before calculation setup. Cancelling the editor leaves the original
+workspace unchanged. **Save Structure** exports the native CLUPOT and its host
+POTFIL together. Complete radial data are retained where supported;
 partially available radial data cause a validation error rather than a lossy export. Generic ASE exports are disabled for embedded clusters
 because they would lose their host-site mapping. The native **Load from File** action recognizes CLUPOT and reopens it with
 an existing host Potential or asks for the host POTFIL if none is active.
 An embedded cluster with an actual SPR-KKR host Potential can be run
 through the ordinary execution/profile workflow. The backend selects the native
-cluster executables (such as `cluscf` or `clugen`) using
+cluster executables (such as `embscf` or `embgen`) using
 `CONTROL.CLUTYPE=embedded`, and the GUI loads the resulting CLUPOT with the
 original host reference. The Guided workflow exposes only the cluster tasks
 supported by the backend; a geometry-only host is not enough to launch a run.

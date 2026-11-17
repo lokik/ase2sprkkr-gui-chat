@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from ase.data import atomic_numbers
 from ase.geometry import minkowski_reduce
-from ase2sprkkr import SPRKKRAtoms
+from ase2sprkkr import Potential, SPRKKRAtoms
 from ase2sprkkr.sprkkr.embedding import embedding_data, host_atoms, host_dimension
 from ase2sprkkr.sprkkr.embedding_geometry import (
     EmbeddingSymmetry,
@@ -386,3 +386,29 @@ def embedding_source(atoms):
     if callable(has_potential) and has_potential():
         return atoms.potential, None
     return atoms, None
+
+
+def prepare_embedding_source(atoms):
+    """Provide a native host before editing, preserving the source on cancel.
+
+    Existing potentials retain their identity and radial data. A geometry-only
+    host is converted on a detached copy; the resulting START potential belongs
+    to the new cluster, rather than being deferred until calculation setup.
+    """
+    host, cluster = embedding_source(atoms)
+    if isinstance(host, Potential):
+        return atoms
+    has_potential = getattr(host, "has_potential", None)
+    if callable(has_potential) and has_potential():
+        potential = host.potential
+    else:
+        detached = host.copy()
+        # ASE-style copies do not retain SPR-KKR's layered-region objects.
+        for region in getattr(host, "regions", {}).values():
+            region.copy_for_atoms(detached)
+        potential = Potential.from_atoms(detached)
+    if cluster is None:
+        return potential
+    prepared = cluster.copy()
+    prepared.embedding_host = potential
+    return prepared
