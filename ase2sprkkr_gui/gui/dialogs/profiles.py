@@ -405,7 +405,12 @@ class ProfileSelectionDialog(QDialog):
         )
         default = self._store.resolved_name(None)
         wanted = selected if selected in names else default
-        index = save_index if save_only else self.profiles.findData(wanted)
+        if save_only:
+            index = save_index
+        elif wanted in names:
+            index = self.profiles.findData(wanted)
+        else:
+            index = 0
         self.profiles.setCurrentIndex(max(index, 0))
         self._update_description()
 

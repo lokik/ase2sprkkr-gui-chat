@@ -208,3 +208,34 @@ def test_save_only_is_a_special_non_persistent_profile_choice(application, tmp_p
     assert dialog._confirm_button.text() == "Run"
     assert "Built-in local profile" in dialog.description.text()
     dialog.close()
+
+
+def test_save_only_is_not_selected_as_default_when_no_default_profile(
+    application, tmp_path,
+):
+    class NamedProfiles:
+        def names(self):
+            return ["local", "remote"]
+
+        def resolved_name(self, _name):
+            return None
+
+        def describe(self, name):
+            return f"Profile: {name}"
+
+    dialog = ProfileSelectionDialog(
+        directory=str(tmp_path), store=NamedProfiles()
+    )
+    assert dialog.profiles.currentText() == "local"
+    assert dialog.profile_name() == "local"
+    assert not dialog.save_only_selected()
+    assert dialog._confirm_button.text() == "Run"
+
+    dialog.profiles.setCurrentIndex(dialog.profiles.count() - 1)
+    assert dialog.save_only_selected()
+    assert dialog._confirm_button.text() == "Save files"
+    dialog._reload_profiles()
+    assert dialog.save_only_selected()
+    assert dialog._confirm_button.text() == "Save files"
+    dialog.close()
+
