@@ -933,17 +933,94 @@ def test_cell_site_and_editing_columns_keep_actions_below_site_table():
     QApplication.processEvents()
     columns = (dialog.cells.parentWidget(), dialog.sites.parentWidget(),
                dialog.occupation_group.parentWidget())
-    splitter = columns[0].parentWidget()
-    assert splitter.count() == 3
-    assert tuple(splitter.widget(i) for i in range(3)) == columns
-    assert columns[0].geometry().right() < columns[1].geometry().left()
-    assert columns[1].geometry().right() < columns[2].geometry().left()
+    outer_splitter = columns[0].parentWidget()
+    details_splitter = columns[1].parentWidget()
+    details_panel = details_splitter.parentWidget()
+    assert outer_splitter.count() == 2
+    assert outer_splitter.widget(0) is columns[0]
+    assert outer_splitter.widget(1) is details_panel
+    assert details_splitter.count() == 2
+    assert tuple(details_splitter.widget(i) for i in range(2)) == columns[1:]
+    assert columns[0].mapTo(dialog, QPoint()).x() < columns[1].mapTo(dialog, QPoint()).x()
+    assert columns[1].mapTo(dialog, QPoint()).x() < columns[2].mapTo(dialog, QPoint()).x()
+    expansion = dialog.add_radius_button.parentWidget()
+    assert expansion.parentWidget() is details_panel
+    assert expansion.geometry().top() >= details_splitter.geometry().bottom()
+    assert dialog.symmetric.parentWidget() is columns[0]
     assert dialog.displacement_group.parentWidget() is columns[2]
     for button in (dialog.include_button, dialog.exclude_button, dialog.centre_button):
         assert button.parentWidget() is columns[1]
         assert button.mapTo(dialog, QPoint()).y() >= dialog.sites.mapTo(
             dialog, QPoint(0, dialog.sites.height())
         ).y()
+
+
+def test_embedding_footer_equal_buttons_and_compact_scope_labels():
+    from PyQt6.QtWidgets import QApplication, QDialogButtonBox
+
+    dialog = BuildEmbeddingDialog(host())
+    dialog.show()
+    QApplication.processEvents()
+    buttons = (
+        dialog.undo_button,
+        dialog.redo_button,
+        dialog.buttons.button(QDialogButtonBox.StandardButton.Ok),
+        dialog.buttons.button(QDialogButtonBox.StandardButton.Cancel),
+    )
+    assert len({button.width() for button in buttons}) == 1
+    assert [dialog.global_scope.itemText(i) for i in range(2)] == [
+        "Whole structure", "Current layer",
+    ]
+    assert dialog._plot_hint_timer.interval() == 900
+    assert dialog.cells.canvas in dialog._plot_hints
+    assert dialog.local_preview.canvas in dialog._plot_hints
+    assert dialog.global_preview.canvas in dialog._plot_hints
+    assert not hasattr(dialog, "preview_legend")
+
+
+def test_embedding_symmetry_colors_and_actions_follow_same_checkbox():
+    from matplotlib.colors import to_rgba
+
+    from ase2sprkkr_gui.gui.widgets.structures.host_cell_map import (
+        SELECTED_COLOR, SYMMETRY_APPLY_COLOR, SYMMETRY_PREVIEW_COLOR,
+    )
+
+    dialog = BuildEmbeddingDialog(host())
+    click_cell(dialog, (1, 0, 0))
+    site = dialog._selected_site
+    # The 3D orbit also contains sites in other displayed layers. Choose
+    # one in the current cell-map plane for both preview assertions.
+    related = next(
+        other for other in dialog._highlighted
+        if other != site and other.cell_index in dialog.cells._cells
+    )
+    assert dialog._site_style(site)[2] == SELECTED_COLOR
+    assert dialog._site_style(related)[2] == SYMMETRY_PREVIEW_COLOR
+
+    def map_edge(cell):
+        view = dialog.cells
+        index = view._cells.index(cell)
+        return view.axes.collections[-1].get_edgecolors()[index]
+
+    np.testing.assert_allclose(map_edge(site.cell_index), to_rgba(SELECTED_COLOR))
+    np.testing.assert_allclose(
+        map_edge(related.cell_index), to_rgba(SYMMETRY_PREVIEW_COLOR)
+    )
+    dialog.symmetric.setChecked(True)
+    assert dialog._site_style(site)[2] == SELECTED_COLOR
+    assert dialog._site_style(related)[2] == SYMMETRY_APPLY_COLOR
+    np.testing.assert_allclose(
+        map_edge(related.cell_index), to_rgba(SYMMETRY_APPLY_COLOR)
+    )
+
+    expected = set(dialog._highlighted)
+    dialog.include_button.click()
+    assert set(dialog.draft.entries) == expected
+    dialog.exclude_button.click()
+    assert not dialog.draft.entries
+    dialog.symmetric.setChecked(False)
+    dialog.include_button.click()
+    assert set(dialog.draft.entries) == {site}
 
 
 def test_displacement_is_debounced_and_flushed_before_changing_selected_site():
@@ -1379,7 +1456,8 @@ def test_symmetry_preview_rings_do_not_override_cluster_membership():
     site = dialog._selected_site
     color, _, edge, _ = dialog._site_style(site)
     assert color == "#a6aeb6"  # A selected host atom is still outside the cluster
-    assert edge == "#d5a13b"
+    from ase2sprkkr_gui.gui.widgets.structures.host_cell_map import SELECTED_COLOR
+    assert edge == SELECTED_COLOR
     dialog._include()
     assert dialog._site_style(site)[0] == "#4b92cf"
     dialog.occupation.rows[0]["elem"].setText("Ni")

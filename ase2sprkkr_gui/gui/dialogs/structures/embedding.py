@@ -7,7 +7,7 @@ from itertools import product
 
 import numpy as np
 from PyQt6.QtCore import QEvent, QItemSelection, QItemSelectionModel, Qt, QTimer
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QCursor, QKeySequence
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -44,7 +45,9 @@ from ase2sprkkr_gui.ase.embedding import (
 from ase2sprkkr_gui.gui.dialogs.structures.embedding_history import EmbeddingUndoStack
 from ase2sprkkr_gui.gui.plots.lattice import corner_indices
 from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
-from ase2sprkkr_gui.gui.widgets.structures.host_cell_map import HostCellMap
+from ase2sprkkr_gui.gui.widgets.structures.host_cell_map import (
+    HostCellMap, SELECTED_COLOR, SYMMETRY_APPLY_COLOR, SYMMETRY_PREVIEW_COLOR,
+)
 from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
 
 
@@ -179,15 +182,29 @@ class BuildEmbeddingDialog(QDialog):
         self.cells = HostCellMap(left)
         self.cells.cellSelected.connect(self._cell_changed)
         left_v.addWidget(self.cells, 1)
-        explanation = QLabel(
-            "Fill: blue = included sites, orange = modified. "
-            "Borders: gold = selected cell, purple = symmetry preview."
+        self.symmetric = QCheckBox("Apply actions to symmetry-equivalent sites")
+        self.symmetric.setToolTip(
+            "Include, Exclude, occupation and displacement affect all "
+            "symmetry-equivalent host sites when checked. When unchecked, "
+            "only the selected sites are edited."
         )
-        explanation.setWordWrap(True)
-        left_v.addWidget(explanation)
+        self.symmetric.toggled.connect(self._symmetry_changed)
+        left_v.addWidget(self.symmetric)
+        self.symmetry_info = QLabel()
+        self.symmetry_info.setWordWrap(True)
+        left_v.addWidget(self.symmetry_info)
         splitter.addWidget(left)
 
-        site_group = QGroupBox("Sites in selected cell", splitter)
+        # The expansion controls belong to the two editing columns, while
+        # the cell map extends to the bottom of their combined height.
+        details_panel = QWidget(splitter)
+        details_layout = QVBoxLayout(details_panel)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_splitter = QSplitter(Qt.Orientation.Horizontal, details_panel)
+        details_splitter.setChildrenCollapsible(False)
+        details_layout.addWidget(details_splitter, 1)
+
+        site_group = QGroupBox("Sites in selected cell", details_splitter)
         site_layout = QVBoxLayout(site_group)
         self.cell_label = QLabel()
         site_layout.addWidget(self.cell_label)
@@ -216,19 +233,10 @@ class BuildEmbeddingDialog(QDialog):
         self.centre_button.clicked.connect(self._set_centre)
         site_actions.addWidget(self.centre_button)
         site_layout.addLayout(site_actions)
-        splitter.addWidget(site_group)
+        details_splitter.addWidget(site_group)
 
-        right = QGroupBox("Site editing", splitter)
+        right = QGroupBox("Site editing", details_splitter)
         right_v = QVBoxLayout(right)
-
-        self.symmetric = QCheckBox("Apply to symmetry-equivalent sites")
-        self.symmetric.toggled.connect(self._symmetry_changed)
-        right_v.addWidget(self.symmetric)
-        sym_row = QHBoxLayout()
-        self.symmetry_info = QLabel()
-        self.symmetry_info.setWordWrap(True)
-        sym_row.addWidget(self.symmetry_info, 1)
-        right_v.addLayout(sym_row)
 
         occupation_group = QGroupBox("Occupation", right)
         occupation_layout = QVBoxLayout(occupation_group)
@@ -267,8 +275,10 @@ class BuildEmbeddingDialog(QDialog):
         self.displacement_group = displacement_group
         right_v.addWidget(displacement_group)
         right_v.addStretch(1)
-        splitter.addWidget(right)
-        splitter.setSizes([350, 510, 500])
+        details_splitter.addWidget(right)
+        details_splitter.setSizes([510, 500])
+        splitter.addWidget(details_panel)
+        splitter.setSizes([350, 1010])
 
         options = QGroupBox("Expand cluster around centre")
         options_layout = QVBoxLayout(options)
@@ -298,7 +308,7 @@ class BuildEmbeddingDialog(QDialog):
         self.expansion_info.setWordWrap(True)
         self.expansion_info.hide()
         options_layout.addWidget(self.expansion_info)
-        controls_layout.addWidget(options)
+        details_layout.addWidget(options)
 
         preview_splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
@@ -319,11 +329,11 @@ class BuildEmbeddingDialog(QDialog):
         self.preview_info = QLabel()
         global_layout.addWidget(self.preview_info)
         self.global_scope = QComboBox()
-        self.global_scope.addItem("Whole displayed structure", "whole")
+        self.global_scope.addItem("Whole structure", "whole")
         if self.draft.dimension == 3:
-            self.global_scope.addItem("Current cell layer (n3)", "layer")
+            self.global_scope.addItem("Current layer", "layer")
         else:
-            self.global_scope.addItem("Transition region across cells", "layer")
+            self.global_scope.addItem("Transition region", "layer")
         self.global_scope.currentIndexChanged.connect(self._schedule_global_render)
         self.global_scope.setToolTip("Scope of the host structure shown in this preview")
         self.global_preview = EmbeddingPreview(
@@ -335,11 +345,26 @@ class BuildEmbeddingDialog(QDialog):
         body.addWidget(preview_splitter)
         body.setSizes([350, 450])
 
-        self.preview_legend = QLabel(
-            "Rings: gold = selected site, purple = symmetry preview. "
-            "Fill: blue = in cluster, orange = modified, green = expansion preview."
+        atom_hint = (
+            "Fill: blue = included in cluster; orange = modified; "
+            "green = expansion preview; gray = host. "
+            "Rings: bright orange = selected site; dark orange = symmetry-related "
+            "sites when actions apply to them; purple = symmetry preview."
         )
-        root.addWidget(self.preview_legend)
+        self._plot_hints = {
+            self.cells.canvas: (
+                "Fill: blue = included sites; orange = modified. "
+                "Borders: bright orange = selected cell; dark orange = symmetry-related "
+                "cells when actions apply to them; purple = symmetry preview."
+            ),
+            self.local_preview.canvas: atom_hint,
+            self.global_preview.canvas: atom_hint,
+        }
+        self._plot_hint_target = None
+        self._plot_hint_timer = QTimer(self)
+        self._plot_hint_timer.setInterval(900)
+        self._plot_hint_timer.setSingleShot(True)
+        self._plot_hint_timer.timeout.connect(self._show_plot_hint)
 
         self.summary = QLabel()
         root.addWidget(self.summary)
@@ -349,6 +374,7 @@ class BuildEmbeddingDialog(QDialog):
         self.buttons.accepted.connect(self._accept)
         self.buttons.rejected.connect(self.reject)
         footer = QHBoxLayout()
+        history_buttons = []
         for name, key, slot in (("undo", QKeySequence.StandardKey.Undo, self._undo),
                                 ("redo", QKeySequence.StandardKey.Redo, self._redo)):
             action = QAction(name.title(), self)
@@ -358,10 +384,24 @@ class BuildEmbeddingDialog(QDialog):
             setattr(self, name + "_action", action)
             button = QToolButton(self)
             button.setDefaultAction(action)
+            setattr(self, name + "_button", button)
+            history_buttons.append(button)
             footer.addWidget(button)
+        standard_buttons = [
+            self.buttons.button(QDialogButtonBox.StandardButton.Ok),
+            self.buttons.button(QDialogButtonBox.StandardButton.Cancel),
+        ]
+        width = max(button.sizeHint().width() for button in history_buttons + standard_buttons)
+        for button in history_buttons + standard_buttons:
+            button.setFixedWidth(width)
         footer.addStretch(1)
         footer.addWidget(self.buttons)
         root.addLayout(footer)
+
+    def _show_plot_hint(self):
+        target = self._plot_hint_target
+        if target is not None and target.underMouse():
+            QToolTip.showText(QCursor.pos(), self._plot_hints[target], target)
 
     def _edit_key(self, field):
         return self.undo_stack.edit_key((field, frozenset(self._selected_sites),
@@ -389,6 +429,16 @@ class BuildEmbeddingDialog(QDialog):
             self.undo_stack.end_edit()
 
     def eventFilter(self, obj, event):
+        if obj in self._plot_hints:
+            if event.type() == QEvent.Type.Enter:
+                self._plot_hint_target = obj
+                self._plot_hint_timer.start()
+            elif (event.type() in (
+                QEvent.Type.Leave, QEvent.Type.MouseButtonPress, QEvent.Type.Wheel
+            ) and self._plot_hint_target is obj):
+                self._plot_hint_timer.stop()
+                self._plot_hint_target = None
+                QToolTip.hideText()
         # Child line edits otherwise consume Ctrl+Z as a character-level undo.
         # Keep shortcuts scoped to this dialog, excluding separate modal windows.
         if (event.type() == QEvent.Type.KeyRelease
@@ -503,7 +553,9 @@ class BuildEmbeddingDialog(QDialog):
         self.layer.blockSignals(False)
         self.map_indices.setText(f"n{axes[0] + 1}, n{axes[1] + 1}")
         self.layer_label.setText(f"Layer n{fixed + 1}")
-        self.global_scope.setItemText(1, f"Current cell layer (n{fixed + 1})")
+        self.global_scope.setItemData(
+            1, f"Current cell layer (n{fixed + 1})", Qt.ItemDataRole.ToolTipRole
+        )
         self._display_region_changed()
 
     def _layer_changed(self, value):
@@ -570,6 +622,7 @@ class BuildEmbeddingDialog(QDialog):
             projection=projection, axis_labels=axis_labels,
             selected=self._selected_cell, counts=counts,
             modified=modified, equivalents=equivalents,
+            apply_equivalents=self.symmetric.isChecked(),
         )
 
     def _is_modified(self, site):
@@ -753,8 +806,8 @@ class BuildEmbeddingDialog(QDialog):
             self.symmetry_info.setText(f"Symmetry unavailable: {exc}")
         else:
             self.symmetry_info.setText(
-                f"{len(self._selected_sites)} selected; {len(self._highlighted)} equivalent sites; "
-                f"edits affect {len(targets)} site(s)"
+                f"{len(self._selected_sites)} selected · {len(self._highlighted)} symmetry-related · "
+                f"{len(targets)} affected by actions"
             )
         self._refresh_cells()
         self._schedule_global_render()
@@ -1008,9 +1061,11 @@ class BuildEmbeddingDialog(QDialog):
         else:
             color, size = "#a6aeb6", 23 if local else 12
         if site in self._selected_sites:
-            return color, max(size, 72), "#d5a13b", 2
+            return color, max(size, 72), SELECTED_COLOR, 2.4
         if site in self._highlighted:
-            return color, max(size, 30), "#a081cf", 1.6
+            ring = (SYMMETRY_APPLY_COLOR if self.symmetric.isChecked()
+                    else SYMMETRY_PREVIEW_COLOR)
+            return color, max(size, 30), ring, 1.8
         if site in self._expansion_sites and site not in self.draft.entries:
             # Keep pending additions visible through the surrounding host,
             # using the preview widget's foreground outline layer.

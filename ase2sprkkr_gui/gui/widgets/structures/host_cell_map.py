@@ -11,6 +11,13 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 
+# Shared across the cell map and atom previews: selected and actively linked
+# symmetry counterparts belong to one orange visual family.
+SELECTED_COLOR = "#f59e0b"
+SYMMETRY_APPLY_COLOR = "#a65e13"
+SYMMETRY_PREVIEW_COLOR = "#9871c0"
+
+
 class HostCellMap(QWidget):
     cellSelected = pyqtSignal(tuple)
 
@@ -29,7 +36,7 @@ class HostCellMap(QWidget):
         self.canvas.mpl_connect("button_release_event", self._mouse_release)
 
     def set_cells(self, cells, *, cell, origin, axes, projection, axis_labels,
-                  selected, counts, modified, equivalents):
+                  selected, counts, modified, equivalents, apply_equivalents=False):
         """Display one translated lattice plane; signal full cell identities.
 
         ``axes`` are the two changing lattice indices. ``projection`` is a
@@ -58,7 +65,12 @@ class HostCellMap(QWidget):
             colors.append(
                 "#f3bd81" if index in modified else "#a2c9ed" if counts.get(index) else "#f5f6f7"
             )
-            edges.append("#d5a13b" if index == selected else "#a081cf" if index in equivalents else "#8c969f")
+            edges.append(
+                SELECTED_COLOR if index == selected
+                else (SYMMETRY_APPLY_COLOR if apply_equivalents
+                      else SYMMETRY_PREVIEW_COLOR) if index in equivalents
+                else "#8c969f"
+            )
             widths.append(2.5 if index == selected else 1.8 if index in equivalents else .7)
             if len(self._cells) <= 81:
                 centre = polygon.mean(axis=0)
