@@ -427,3 +427,37 @@ def test_guided_save_structure_writes_normal_atoms_without_running(tmp_path, mon
     assert not window.controller.has_unsaved_structure
     assert window.controller.atoms is structure
     window.close()
+
+
+def test_save_embedded_cluster_from_shutdown_keeps_host_and_writes_both_files(
+    tmp_path, monkeypatch,
+):
+    from ase2sprkkr_gui.ase.embedding import EmbeddingDraft
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    application = QApplication.instance() or QApplication([])
+    gui, workflow = _workflow(tmp_path)
+    periodic_host = Atoms("Fe", cell=[2.87] * 3, pbc=True)
+    draft = EmbeddingDraft(periodic_host)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    gui.controller.replace_structure(cluster)
+    assert gui.controller.has_unsaved_structure
+    assert gui.controller.atoms.embedding_host is periodic_host
+
+    destination = tmp_path / "embedded.clu"
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Save,
+    )
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getSaveFileName",
+        lambda *_args: (str(destination), "SPR-KKR cluster potential (*.clu *.pot)"),
+    )
+
+    assert gui._confirm_unsaved_work()
+    assert destination.is_file()
+    assert (tmp_path / "embedded.host.pot").is_file()
+    assert not gui.controller.has_unsaved_structure
+    assert gui.controller.atoms.embedding_host is periodic_host
+    workflow.close()

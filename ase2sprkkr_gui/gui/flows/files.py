@@ -477,8 +477,10 @@ def save_structure(
     atoms = controller.atoms
     if atoms is None:
         return False
-    if ("sprkkr_embedding" in getattr(atoms, "arrays", {})
-            and getattr(atoms, "embedding_host", None) is not None):
+    # Never fall back to a generic ASE writer for an embedded structure:
+    # it cannot preserve the original-site/cell mapping and host reference.
+    # save_embedded_cluster diagnoses a missing host rather than losing data.
+    if "sprkkr_embedding" in getattr(atoms, "arrays", {}):
         return save_embedded_cluster(controller, recent_files, parent)
     generation = controller.structure_generation
     formats = {

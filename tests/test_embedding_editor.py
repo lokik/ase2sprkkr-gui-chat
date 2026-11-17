@@ -217,6 +217,35 @@ def test_uncomputed_embedded_structure_saves_cluster_and_generated_host(monkeypa
 
 
 
+def test_embedded_structure_missing_host_cannot_silently_export_as_ase(
+    monkeypatch, tmp_path,
+):
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    draft = EmbeddingDraft(host())
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    cluster.info.pop("sprkkr_embedding_host")
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    messages = []
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "warning",
+        lambda *_args: messages.append(_args),
+    )
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getSaveFileName",
+        lambda *_args: pytest.fail("No save dialog for an invalid embedded host"),
+    )
+    monkeypatch.setattr(
+        file_flows, "ase_write",
+        lambda *_args, **_kwargs: pytest.fail("Embedding metadata was lost"),
+    )
+
+    assert not file_flows.save_structure(controller, None, None)
+    assert messages and "host structure" in messages[0][2]
+    assert not (tmp_path / "cluster.xyz").exists()
+
+
 def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_path):
     from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
     from ase2sprkkr.sprkkr.sprkkr_atoms import SPRKKRAtoms
