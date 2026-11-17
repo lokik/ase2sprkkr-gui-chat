@@ -655,6 +655,17 @@ class BuildEmbeddingDialog(QDialog):
                 c=colors, s=sizes, depthshade=False,
                 **({"picker": 7} if pick else {}),
             )
+            # Axes3D's implicit autoscaling can crop edge markers in a small
+            # Qt canvas, especially when the axis decorations are hidden.
+            # Fit all points in an equal-scale padded Cartesian cube.
+            lower = np.min(coordinates, axis=0)
+            upper = np.max(coordinates, axis=0)
+            centre = (lower + upper) / 2
+            halfwidth = max(1.0, float(np.max(upper - lower)) * 0.62)
+            ax.set_xlim(centre[0] - halfwidth, centre[0] + halfwidth)
+            ax.set_ylim(centre[1] - halfwidth, centre[1] + halfwidth)
+            ax.set_zlim(centre[2] - halfwidth, centre[2] + halfwidth)
+            ax.set_box_aspect((1, 1, 1), zoom=0.8)
         canvas.draw_idle()
         return scatter
 
@@ -695,8 +706,11 @@ class BuildEmbeddingDialog(QDialog):
         self._scatter = self._draw_sites(
             self.axes, self.canvas, self._rendered_sites
         )
+        included_shown = sum(
+            site in self.draft.entries for site in self._rendered_sites
+        )
         self.preview_info.setText(
-            f"Cluster: {len(self.draft.entries)} sites · "
+            f"Included: {included_shown}/{len(self.draft.entries)} · "
             f"Equivalents: {len(self._highlighted)} · "
             f"Displayed: {len(self._rendered_sites)}"
         )
