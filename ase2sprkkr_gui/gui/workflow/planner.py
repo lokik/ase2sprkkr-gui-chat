@@ -131,7 +131,41 @@ class WorkflowPlanner:
     def initial_plan(
         self,
         recent: RecentHistorySnapshot | None = None,
+        *,
+        read_only_cluster: str | None = None,
     ) -> WorkflowPlan:
+        if read_only_cluster is not None:
+            return WorkflowPlan(
+                f"CLUPOT loaded read-only: {read_only_cluster}. "
+                "Attach its host POTFIL before editing or calculating.",
+                (
+                    AvailableActionGroup(
+                        WorkflowSection.CREATE, "Create / attach host",
+                        (
+                            _action(
+                                LoadHostPotential(), "Load Host Potential",
+                                "Choose an existing matching host POTFIL",
+                                "structure", ActionIcon.OPEN,
+                            ),
+                            _action(
+                                CreateHostPotential(), "Create Host Potential",
+                                "Build a matching periodic host and generate its POTFIL",
+                                "structure", ActionIcon.BULK_CRYSTAL,
+                            ),
+                        ),
+                    ),
+                    AvailableActionGroup(
+                        WorkflowSection.LOAD, "Load another structure",
+                        (
+                            _action(
+                                Load(LoadKind.STRUCTURE), "Load a Structure",
+                                "Open another structure instead of this CLUPOT",
+                                "load", ActionIcon.OPEN,
+                            ),
+                        ),
+                    ),
+                ),
+            )
         create_actions = (
             _action(
                 CreateStructure(CreateStructureKind.THREE_D),
@@ -231,7 +265,11 @@ class WorkflowPlanner:
     ) -> WorkflowPlan:
         atoms = workspace.atoms
         if atoms is None:
-            return self.initial_plan(recent)
+            path = getattr(workspace, "unresolved_cluster_path", None)
+            return self.initial_plan(
+                recent,
+                read_only_cluster=str(path) if path is not None else None,
+            )
 
         status = workspace.scf_status()
         progress = classify_scf_progress(

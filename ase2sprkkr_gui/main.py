@@ -526,7 +526,20 @@ def main(argv: list[str] | None = None) -> int:
     gui = GuiApplication(parent=app)
     gui.show_workflow_window()
     gui.open_startup_selection(kind, file_path)
-    interrupt = ConsoleInterrupt(gui.request_exit, parent=app)
+    def shutdown_from_console() -> None:
+        if (gui.controller.has_unsaved_structure
+                or gui.controller.has_unsaved_input_parameters):
+            ConsoleInterrupt._console_notice(
+                b"GUI: awaiting response to save/discard prompt.\n"
+            )
+        else:
+            ConsoleInterrupt._console_notice(b"GUI: closing.\n")
+        if not gui.request_exit():
+            ConsoleInterrupt._console_notice(
+                b"GUI remains open (shutdown cancelled or save failed).\n"
+            )
+
+    interrupt = ConsoleInterrupt(shutdown_from_console, parent=app)
     try:
         return app.exec()
     finally:

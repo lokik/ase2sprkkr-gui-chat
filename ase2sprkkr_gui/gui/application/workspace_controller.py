@@ -120,6 +120,10 @@ class WorkspaceController(QObject):
         self._workspace = workspace or WorkspaceState()
         self._conflict_resolver = conflict_resolver
         self._results = ResultStore()
+        # A native CLUPOT may be opened read-only without its host POTFIL.
+        # It is a loaded file, not an editable Atoms document or unsaved work.
+        self._unresolved_cluster = None
+        self._unresolved_cluster_path: Path | None = None
         # The loaded or written revision, not merely the presence of a file.
         self._saved_structure_generation: Generation | None = None
         self._saved_input_parameters_generation: Generation | None = None
@@ -140,6 +144,37 @@ class WorkspaceController(QObject):
                 ),
                 generation=structure_lock.generation,
             )
+
+    @property
+    def unresolved_cluster(self):
+        """Native read-only CLUPOT awaiting an explicitly provided host."""
+        return self._unresolved_cluster
+
+    @property
+    def unresolved_cluster_path(self) -> Path | None:
+        return self._unresolved_cluster_path
+
+    def load_unresolved_cluster(
+        self,
+        potential,
+        path: str | Path,
+        *,
+        expected_structure_generation: Generation | None = None,
+        expected_directory_generation: Generation | None = None,
+    ) -> DocumentChange:
+        """Open an orphan CLUPOT without treating it as an editable structure."""
+        path = Path(path).resolve()
+        change = self.replace_structure(
+            None,
+            directory=str(path.parent),
+            expected_structure_generation=expected_structure_generation,
+            expected_directory_generation=expected_directory_generation,
+        )
+        if change is DocumentChange.APPLIED:
+            self._unresolved_cluster = potential
+            self._unresolved_cluster_path = path
+            self.structureChanged.emit(None)
+        return change
 
     @property
     def structure_state(self) -> StructureState:
@@ -458,6 +493,9 @@ class WorkspaceController(QObject):
             )
         if directory_changed:
             self.directoryChanged.emit(directory)
+        # A successfully loaded regular structure replaces the read-only CLUPOT.
+        self._unresolved_cluster = None
+        self._unresolved_cluster_path = None
         self.structureChanged.emit(atoms)
         return DocumentChange.APPLIED
 
@@ -819,6 +857,8 @@ class WorkspaceController(QObject):
 
     def reset(self) -> None:
         """Clear calculation values while preserving history and active project."""
+        self._unresolved_cluster = None
+        self._unresolved_cluster_path = None
         structure = self.structure_state
         if (
             structure.atoms is not None
