@@ -686,40 +686,100 @@ class BuildEmbeddingDialog(QDialog):
         canvas.draw_idle()
         return scatter
 
-    def _render_local(self):
-        """The pickable view contains one *regular* host cell only.
+    def _host_context_sites(self, *, allowed_only=False):
+        """Finite viewport of the infinite host, independent of cluster size.
 
-        The site table also lists exceptional native 5-vector translations
-        to permit lossless editing; they do not belong to this physical cell.
+        The in-plane cell grid controls how many periodic replicas are shown.
+        For a bulk host we show a bounded stack of translated cells as well.
+        Native 2D lead sites are visible in the whole-structure view but are
+        excluded from the clickable/embeddable layer.
         """
+        host_atoms = getattr(self.draft.host, "atoms", self.draft.host)
+        indices = (
+            sorted(self.draft.allowed) if allowed_only
+            else range(len(host_atoms))
+        )
+        offsets = self._inplane_offsets()
+        xcells = [self.origin_x.value() + offset for offset in offsets]
+        ycells = [self.origin_y.value() + offset for offset in offsets]
+        if self.draft.dimension == 2:
+            cells = ((x, y) for x, y in product(xcells, ycells))
+        else:
+            # A finite viewport, not an attempt to materialize an infinite
+            # periodic host. Keep at most five consecutive bulk layers.
+            nz = min(len(offsets), 5)
+            start = self.layer.value() - nz // 2
+            cells = (
+                (x, y, z)
+                for x, y, z in product(xcells, ycells, range(start, start + nz))
+            )
+        return tuple(HostSite(i, cell) for cell in cells for i in indices)
+
+    def _layer_reference(self):
+        """Normal and physical height of the selected atomic plane (Å)."""
+        host = getattr(self.draft.host, "atoms", self.draft.host)
+        a, b = np.asarray(host.cell, dtype=float)[:2]
+        normal = np.cross(a, b)
+        length = float(np.linalg.norm(normal))
+        if length < 1e-10:
+            raise ValueError("The host has no defined in-plane lattice normal")
+        normal /= length
+        reference = self._selected_site or self.draft.center
+        height = float(np.dot(reference.position(self.draft.host), normal))
+        return normal, height
+
+    def _on_current_layer(self, site, normal, height):
+        # Adjacent atoms in a slightly buckled plane may have subtly
+        # different heights. Do not include the entire multilayer slab.
+        return abs(float(np.dot(site.position(self.draft.host), normal)) - height) <= 0.35
+
+    def _render_local(self):
+        """Clickable physical atomic layer across the visible host-cell grid."""
+        normal, height = self._layer_reference()
         self._local_sites = [
-            HostSite(i, self._selected_cell).canonical(self.draft.host)
-            for i in sorted(self.draft.allowed)
+            site for site in self._host_context_sites(allowed_only=True)
+            if self._on_current_layer(site, normal, height)
         ]
+        # Existing native N5VEC cluster sites can be picked if they actually
+        # lie in this plane; otherwise they remain available in the site table.
+        for site in self.draft.entries:
+            if (
+                site not in self._local_sites
+                and self._on_current_layer(site, normal, height)
+            ):
+                self._local_sites.append(site)
+        self._local_sites.sort()
         self._local_scatter = self._draw_sites(
             self.local_axes, self.local_canvas, self._local_sites, pick=True
         )
         self.local_info.setText(
-            f"Cell {self._selected_cell} · {len(self._local_sites)} sites"
+            f"Layer at {height:.2f} Å · "
+            f"{len(self._local_sites)} visible sites in "
+            f"{self.inplane_cells.value()}×{self.inplane_cells.value()} cells"
         )
 
     def _render_global(self):
-        """The resulting cluster, plus all symmetry equivalents of selection."""
-        sites = set(self.draft.entries) | self._highlighted
+        """Display all host replicas in the viewport with the entire cluster.
+
+        The host is infinite, so 'whole' means the entire displayed viewport
+        plus all explicit included sites and symmetry-related selections,
+        even when those sites are outside the viewport.
+        """
+        host_context = set(self._host_context_sites())
+        overlay = set(self.draft.entries) | self._highlighted
         if self._selected_site is not None:
-            sites.add(self._selected_site)
+            overlay.add(self._selected_site)
         if self.global_scope.currentData() == "layer":
-            if self.draft.dimension == 3:
-                sites = {
-                    site for site in sites
-                    if site.cell_index[2] == self.layer.value()
-                }
-            else:
-                sites = {
-                    site for site in sites
-                    if site.cell_index[:2] == self._selected_cell[:2]
-                }
-        self._rendered_sites = sorted(sites)
+            normal, height = self._layer_reference()
+            host_context = {
+                site for site in host_context
+                if self._on_current_layer(site, normal, height)
+            }
+            overlay = {
+                site for site in overlay
+                if self._on_current_layer(site, normal, height)
+            }
+        self._rendered_sites = sorted(host_context | overlay)
         self._scatter = self._draw_sites(
             self.axes, self.canvas, self._rendered_sites
         )
@@ -727,25 +787,46 @@ class BuildEmbeddingDialog(QDialog):
             site in self.draft.entries for site in self._rendered_sites
         )
         self.preview_info.setText(
-            f"Included: {included_shown}/{len(self.draft.entries)} · "
-            f"Equivalents: {len(self._highlighted)} · "
+            f"Host: {len(host_context)} · "
+            f"Cluster: {included_shown}/{len(self.draft.entries)} · "
+            f"Symmetry: {len(self._highlighted)} · "
             f"Displayed: {len(self._rendered_sites)}"
         )
 
     def _local_pick(self, event):
-        """Select a site through the local view; global view is not pickable."""
+        """Select any editable host site in the displayed atomic layer."""
         if event.artist is not self._local_scatter or not len(event.ind):
             return
         index = int(event.ind[0])
         if not 0 <= index < len(self._local_sites):
             return
         site = self._local_sites[index]
-        if site not in self._site_rows:
+        if site.original_site not in self.draft.allowed:
             return
-        self.sites.blockSignals(True)
-        self.sites.selectRow(self._site_rows.index(site))
-        self.sites.blockSignals(False)
-        self._site_changed()
+        if (
+            site != self._selected_site
+            and self._selected_site is not None
+            and not self.occupation.is_valid()
+        ):
+            return
+        self._apply_pending_displacement()
+        self._selected_cell = site.cell_index[:self.draft.dimension]
+        self._selected_site = site
+        self._occupation_overwrite_approval = None
+        offsets = self._inplane_offsets()
+        for coordinate, spin in zip(
+            site.cell_index[:2], (self.origin_x, self.origin_y)
+        ):
+            if coordinate - spin.value() not in offsets:
+                spin.blockSignals(True)
+                spin.setValue(coordinate)
+                spin.blockSignals(False)
+        if self.layer is not None:
+            self.layer.blockSignals(True)
+            self.layer.setValue(site.cell_index[2])
+            self.layer.blockSignals(False)
+        self._refresh_cells()
+        self._refresh_sites()
 
     def _accept(self):
         self._apply_pending_displacement()
