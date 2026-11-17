@@ -531,3 +531,36 @@ def test_save_embedded_cluster_from_shutdown_keeps_host_and_writes_both_files(
     assert not gui.controller.has_unsaved_structure
     assert gui.controller.atoms.embedding_host is periodic_host
     workflow.close()
+
+
+def test_guided_structure_sidebar_tracks_current_structure(tmp_path):
+    """Structure facts stay separate from actions and results."""
+    from ase.build import bulk
+    from PyQt6.QtWidgets import QSplitter
+
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.show()
+    application.processEvents()
+
+    assert window._layout_splitter.count() == 3
+    assert window._structure_overview.isHidden()
+
+    atoms = bulk("Fe", "bcc", a=2.87, cubic=True)
+    window.controller.replace_structure(atoms)
+    application.processEvents()
+
+    inspector = window._structure_overview
+    assert not inspector.isHidden()
+    assert "Type: Bulk (3D)" in inspector.details.text()
+    assert "Elements: Fe" in inspector.details.text()
+    assert "Periodicity: x, y, z (3D)" in inspector.details.text()
+    assert "Cell (Å)" in inspector.details.text()
+    assert inspector.preview_source.count() == 1
+    assert not window._subtitle.isVisible()
+
+    window.controller.reset()
+    application.processEvents()
+    assert inspector.isHidden()
+    assert window._subtitle.isVisible()
+    window.close()
