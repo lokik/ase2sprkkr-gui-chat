@@ -63,20 +63,21 @@ class BuildEmbeddingDialog(QDialog):
         left = QGroupBox("Host cells", splitter)
         left_v = QVBoxLayout(left)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Grid radius"))
-        self.grid_radius = QSpinBox()
-        self.grid_radius.setRange(1, 10)
-        self.grid_radius.setValue(2)
-        self.grid_radius.valueChanged.connect(self._refresh_cells)
-        row.addWidget(self.grid_radius)
-        row.addWidget(QLabel("Centre x, y"))
+        row.addWidget(QLabel("In-plane cells per axis"))
+        self.inplane_cells = QSpinBox()
+        self.inplane_cells.setRange(1, 21)
+        self.inplane_cells.setValue(5)
+        self.inplane_cells.setToolTip("Actual number of cells displayed along each in-plane axis")
+        self.inplane_cells.valueChanged.connect(self._refresh_cells)
+        row.addWidget(self.inplane_cells)
+        row.addWidget(QLabel("Centre n1, n2"))
         self.origin_x, self.origin_y = QSpinBox(), QSpinBox()
         for spin in (self.origin_x, self.origin_y):
             spin.setRange(-100000, 100000)
             spin.valueChanged.connect(self._refresh_cells)
             row.addWidget(spin)
-        row.addWidget(QLabel("Layer n3" if self.draft.dimension == 3 else "In-plane cells"))
         if self.draft.dimension == 3:
+            row.addWidget(QLabel("Layer n3"))
             self.layer = QSpinBox()
             self.layer.setRange(-100, 100)
             self.layer.valueChanged.connect(self._layer_changed)
@@ -229,26 +230,40 @@ class BuildEmbeddingDialog(QDialog):
             return x, y, self.layer.value()
         return x, y
 
+    def _inplane_offsets(self):
+        # Even cell counts are legal. The centre is the left/lower centre
+        # cell, so changing 4 to 5 does not unexpectedly move the origin.
+        n = self.inplane_cells.value()
+        return tuple(range(-(n // 2), n - n // 2))
+
     def _refresh_cells(self, *_):
-        radius = self.grid_radius.value()
-        size = 2 * radius + 1
+        offsets = self._inplane_offsets()
+        size = len(offsets)
         self._grid_updating = True
         self.cells.blockSignals(True)
         self.cells.setRowCount(size)
         self.cells.setColumnCount(size)
         self.cells.setHorizontalHeaderLabels([
-            str(self.origin_x.value() + x) for x in range(-radius, radius + 1)
+            str(self.origin_x.value() + x) for x in offsets
         ])
         self.cells.setVerticalHeaderLabels([
-            str(self.origin_y.value() + y) for y in range(radius, -radius - 1, -1)
+            str(self.origin_y.value() + y) for y in reversed(offsets)
         ])
+        # The grid only needs included/highlighted identities; avoid
+        # enumerating every atom of a large host in every visible cell.
         for r in range(size):
             for c in range(size):
-                cell = self._cell_index(c - radius, radius - r)
-                sites = self.draft.cell_sites(cell)
-                count = sum(site in self.draft.entries for site in sites)
+                cell = self._cell_index(offsets[c], offsets[size - 1 - r])
+                sites = [
+                    site for site in self.draft.entries
+                    if site.cell_index[:self.draft.dimension] == cell
+                ]
+                count = len(sites)
                 changed = any(self._is_modified(site) for site in sites)
-                highlighted = any(site in self._highlighted for site in sites)
+                highlighted = any(
+                    site.cell_index[:self.draft.dimension] == cell
+                    for site in self._highlighted
+                )
                 item = QTableWidgetItem("★" if changed else str(count) if count else "·")
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setData(Qt.ItemDataRole.UserRole, cell)
@@ -265,8 +280,10 @@ class BuildEmbeddingDialog(QDialog):
             cell = self._selected_cell
         rel_x = cell[0] - self.origin_x.value()
         rel_y = cell[1] - self.origin_y.value()
-        if abs(rel_x) <= radius and abs(rel_y) <= radius:
-            self.cells.setCurrentCell(radius - rel_y, radius + rel_x)
+        if rel_x in offsets and rel_y in offsets:
+            self.cells.setCurrentCell(
+                size - 1 - offsets.index(rel_y), offsets.index(rel_x)
+            )
         else:
             self.cells.clearSelection()
         self.cells.blockSignals(False)
@@ -467,13 +484,16 @@ class BuildEmbeddingDialog(QDialog):
     def _render(self):
         ax = self.axes
         ax.clear()
-        radius = self.grid_radius.value()
+        offsets = self._inplane_offsets()
         layer = self.layer.value() if self.layer else 0
         xs, ys, zs, colors, sizes = [], [], [], [], []
+        # Cap context markers; cluster sites are always shown independently.
+        displayed_cells = len(offsets) ** 2
+        limit = max(1, 20000 // displayed_cells)
         context = (
             HostSite(i, self._cell_index(x, y))
-            for i in sorted(self.draft.allowed)
-            for x, y in product(range(-radius, radius + 1), repeat=2)
+            for i in sorted(self.draft.allowed)[:limit]
+            for x, y in product(offsets, repeat=2)
         )
         # Show the entire finite cluster, including selected sites in other
         # layers or outside the currently visible host-cell map.
@@ -553,8 +573,10 @@ class BuildEmbeddingDialog(QDialog):
                 )
                 if choice != QMessageBox.StandardButton.Yes:
                     return
-            self.result_atoms = self.draft.to_atoms(
-                allow_radial_reset=radial_reset
+            self.result_atoms = (
+                self.draft.original_cluster
+                if self.draft.is_unchanged()
+                else self.draft.to_atoms(allow_radial_reset=radial_reset)
             )
             self.accept()
         self._guard(action)
