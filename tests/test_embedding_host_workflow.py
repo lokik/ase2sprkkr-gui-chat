@@ -72,6 +72,7 @@ def test_created_cluster_reuses_native_host_during_scf(monkeypatch, tmp_path, so
     monkeypatch.setattr(calculation, "select_guided_input_parameters",
                         lambda *_args, **_kwargs: parameters)
     launched = []
+    real_run_calculation = calculation.run_calculation
     monkeypatch.setattr(calculation, "run_calculation",
                         lambda *_args, **_kwargs: launched.append(controller.atoms) or "run")
     messages = []
@@ -79,7 +80,7 @@ def test_created_cluster_reuses_native_host_during_scf(monkeypatch, tmp_path, so
                         lambda _parent, title, message: messages.append((title, message)))
     # A freshly generated START host can be saved/edited but not used for
     # an embedded SCF calculation until its own periodic SCF was run.
-    assert calculation.run_calculation(
+    assert real_run_calculation(
         controller, RecentFiles(tmp_path / "recent.json"), None,
     ) is None
     assert messages and messages[0][0] == "Host SCF Required"
@@ -162,7 +163,7 @@ def test_host_scf_result_updates_a_cluster_edited_while_host_was_running(monkeyp
     new_host.SCF_INFO.SCFSTATUS = "CONVERGED"
     monkeypatch.setattr(controller, "adopt_external_result", lambda _loaded: "record")
     assert captured["on_result_loaded"](
-        SimpleNamespace(atoms=new_host.atoms), request
+        SimpleNamespace(result=SimpleNamespace(potential=new_host)), request
     ) == "record"
     assert controller.atoms.embedding_host is new_host
     np.testing.assert_allclose(controller.atoms.positions, expected_positions)
