@@ -510,6 +510,7 @@ class BuildEmbeddingDialog(QDialog):
         return False
 
     def _include(self):
+        self._apply_pending_displacement()
         def action():
             targets = self._targets()
             self.draft.include(targets)
@@ -517,6 +518,7 @@ class BuildEmbeddingDialog(QDialog):
         self._guard(action)
 
     def _exclude(self):
+        self._apply_pending_displacement()
         def action():
             targets = self._targets()
             self.draft.exclude(targets)
@@ -524,6 +526,7 @@ class BuildEmbeddingDialog(QDialog):
         self._guard(action)
 
     def _set_centre(self):
+        self._apply_pending_displacement()
         def action():
             if self._selected_site is None:
                 raise ValueError("Select a site first")
@@ -538,6 +541,7 @@ class BuildEmbeddingDialog(QDialog):
             self._assign_occupation()
 
     def _assign_occupation(self):
+        self._apply_pending_displacement()
         def action():
             occupation = self.occupation.occupation()
             targets = self._targets()
@@ -592,9 +596,11 @@ class BuildEmbeddingDialog(QDialog):
         self._guard(action)
 
     def _add_radius(self):
+        self._apply_pending_displacement()
         self._guard(lambda: (self.draft.add_radius(self.radius.value()), self._changed()))
 
     def _add_shells(self):
+        self._apply_pending_displacement()
         self._guard(lambda: (self.draft.add_shells(self.shells.value()), self._changed()))
 
     def _changed(self, *, preserve_occupation=False):
