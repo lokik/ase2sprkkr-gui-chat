@@ -43,6 +43,7 @@ from ase2sprkkr_gui.gui.style import (
     secondary_text_stylesheet,
 )
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
+from ase2sprkkr_gui.gui.widgets.structures.overview import StructureOverviewWidget
 from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
 from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
@@ -85,7 +86,7 @@ class WorkflowWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.setWindowTitle("Ase2sprkkr - Workflow")
-        manage_window_geometry(self, "workflow", default_size=(1120, 700))
+        manage_window_geometry(self, "workflow", default_size=(1320, 760))
         self.controller = controller
         self.recent_history = recent_files
         self.settings = settings
@@ -123,9 +124,16 @@ class WorkflowWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(8)
         root.addWidget(splitter)
+        self._layout_splitter = splitter
+
+        # Structure context remains visible alongside calculation actions and
+        # results; no separate viewer or change to the active document is needed.
+        self._structure_overview = StructureOverviewWidget(splitter)
+        self._structure_overview.setMinimumWidth(245)
+        splitter.addWidget(self._structure_overview)
 
         content = QWidget(splitter)
-        content.setMinimumWidth(480)
+        content.setMinimumWidth(360)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, SPACE_XL, 0)
         title = QLabel("What would you like to do?")
@@ -153,7 +161,7 @@ class WorkflowWindow(QMainWindow):
         # The sidebar is only a layout container: the result view and the
         # bottom navigation must be independent, visually separate panels.
         side = QWidget(splitter)
-        side.setMinimumWidth(300)
+        side.setMinimumWidth(285)
         side.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(0, 0, 0, 0)
@@ -249,14 +257,27 @@ class WorkflowWindow(QMainWindow):
         splitter.addWidget(side)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([560, 360])
+        splitter.setStretchFactor(2, 1)
+        splitter.setSizes([290, 560, 380])
 
     def _refresh(self) -> None:
         plan = self._workflow_planner.for_workspace(
             self.controller,
             recent=self.recent_history.read_snapshot(),
         )
-        self._subtitle.setText(plan.subtitle)
+        atoms = self.controller.atoms
+        kind = self.controller.structure_kind()
+        self._structure_overview.set_structure(
+            atoms, kind=kind, scf_status=self.controller.scf_status(),
+        )
+        self._structure_overview.setVisible(atoms is not None)
+        # Formula, dimensionality and SCF state belong to the structure panel.
+        # Keep the central subtitle for onboarding and diagnostic messages.
+        invalid_cluster = (
+            kind == "0d" and getattr(atoms, "embedding_host", None) is None
+        )
+        self._subtitle.setText(plan.subtitle if atoms is None or invalid_cluster else "")
+        self._subtitle.setVisible(atoms is None or invalid_cluster)
         self._actions.set_plan(plan)
 
     def execute_workflow_command(self, command: WorkflowCommand) -> None:
