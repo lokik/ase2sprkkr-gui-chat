@@ -407,6 +407,7 @@ def select_guided_input_parameters(
     *,
     atoms: Any = None,
     dataset_default_mode: str,
+    dataset_prefix: str | None = None,
 ) -> InputParameters | None:
     definition = guided_task_definition(task)
     if not InputParameters.is_task_name(definition.backend_task):
@@ -420,6 +421,12 @@ def select_guided_input_parameters(
             f"The {task.upper()} backend task could not be loaded: {exc}"
         ) from exc
     apply_default_dataset(parameters, dataset_default_mode, atoms)
+    # Prefix only the suggested default, before the dialog. User edits in
+    # the dialog must be respected verbatim.
+    if dataset_prefix:
+        value = parameters.CONTROL.DATASET()
+        if value and not str(value).startswith(dataset_prefix):
+            parameters.CONTROL.DATASET.set(f"{dataset_prefix}{value}")
     dialog = GuidedInputParametersDialog(
         task,
         parameters,

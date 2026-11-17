@@ -91,9 +91,14 @@ class SprkkrExecution:
         input_file, potential_file, output_file = self.file_names()
         # The backend Potential.from_atoms factory recognizes embedded Atoms.
         # Keep the same public atoms= path as periodic calculations.
+        source = (
+            {"potential": self.request.potential}
+            if self.request.potential is not None else
+            {"atoms": self.request.atoms}
+        )
         return self._with_mpi_warnings(
             lambda: calculator.create_run(
-                atoms=self.request.atoms,
+                **source,
                 input_parameters=self.request.input_parameters,
                 directory=self.request.directory,
                 input_file=input_file,
@@ -110,8 +115,13 @@ class SprkkrExecution:
     def prepare_files(self):
         """Write native input/potential files without submitting a runner."""
         input_file, potential_file, _output_file = self.file_names()
+        source = (
+            {"potential": self.request.potential}
+            if self.request.potential is not None else
+            {"atoms": self.request.atoms}
+        )
         return self._calculator().save_input(
-            atoms=self.request.atoms,
+            **source,
             input_parameters=self.request.input_parameters,
             directory=self.request.directory,
             input_file=input_file,
