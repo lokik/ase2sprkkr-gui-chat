@@ -241,6 +241,15 @@ class ProfileSelectionDialog(QDialog):
         layout.addWidget(directory_box)
         directory_box.setVisible(require_directory)
         self._project_changed()
+        self.prepare_only = QCheckBox(
+            "Save input and potential files only (do not run)", self
+        )
+        self.prepare_only.setToolTip(
+            "Prepare the native SPR-KKR input file and both required potentials "
+            "(host and CLUPOT for an embedded cluster), without starting "
+            "an executable or creating a persistent job."
+        )
+        layout.addWidget(self.prepare_only)
         layout.addStretch(1)
 
         buttons = QDialogButtonBox(
@@ -250,6 +259,13 @@ class ProfileSelectionDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        self._confirm_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self._confirm_button.setText("Run")
+        self.prepare_only.toggled.connect(
+            lambda save_only: self._confirm_button.setText(
+                "Save files" if save_only else "Run"
+            )
+        )
         layout.addWidget(buttons)
         self._reload_profiles(selected_profile_name)
 

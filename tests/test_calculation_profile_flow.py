@@ -460,3 +460,36 @@ def test_back_from_conflict_reopens_run_picker_with_previous_settings(
     assert len(selected) == 2
     # Declining a conflicting run does not start the second calculation.
     assert len(launched) == 1
+
+
+def test_prepare_only_selection_writes_inputs_without_creating_run(monkeypatch, tmp_path):
+    controller = _controller(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        calculation_flow, "_select_profile",
+        lambda _parent, **_kw: (
+            True, None, RunIdentification("Fe", "SCF"), str(tmp_path), None, True,
+        ),
+    )
+
+    class Execution:
+        def __init__(self, request, cancellation, *, profile_name):
+            calls.append(("prepare", request.directory, profile_name))
+
+        def prepare_files(self):
+            from types import SimpleNamespace
+            parameters = SimpleNamespace(
+                CONTROL=SimpleNamespace(POTFIL_CLU=lambda: None)
+            )
+            return parameters, tmp_path / "Fe_SCF.inp", tmp_path / "Fe.pot", None
+
+    monkeypatch.setattr(calculation_flow, "SprkkrExecution", Execution)
+    monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", lambda **_kw: pytest.fail(
+        "Save-only must not create any monitor or run"
+    ))
+    monkeypatch.setattr(calculation_flow.QMessageBox, "information",
+                        lambda *_args: calls.append("reported"))
+    assert calculation_flow.run_calculation(
+        controller, RecentFiles(tmp_path / "recent.json"), object()
+    ) is None
+    assert calls == [("prepare", str(tmp_path), None), "reported"]

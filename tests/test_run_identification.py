@@ -176,3 +176,15 @@ def test_execution_dialog_requires_working_directory_and_can_browse(
     dialog.accept()
     assert dialog.result() == dialog.DialogCode.Accepted
     dialog.close()
+
+
+def test_profile_dialog_prepare_only_changes_confirmation_label(tmp_path):
+    from ase2sprkkr_gui.gui.dialogs.profiles import ProfileSelectionDialog
+
+    dialog = ProfileSelectionDialog(directory=str(tmp_path))
+    assert not dialog.prepare_only.isChecked()
+    assert dialog._confirm_button.text() == "Run"
+    dialog.prepare_only.setChecked(True)
+    assert dialog._confirm_button.text() == "Save files"
+    dialog.prepare_only.setChecked(False)
+    assert dialog._confirm_button.text() == "Run"

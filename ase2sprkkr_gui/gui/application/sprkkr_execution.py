@@ -107,6 +107,20 @@ class SprkkrExecution:
             )
         )
 
+    def prepare_files(self):
+        """Write native input/potential files without submitting a runner."""
+        input_file, potential_file, _output_file = self.file_names()
+        return self._calculator().save_input(
+            atoms=self.request.atoms,
+            input_parameters=self.request.input_parameters,
+            directory=self.request.directory,
+            input_file=input_file,
+            potential_file=potential_file,
+            output_file=False,
+            empty_spheres=False,
+            restart_scf=self.request.restart_scf,
+        )
+
     def _notify_persistent_job_changed(self, runner: Any) -> None:
         callback = self._persistent_job_changed
         if callback is None or self.project_id is None:
