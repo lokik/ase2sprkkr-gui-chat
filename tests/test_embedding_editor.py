@@ -604,9 +604,12 @@ def test_editor_occupation_matches_bulk_rows_with_normalize_and_picker():
     dialog = BuildEmbeddingDialog(host())
     assert isinstance(dialog.occupation, OccupationEditor)
     dialog.occupation.set_occupation({"Fe": 0.7, "Ni": 0.3})
+    assert dialog.occupation.normalize_check.isChecked()
+    assert not dialog.occupation.normalize_check.isHidden()
     assert dialog.occupation.is_valid()
     assert dialog.occupation.occupation() == {"Fe": 0.7, "Ni": 0.3}
     dialog.occupation.set_occupation({"Fe": 0.6})
+    assert dialog.occupation.normalize_check.isHidden()
     assert not dialog.occupation.is_valid()
     dialog.occupation.normalize()
     assert dialog.occupation.occupation() == {"Fe": 1.0}
@@ -617,12 +620,85 @@ def test_editor_occupation_matches_bulk_rows_with_normalize_and_picker():
     second = dialog.occupation.rows[-1]
     second["elem"].setText("Ni")
     second["occ"].setValue(0.5)
-    assert not dialog.occupation.is_valid()
-    dialog.occupation.rows[0]["occ"].setValue(0.5)
-    dialog._assign_occupation()
+    assert dialog.occupation.is_valid()
+    assert dialog.occupation.rows[0]["occ"].value() == 0.5
     assert dialog.draft.entries[dialog.draft.center].occupation == {
         "Fe": 0.5, "Ni": 0.5
     }
+
+
+def test_normalize_checkbox_scales_other_components_and_can_be_disabled():
+    from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
+
+    control = OccupationEditor(require_full=True)
+    control.set_occupation({"Fe": 0.5, "Ni": 0.3, "Co": 0.2})
+    assert control.normalize_check.isChecked()
+    assert not control.normalize_check.isHidden()
+
+    control.rows[0]["occ"].setValue(0.6)
+    assert control.occupation() == {"Fe": 0.6, "Ni": 0.24, "Co": 0.16}
+    assert [row["occ"].value() for row in control.rows] == [0.6, 0.24, 0.16]
+
+    control.normalize_check.setChecked(False)
+    control.rows[1]["occ"].setValue(0.1)
+    assert not control.is_valid()
+    assert [row["occ"].value() for row in control.rows] == [0.6, 0.1, 0.16]
+
+    # Checking Normalize fixes existing values without requiring another edit.
+    control.normalize_check.setChecked(True)
+    assert control.is_valid()
+    assert sum(control.occupation().values()) == pytest.approx(1.0)
+    assert all(row["occ"].value() == row["entry"].value for row in control.rows)
+
+
+def test_normalize_checkbox_handles_zero_others_and_row_removal():
+    from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
+
+    control = OccupationEditor(require_full=True)
+    control.set_occupation({"Fe": 1.0})
+    assert control.normalize_check.isHidden()
+    control.add_row()
+    assert not control.normalize_check.isHidden()
+    control.rows[1]["elem"].setText("Ni")
+    control.rows[0]["occ"].setValue(0.75)
+    assert control.occupation() == {"Fe": 0.75, "Ni": 0.25}
+
+    control.remove_row(control.entries[0])
+    assert control.normalize_check.isHidden()
+    assert control.occupation() == {"Ni": 1.0}
+
+    control.set_occupation({"Fe": 0.0, "Ni": 0.0, "Co": 0.0})
+    control.normalize_check.setChecked(False)
+    control.normalize_check.setChecked(True)
+    assert control.is_valid()
+    assert sum(control.occupation().values()) == pytest.approx(1.0)
+    assert all(row["occ"].value() == row["entry"].value for row in control.rows)
+
+
+def test_bulk_normalization_checkbox_updates_the_draft():
+    from ase2sprkkr_gui.gui.dialogs.structures.element_assignment import (
+        ElementAssignmentDialog,
+    )
+
+    parent = host()
+    parent.set_array("spacegroup_kinds", np.array([0]))
+    parent.info["occupancy"] = {"0": {"Fe": 0.7, "Ni": 0.3}}
+    dialog = ElementAssignmentDialog()
+    dialog.setup(parent)
+    editor = dialog._letter_widgets[0].occupation_editor
+    editor.rows[0]["occ"].setValue(0.4)
+    assert [entry.value for entry in dialog._draft.sites[0].occupancies] == [
+        0.4, 0.6
+    ]
+    editor.normalize_check.setChecked(False)
+    editor.rows[1]["occ"].setValue(0.3)
+    assert [entry.value for entry in dialog._draft.sites[0].occupancies] == [
+        0.4, 0.3
+    ]
+    editor.normalize_check.setChecked(True)
+    assert sum(entry.value for entry in dialog._draft.sites[0].occupancies) == (
+        pytest.approx(1.0)
+    )
 
 
 def test_global_preview_highlights_all_equivalents_not_only_selected_cell():
@@ -691,14 +767,16 @@ def test_embedding_occupation_is_committed_automatically_only_when_valid(monkeyp
     # A temporary incomplete mixture must not corrupt the already valid state.
     dialog.occupation.add_row()
     dialog.occupation.rows[0]["occ"].setValue(0.7)
-    dialog.occupation.rows[1]["elem"].setText("Ni")
     assert not dialog.occupation.is_valid()
     assert dialog.draft.entries[site].occupation == {"Fe": 1.0}
+    assert dialog.occupation.rows[1]["occ"].value() == 0.3
 
     row = dialog.occupation.rows[1]
-    row["occ"].setValue(0.3)
+    row["elem"].setText("Ni")
     assert dialog.occupation.is_valid()
     assert dialog.draft.entries[site].occupation == {"Fe": 0.7, "Ni": 0.3}
+    row["occ"].setValue(0.4)
+    assert dialog.draft.entries[site].occupation == {"Fe": 0.6, "Ni": 0.4}
     assert dialog.occupation.rows[1] is row  # No focus-destroying rebuild
     assert prompts == []
 
