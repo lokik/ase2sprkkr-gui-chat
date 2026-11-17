@@ -78,6 +78,11 @@ from **Use as symmetry centre**, which chooses a physical host site for point sy
 radius/shell expansion. A cell can contain many inequivalent sites, so choosing
 that physical centre remains meaningful even within cell (0,0).
 
+The upper row has three resizable columns: host cells, sites in the selected
+cell, and site editing. Include, Exclude and Use as symmetry centre sit beneath
+the site table. Changing the ring count updates the map and context preview
+together immediately; the detail remains on the selected cell.
+
 Select a cell in the lattice map, then sites in its table or detail preview. The
 map preserves projected lattice angles and length ratios; the longer projected
 vector has length one. In 2D it uses an orthonormal basis of the surface plane.
@@ -98,7 +103,8 @@ projection or select the table row. The selected site's number is always shown;
 **All site numbers** labels the other sites as well. The vertical divider lets
 you enlarge the previews, and **Fit** restores their framing. Projection and
 Fit controls sit on the outer sides: left of the detail, right of the context.
-The orthographic
+The context scope selector sits above its projection and Fit controls; a shared
+colour legend runs below both previews. The orthographic
 camera fits the actual projected geometry to the full rectangular canvas on
 resize, preserving physical aspect without the unused 3D bounding cube.
 

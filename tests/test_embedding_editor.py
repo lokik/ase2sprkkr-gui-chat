@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 from ase import Atoms
 from matplotlib.backend_bases import MouseEvent
-from PyQt6.QtWidgets import QPushButton
 
 # The GUI is released independently of the still-unreleased embedding API.
 pytest.importorskip("ase2sprkkr.sprkkr.embedding_geometry")
@@ -925,16 +924,26 @@ def test_global_whole_mode_includes_all_cluster_sites_and_has_padded_bounds():
         assert all(lo < coordinate < hi for coordinate, (lo, hi) in zip(position, bounds))
 
 
-def test_cell_actions_are_adjacent_to_cell_grid():
+def test_cell_site_and_editing_columns_keep_actions_below_site_table():
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QApplication
+
     dialog = BuildEmbeddingDialog(host())
-    panel = dialog.cells.parentWidget()
-    actions = panel.findChildren(QPushButton)
-    assert not {w.text() for w in actions} & {"Include", "Exclude", "Set centre"}
-    right_panel = dialog.sites.parentWidget()
-    right_actions = right_panel.findChildren(QPushButton)
-    assert {w.text() for w in right_actions} >= {
-        "Include", "Exclude", "Use as symmetry centre"
-    }
+    dialog.show()
+    QApplication.processEvents()
+    columns = (dialog.cells.parentWidget(), dialog.sites.parentWidget(),
+               dialog.occupation_group.parentWidget())
+    splitter = columns[0].parentWidget()
+    assert splitter.count() == 3
+    assert tuple(splitter.widget(i) for i in range(3)) == columns
+    assert columns[0].geometry().right() < columns[1].geometry().left()
+    assert columns[1].geometry().right() < columns[2].geometry().left()
+    assert dialog.displacement_group.parentWidget() is columns[2]
+    for button in (dialog.include_button, dialog.exclude_button, dialog.centre_button):
+        assert button.parentWidget() is columns[1]
+        assert button.mapTo(dialog, QPoint()).y() >= dialog.sites.mapTo(
+            dialog, QPoint(0, dialog.sites.height())
+        ).y()
 
 
 def test_displacement_is_debounced_and_flushed_before_changing_selected_site():
@@ -1057,6 +1066,55 @@ def test_detail_follows_grid_selection_and_is_independent_of_viewport_size():
     dialog.cell_rings.setValue(3)
     dialog._render_local()
     assert dialog._local_sites == [destination]
+
+
+@pytest.mark.parametrize("dimension,scope", [(2, 0), (2, 1), (3, 0), (3, 1)])
+def test_cell_ring_spin_redraws_context_without_manual_render(dimension, scope):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication
+
+    parent = host()
+    if dimension == 2:
+        parent.pbc = (True, True, False)
+    dialog = BuildEmbeddingDialog(parent)
+    dialog.cell_rings.setValue(0)
+    dialog.global_scope.setCurrentIndex(scope)
+    dialog.show()
+    QApplication.processEvents()
+    QTest.qWait(300)
+    preview = dialog.global_preview
+    before = np.asarray(preview.canvas.buffer_rgba()).copy()
+    assert len(preview._positions) == 1
+    draws = []
+    preview.canvas.mpl_connect("draw_event", lambda _: draws.append(len(preview._positions)))
+    dialog.cell_rings.setFocus()
+    QTest.keyClick(dialog.cell_rings, Qt.Key.Key_Up)
+    expected = 15 if dimension == 3 and scope == 0 else 5
+    # Viewport controls update the model and artists in the same event turn.
+    assert len(dialog._rendered_sites) == expected
+    assert len(preview._scatter.get_offsets()) == expected
+    for _ in range(30):
+        QTest.qWait(20)
+        if expected in draws:
+            break
+    assert expected in draws
+    assert not np.array_equal(before, np.asarray(preview.canvas.buffer_rgba()))
+    assert dialog.undo_stack.count() == 0
+
+
+@pytest.mark.parametrize("scope", [0, 1])
+def test_gete_ring_change_updates_context_points_and_counter_immediately(gete_host, scope):
+    dialog = BuildEmbeddingDialog(gete_host)
+    dialog.global_scope.setCurrentIndex(scope)
+    dialog.cell_rings.setValue(0)
+    basis_count = len(gete_host) if scope == 0 else len(dialog.draft.allowed)
+    assert len(dialog.global_preview._positions) == basis_count
+    dialog.cell_rings.stepUp()
+    assert len(dialog.global_preview._positions) == 7 * basis_count
+    assert f"Host: {7 * basis_count}" in dialog.preview_info.text()
+    dialog.cell_rings.stepDown()
+    assert len(dialog.global_preview._positions) == basis_count
 
 
 def test_cell_map_stays_at_the_origin_after_selecting_another_cell():
@@ -1225,6 +1283,8 @@ def test_gete_transition_cell_outline_encloses_its_native_sites(gete_host, cell_
     dialog = BuildEmbeddingDialog(gete_host)
     click_cell(dialog, cell_index)
     dialog._render()
+    assert dialog.local_info.text() == f"Transition region {cell_index} · 40 sites"
+    assert dialog.cell_label.text() == f"Cell {cell_index}"
     origin, cell = embedding_cell(gete_host)
     np.testing.assert_allclose(origin, gete_host.regions["left"].cell[2])
     np.testing.assert_allclose(cell, gete_host.regions["central"].cell)

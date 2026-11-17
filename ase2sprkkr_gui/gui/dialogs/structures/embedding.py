@@ -16,8 +16,10 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -127,12 +129,13 @@ class BuildEmbeddingDialog(QDialog):
         controls_layout = QVBoxLayout(controls)
         controls_layout.setContentsMargins(0, 0, 0, 0)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        splitter.setChildrenCollapsible(False)
         controls_layout.addWidget(splitter, 1)
 
         left = QGroupBox("Host cells", splitter)
         left_v = QVBoxLayout(left)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Wigner–Seitz rings around (0,0)"))
+        row.addWidget(QLabel("Wigner–Seitz rings"))
         self.cell_rings = QSpinBox()
         self.cell_rings.setRange(0, 20)
         self.cell_rings.setValue(2)
@@ -147,13 +150,11 @@ class BuildEmbeddingDialog(QDialog):
         row.addWidget(self.map_indices)
         if self.draft.dimension == 3:
             self.layer_label = QLabel("Layer n3")
-            row.addWidget(self.layer_label)
             self.layer = QSpinBox()
             self.layer.setRange(-100000, 100000)
             self.layer.setValue(self._selected_cell[2])
             self.layer.setToolTip("Cell translation index n3, not an individual atomic plane")
             self.layer.valueChanged.connect(self._layer_changed)
-            row.addWidget(self.layer)
         else:
             self.layer = None
         row.addStretch(1)
@@ -167,8 +168,10 @@ class BuildEmbeddingDialog(QDialog):
         self.cell_plane.currentIndexChanged.connect(self._plane_changed)
         if self.draft.dimension == 3:
             plane_row = QHBoxLayout()
-            plane_row.addWidget(QLabel("Cell map plane"))
+            plane_row.addWidget(QLabel("Projection"))
             plane_row.addWidget(self.cell_plane)
+            plane_row.addWidget(self.layer_label)
+            plane_row.addWidget(self.layer)
             plane_row.addStretch(1)
             left_v.addLayout(plane_row)
         else:
@@ -184,12 +187,8 @@ class BuildEmbeddingDialog(QDialog):
         left_v.addWidget(explanation)
         splitter.addWidget(left)
 
-        right = QWidget(splitter)
-        right_v = QVBoxLayout(right)
-        right_v.setContentsMargins(0, 0, 0, 0)
-        site_group = QGroupBox("Sites in selected cell", right)
+        site_group = QGroupBox("Sites in selected cell", splitter)
         site_layout = QVBoxLayout(site_group)
-        right_v.addWidget(site_group, 2)
         self.cell_label = QLabel()
         site_layout.addWidget(self.cell_label)
         self.sites = QTableWidget(site_group)
@@ -200,25 +199,27 @@ class BuildEmbeddingDialog(QDialog):
         self.sites.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.sites.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.sites.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.sites.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.sites.horizontalHeader().setStretchLastSection(True)
         self.sites.itemSelectionChanged.connect(self._site_changed)
         self.sites.currentCellChanged.connect(self._current_site_changed)
-        sites_and_actions = QHBoxLayout()
-        sites_and_actions.addWidget(self.sites, 1)
-        site_actions = QVBoxLayout()
-        include = QPushButton("Include")
-        include.clicked.connect(self._include)
-        site_actions.addWidget(include)
-        exclude = QPushButton("Exclude")
-        exclude.clicked.connect(self._exclude)
-        site_actions.addWidget(exclude)
+        site_layout.addWidget(self.sites, 1)
+        site_actions = QHBoxLayout()
+        self.include_button = QPushButton("Include")
+        self.include_button.clicked.connect(self._include)
+        site_actions.addWidget(self.include_button)
+        self.exclude_button = QPushButton("Exclude")
+        self.exclude_button.clicked.connect(self._exclude)
+        site_actions.addWidget(self.exclude_button)
         self.centre_button = QPushButton("Use as symmetry centre")
         self.centre_button.setToolTip("Centre for point symmetry and radius/shell expansion")
         self.centre_button.clicked.connect(self._set_centre)
         site_actions.addWidget(self.centre_button)
-        site_actions.addStretch(1)
-        sites_and_actions.addLayout(site_actions)
-        site_layout.addLayout(sites_and_actions, 1)
+        site_layout.addLayout(site_actions)
+        splitter.addWidget(site_group)
+
+        right = QGroupBox("Site editing", splitter)
+        right_v = QVBoxLayout(right)
 
         self.symmetric = QCheckBox("Apply to symmetry-equivalent sites")
         self.symmetric.toggled.connect(self._symmetry_changed)
@@ -251,10 +252,9 @@ class BuildEmbeddingDialog(QDialog):
         self.displacement_info = QLabel()
         self.displacement_info.setWordWrap(True)
         displacement_layout.addWidget(self.displacement_info)
-        displacement_row = QHBoxLayout()
+        displacement_row = QFormLayout()
         self.deltas = []
         for label in ("x", "y", "z"):
-            displacement_row.addWidget(QLabel(label))
             spin = QDoubleSpinBox()
             spin.setDecimals(5)
             spin.setRange(-100.0, 100.0)
@@ -262,12 +262,13 @@ class BuildEmbeddingDialog(QDialog):
             self.deltas.append(spin)
             spin.valueChanged.connect(self._schedule_displacement)
             spin.editingFinished.connect(self._finish_displacement_edit)
-            displacement_row.addWidget(spin)
+            displacement_row.addRow(label, spin)
         displacement_layout.addLayout(displacement_row)
         self.displacement_group = displacement_group
         right_v.addWidget(displacement_group)
+        right_v.addStretch(1)
         splitter.addWidget(right)
-        splitter.setSizes([480, 680])
+        splitter.setSizes([350, 510, 500])
 
         options = QGroupBox("Expand cluster around centre")
         options_layout = QVBoxLayout(options)
@@ -315,10 +316,8 @@ class BuildEmbeddingDialog(QDialog):
 
         global_group = QGroupBox("Host structure / embedded cluster · view only", preview_splitter)
         global_layout = QVBoxLayout(global_group)
-        global_header = QHBoxLayout()
         self.preview_info = QLabel()
-        global_header.addWidget(self.preview_info)
-        global_header.addStretch(1)
+        global_layout.addWidget(self.preview_info)
         self.global_scope = QComboBox()
         self.global_scope.addItem("Whole displayed structure", "whole")
         if self.draft.dimension == 3:
@@ -326,20 +325,21 @@ class BuildEmbeddingDialog(QDialog):
         else:
             self.global_scope.addItem("Transition region across cells", "layer")
         self.global_scope.currentIndexChanged.connect(self._schedule_global_render)
-        global_header.addWidget(self.global_scope)
-        global_layout.addLayout(global_header)
-        legend = QLabel(
-            "Rings: gold = selected site, purple = symmetry preview. "
-            "Fill: blue = in cluster, orange = modified, green = expansion preview."
+        self.global_scope.setToolTip("Scope of the host structure shown in this preview")
+        self.global_preview = EmbeddingPreview(
+            controls_on_right=True, controls_header=self.global_scope,
         )
-        legend.setWordWrap(True)
-        global_layout.addWidget(legend)
-        self.global_preview = EmbeddingPreview(controls_on_right=True)
         global_layout.addWidget(self.global_preview, 1)
         preview_splitter.addWidget(global_group)
         preview_splitter.setSizes([650, 650])
         body.addWidget(preview_splitter)
         body.setSizes([350, 450])
+
+        self.preview_legend = QLabel(
+            "Rings: gold = selected site, purple = symmetry preview. "
+            "Fill: blue = in cluster, orange = modified, green = expansion preview."
+        )
+        root.addWidget(self.preview_legend)
 
         self.summary = QLabel()
         root.addWidget(self.summary)
@@ -484,8 +484,10 @@ class BuildEmbeddingDialog(QDialog):
 
     def _display_region_changed(self, *_):
         self._refresh_cells()
-        self._schedule_local_render()
-        self._schedule_global_render()
+        # The cell map and the context must show the same viewport immediately.
+        # Detail geometry is independent of its size and needs no redraw here.
+        self._global_timer.stop()
+        self._render_global()
 
     def _plane_axes(self):
         return tuple(self.cell_plane.currentData()) if self.draft.dimension == 3 else (0, 1)
@@ -586,7 +588,9 @@ class BuildEmbeddingDialog(QDialog):
         ):
             return
         self.undo_stack.end_edit()
-        self._selected_cell = tuple(cell)
+        # Cell-map offsets may contain NumPy scalars; keep UI identities and
+        # their tuple representations as ordinary Python integers.
+        self._selected_cell = tuple(int(index) for index in cell)
         self._selected_site = None
         self._selected_sites.clear()
         self._occupation_overwrite_approval = None

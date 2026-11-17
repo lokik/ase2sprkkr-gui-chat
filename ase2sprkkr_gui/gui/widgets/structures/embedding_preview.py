@@ -24,7 +24,8 @@ from ase2sprkkr_gui.gui.plots.lattice import edge_indices
 class EmbeddingPreview(QWidget):
     pointSelected = pyqtSignal(int)
 
-    def __init__(self, parent=None, *, selectable=False, controls_on_right=False):
+    def __init__(self, parent=None, *, selectable=False, controls_on_right=False,
+                 controls_header: QWidget | None = None):
         super().__init__(parent)
         self._press = None
         self._positions = np.empty((0, 3))
@@ -45,6 +46,8 @@ class EmbeddingPreview(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         controls = QVBoxLayout()
+        if controls_header is not None:
+            controls.addWidget(controls_header)
         self.projection = QComboBox()
         for label, angles in (
             ("3D", (25, -60)), ("XY", (90, -90)),
