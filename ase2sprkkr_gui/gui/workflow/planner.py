@@ -29,6 +29,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
     BuildEmbedding,
+    ConvergeHostScf,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -69,6 +70,8 @@ class WorkflowWorkspace(Protocol):
     def can_build_embedding(self) -> bool: ...
 
     def can_run_embedding(self) -> bool: ...
+
+    def embedding_host_scf_status(self) -> str | None: ...
 
     def scf_status(self) -> str | None: ...
 
@@ -282,6 +285,12 @@ class WorkflowPlanner:
 
         is_cluster = workspace.structure_kind() == "0d"
         invalid_cluster = is_cluster and getattr(atoms, "embedding_host", None) is None
+        host_status = (
+            getattr(workspace, "embedding_host_scf_status", lambda: None)()
+            if is_cluster and not invalid_cluster else None
+        )
+        host_needs_initial_scf = host_status == "START"
+        host_not_converged = host_status not in (None, "START", "CONVERGED")
         if not is_cluster and not converged and not workspace.structure_change_requires_scf_restart():
             empty_spheres = workspace.empty_spheres_action()
             if empty_spheres is not None:
@@ -295,12 +304,23 @@ class WorkflowPlanner:
                     )
                 )
 
+        if host_needs_initial_scf or host_not_converged:
+            continuing = host_not_converged and host_status != "START"
+            calculate.append(_action(
+                ConvergeHostScf(),
+                "Continue Host SCF" if continuing else "Converge Host SCF",
+                ("Complete the periodic host SCF before running the embedded cluster."
+                 if continuing else
+                 "Converge the periodic host potential before calculating the cluster."),
+                "calculation", ActionIcon.RUN,
+            ))
+
         stage = WorkflowStage.POST_SCF if converged else WorkflowStage.SCF
         supported_tasks = workflow_tasks(stage)
         if is_cluster:
-            # Only a cluster with a known host geometry can be configured.
-            # Missing host identity is a corrupt document, not a pending task.
-            supported_tasks = (() if invalid_cluster else tuple(
+            # A START host cannot provide usable embedding boundary conditions.
+            # An iterating host is allowed with an explicit reliability warning.
+            supported_tasks = (() if invalid_cluster or host_needs_initial_scf else tuple(
                 d for d in supported_tasks if _cluster_task_supported(d)
             ))
         for definition in supported_tasks:
@@ -317,6 +337,8 @@ class WorkflowPlanner:
                     description = "Converge bulk region(s), then the interaction zone"
             if is_cluster and not getattr(workspace, "can_run_embedding", lambda: False)():
                 description += " (requires a matching host POTFIL)"
+            elif host_not_converged:
+                description += " (warning: host SCF has not converged; results may be unreliable)"
             calculate.append(
                 _action(
                     RunTask(definition.backend_task),
@@ -411,6 +433,13 @@ class WorkflowPlanner:
             ))
 
         other: list[AvailableAction] = []
+        if is_cluster and not invalid_cluster and host_status not in (None, "START"):
+            other.append(_action(
+                ConvergeHostScf(restart_scf=True),
+                "Re-converge Host SCF",
+                "Restart the periodic host SCF from its current potential.",
+                "calculation", ActionIcon.NEW_CALCULATION,
+            ))
         if progress is not ScfProgress.NOT_STARTED:
             other.append(
                 _action(
@@ -439,11 +468,17 @@ class WorkflowPlanner:
         )
 
         formula = structure_formula(atoms)
+        host_note = (
+            "  •  Host SCF: START (must be converged first)"
+            if host_needs_initial_scf else
+            f"  •  Host SCF: {host_status} (not converged; embedding results may be unreliable)"
+            if host_not_converged else ""
+        )
         return WorkflowPlan(
             ("Invalid embedded structure: the host reference is missing. "
              "Reload or rebuild it from the original host structure."
              if invalid_cluster else
              f"Current structure: {formula}  •  "
-             f"SCF status: {scf_progress_label(progress, status)}"),
+             f"SCF status: {scf_progress_label(progress, status)}{host_note}"),
             tuple(groups),
         )
