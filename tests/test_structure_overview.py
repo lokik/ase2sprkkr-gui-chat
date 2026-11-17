@@ -1,0 +1,93 @@
+"""Guided structure inspector: composition, geometry and host context."""
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
+
+import pytest
+from ase import Atoms
+from ase.build import bulk
+from PyQt6.QtWidgets import QApplication
+
+from ase2sprkkr import SPRKKRAtoms
+from ase2sprkkr_gui.ase.embedding import EmbeddingDraft
+from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
+from ase2sprkkr_gui.gui.widgets.structures.overview import (
+    StructureOverviewWidget,
+    structure_facts,
+)
+from ase2sprkkr.input_parameters.input_parameters import InputParameters
+
+
+@pytest.fixture
+def application():
+    return QApplication.instance() or QApplication([])
+
+
+def test_periodicity_and_cell_data_are_physical_properties():
+    bulk_atoms = Atoms("Fe2", positions=[[0, 0, 0], [1, 1, 1]],
+                       cell=(2, 3, 4), pbc=True)
+    facts = structure_facts(bulk_atoms, status="ITR")
+    assert "Type: Bulk (3D)" in facts
+    assert "Composition: Fe2" in facts
+    assert "Sites: 2" in facts
+    assert "Periodicity: x, y, z (3D)" in facts
+    assert "a=2.000, b=3.000, c=4.000" in facts
+    assert "α=90.0, β=90.0, γ=90.0" in facts
+    assert "SCF status: ITR" in facts
+
+    finite = Atoms("H2", positions=[[0, 0, 0], [1, 0, 0]], pbc=False)
+    finite_facts = structure_facts(finite)
+    assert "Periodicity: None (finite cluster)" in finite_facts
+    assert "Cell (Å)" not in finite_facts
+
+    from ase2sprkkr.sprkkr.build import semiinfinite_system
+
+    slab = semiinfinite_system(bulk("Cu", "sc", a=2.0), (0, 0))
+    slab_facts = structure_facts(slab)
+    assert "Type: 2D structure" in slab_facts
+    assert "Periodicity: x, y (2D)" in slab_facts
+    assert "Cell (Å)" in slab_facts
+
+
+def test_overview_shows_separate_host_and_cluster_information(application):
+    host = SPRKKRAtoms.promote_ase_atoms(bulk("Fe", "bcc", a=2.87)).potential
+    host.SCF_INFO.SCFSTATUS = "ITR"
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+
+    widget = StructureOverviewWidget()
+    widget.set_structure(cluster, kind="0d", scf_status="START")
+
+    assert "Embedded cluster" in widget.details.text()
+    assert "Periodicity: None" in widget.details.text()
+    assert "Host structure" == widget.host_heading.text()
+    assert "Bulk (3D)" in widget.host_details.text()
+    assert "Cell (Å)" in widget.host_details.text()
+    assert "SCF status: ITR" in widget.host_details.text()
+    assert widget.preview_source.count() == 2
+
+    widget.preview_source.setCurrentIndex(1)
+    assert widget.preview_source.currentData() == "host"
+    assert len(widget.preview._positions) == len(host.atoms)
+
+    widget.preview_source.setCurrentIndex(0)
+    assert len(widget.preview._positions) == len(cluster)
+    widget.close()
+
+
+def test_guided_scf_dialog_displays_structure_type(application):
+    source = Atoms("Fe", cell=(3, 3, 3), pbc=True)
+    dialog = GuidedInputParametersDialog("scf", InputParameters.create("scf"),
+                                        atoms=source)
+    assert dialog.structure_type_label.text() == "Structure type: Bulk (3D)"
+    dialog.close()
+
+    without_structure = GuidedInputParametersDialog(
+        "scf", InputParameters.create("scf"),
+    )
+    assert without_structure.structure_type_label is None
+    without_structure.close()
