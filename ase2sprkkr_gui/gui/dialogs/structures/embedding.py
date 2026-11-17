@@ -610,7 +610,9 @@ class BuildEmbeddingDialog(QDialog):
         site = self._local_sites[index]
         if site not in self._site_rows:
             return
+        self.sites.blockSignals(True)
         self.sites.selectRow(self._site_rows.index(site))
+        self.sites.blockSignals(False)
         self._site_changed()
 
     def _accept(self):
