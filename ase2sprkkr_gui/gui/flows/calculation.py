@@ -426,15 +426,21 @@ def configure_and_run_host_scf(
         # The host SCF is a separate periodic calculation, not a cluster
         # result. Keep its own result lineage in the project history.
         adoption = controller.adopt_external_result(loaded)
-        if loaded.atoms is None or not getattr(loaded.atoms, "has_potential", lambda: False)():
+        try:
+            # Result atoms need not carry a Potential attached to themselves.
+            # Read the native result instead; a missing/invalid host must never
+            # silently replace the cluster's last usable host.
+            new_host = loaded.result.potential
+            if not isinstance(new_host, Potential):
+                raise TypeError("SCF result does not contain a periodic Potential.")
+        except Exception as exc:  # noqa: BLE001 - missing or corrupt POTFIL
             QMessageBox.warning(
                 parent, "Host Potential Not Loaded",
                 "The host calculation has finished, but its resulting potential "
                 "could not be loaded. The embedded cluster still uses its "
-                "previous host potential.",
+                f"previous host potential.\\n{exc}",
             )
             return adoption
-        new_host = loaded.atoms.potential
         try:
             adopted = controller.replace_embedding_host_if_current(host, new_host)
         except Exception as exc:  # noqa: BLE001 - reject incomplete/incompatible POTFIL
