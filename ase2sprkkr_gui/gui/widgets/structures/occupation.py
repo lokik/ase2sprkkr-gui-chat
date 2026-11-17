@@ -2,7 +2,7 @@
 
 The widget owns only transient row controls, not the accepted physical structure.
 Bulk assignment supplies mutation callbacks for its ElementAssignmentDraft;
-embedding supplies detached OccupancyEntry rows and commits on Apply.
+embedding supplies detached OccupancyEntry rows and commits valid edits as they occur.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ class OccupationEditor(QWidget):
     """Element rows, picker, fractions, normalization and common validation."""
 
     validityChanged = pyqtSignal(bool)
+    occupationEdited = pyqtSignal()
 
     def __init__(
         self,
@@ -165,6 +166,7 @@ class OccupationEditor(QWidget):
         else:
             entry.symbol = value.strip()
         self._validate()
+        self.occupationEdited.emit()
 
     def _value_changed(self, entry: OccupancyEntry, value: float) -> None:
         if self._on_value is not None:
@@ -172,6 +174,7 @@ class OccupationEditor(QWidget):
         else:
             entry.value = value
         self._validate()
+        self.occupationEdited.emit()
 
     def remove_row(self, entry: OccupancyEntry) -> None:
         if len(self.entries) <= 1:
@@ -184,6 +187,7 @@ class OccupationEditor(QWidget):
         row["w"].setParent(None)
         row["w"].deleteLater()
         self._validate()
+        self.occupationEdited.emit()
 
     def normalize(self) -> None:
         if self._on_normalize is not None:
@@ -198,6 +202,7 @@ class OccupationEditor(QWidget):
             row["occ"].setValue(row["entry"].value)
             row["occ"].blockSignals(False)
         self._validate()
+        self.occupationEdited.emit()
 
     def _validation_error(self) -> str | None:
         nonempty = [entry for entry in self.entries if entry.symbol.strip()]
