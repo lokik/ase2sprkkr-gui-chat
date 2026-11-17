@@ -14,6 +14,7 @@ from ase2sprkkr_gui.gui.input_parameters.tasks import (
 from ase2sprkkr_gui.gui.presentation import (
     ActionCategory,
     empty_spheres_action_title,
+    structure_kind_label,
 )
 from ase2sprkkr_gui.gui.recent_presentation import (
     RecentHistorySnapshot,
@@ -468,6 +469,8 @@ class WorkflowPlanner:
         )
 
         formula = structure_formula(atoms)
+        kind_label = structure_kind_label(workspace.structure_kind())
+        kind_note = f"  •  Structure type: {kind_label}" if kind_label else ""
         host_note = (
             "  •  Host SCF: START (must be converged first)"
             if host_needs_initial_scf else
@@ -478,7 +481,7 @@ class WorkflowPlanner:
             ("Invalid embedded structure: the host reference is missing. "
              "Reload or rebuild it from the original host structure."
              if invalid_cluster else
-             f"Current structure: {formula}  •  "
+             f"Current structure: {formula}{kind_note}  •  "
              f"SCF status: {scf_progress_label(progress, status)}{host_note}"),
             tuple(groups),
         )
