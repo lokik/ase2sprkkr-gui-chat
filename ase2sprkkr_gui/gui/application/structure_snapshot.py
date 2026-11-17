@@ -118,7 +118,7 @@ class StructureSnapshot:
         """Reconstruct the structure, including embedded-cluster identity."""
         host = self.info.get("sprkkr_embedding_host")
         if host is not None:
-            from ase2sprkkr.sprkkr.sprkkr_atoms import SPRKKRAtoms
+            from ase2sprkkr import SPRKKRAtoms
 
             if "sprkkr_embedding" not in self.arrays:
                 raise ValueError("Embedding snapshot is missing site identities")
