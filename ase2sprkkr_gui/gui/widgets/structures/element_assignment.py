@@ -85,7 +85,7 @@ class QLetterRow(QWidget):
         # Model mutations remain delegated to ElementAssignmentDraft.
         self.occupation_editor = OccupationEditor(
             left,
-            on_add=lambda: self.draft.add_occupancy(self.site),
+            on_add=lambda: self.draft.add_occupancy(self.site, value=0.0),
             on_remove=lambda entry: self.draft.remove_occupancy(self.site, entry),
             on_symbol=lambda entry, value: self.draft.set_occupancy_symbol(
                 self.site, entry, value
