@@ -225,8 +225,10 @@ def test_embedded_structure_missing_host_cannot_silently_export_as_ase(
     draft = EmbeddingDraft(host())
     draft.include([draft.center])
     cluster = draft.to_atoms()
-    cluster.info.pop("sprkkr_embedding_host")
     controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    # Simulate a corrupted in-memory reference after a valid structure was
+    # registered; the result-store snapshot deliberately rejects such input.
+    cluster.info.pop("sprkkr_embedding_host")
     messages = []
     monkeypatch.setattr(
         file_flows.QMessageBox, "warning",
