@@ -221,6 +221,10 @@ class OccupationEditor(QWidget):
             return "Duplicate element"
         if any(entry.value < 0 or entry.value > 1 for entry in self.entries):
             return "Occupation component must be between 0 and 1"
+        if self.require_full and any(
+            entry.symbol.strip() and entry.value <= 0 for entry in self.entries
+        ):
+            return "Occupation components must be positive"
         total = sum(entry.value for entry in self.entries)
         if total <= 0:
             return "Occupation must be positive"
