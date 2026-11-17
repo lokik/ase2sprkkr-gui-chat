@@ -13,17 +13,11 @@ from PyQt6.QtWidgets import QApplication
 
 from ase2sprkkr import SPRKKRAtoms
 from ase2sprkkr_gui.ase.embedding import EmbeddingDraft
-from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
 from ase2sprkkr_gui.gui.widgets.structures.overview import (
     StructureOverviewWidget,
     structure_facts,
 )
-from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
-from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
-from ase2sprkkr_gui.gui.workflow.model import WorkflowSection
-from ase2sprkkr_gui.gui.input_parameters.tasks import guided_task_definition
-from ase2sprkkr_gui.physics.lattice import detect_structure_kind
 from ase2sprkkr.input_parameters.input_parameters import InputParameters
 
 
