@@ -222,3 +222,46 @@ def test_result_parse_failure_has_no_workspace_side_effects(tmp_path, monkeypatc
     assert controller.directory == "original"
     assert controller.potential_path == "Cu.pot"
     assert controller.result_store.results == ()
+
+
+def test_native_cluster_result_requires_and_reuses_original_host(tmp_path, monkeypatch):
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+
+    cluster_path = tmp_path / "after_scf.clu"
+    cluster_path.write_text("NQCLU 1\\n", encoding="utf-8")
+    host = object()
+    expected = Atoms("Fe")
+    calls = []
+
+    def parse(path, *, host):
+        calls.append((path, host))
+        return SimpleNamespace(atoms=expected)
+
+    monkeypatch.setattr(ClusterPotential, "from_file", staticmethod(parse))
+    result = SimpleNamespace(
+        files={"converged": cluster_path.name},
+        directory=str(tmp_path),
+        input_parameters=None,
+    )
+    result.path_to = lambda key: result.files[key]
+
+    missing = load_result(result, fallback_directory=tmp_path)
+    assert missing.atoms is None
+    assert "requires a host" in str(missing.potential_error)
+
+    loaded = load_result(result, fallback_directory=tmp_path, embedding_host=host)
+    assert loaded.atoms is expected
+    assert loaded.potential_error is None
+    assert calls == [(cluster_path.resolve(), host)]
+
+
+def test_native_pot_extension_cluster_is_detected_by_header(tmp_path):
+    from ase2sprkkr_gui.gui.application.result_loading import is_embedded_cluster_file
+
+    periodic = tmp_path / "bulk.pot"
+    embedded = tmp_path / "cluster.pot_new"
+    periodic.write_text("HEADER\\nNQ 1\\n", encoding="utf-8")
+    embedded.write_text("HEADER\\nNQCLU 3\\n", encoding="utf-8")
+    assert not is_embedded_cluster_file(periodic)
+    assert is_embedded_cluster_file(embedded)
+    assert not is_embedded_cluster_file(tmp_path / "missing.pot")
