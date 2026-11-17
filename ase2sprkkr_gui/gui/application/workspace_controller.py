@@ -260,7 +260,7 @@ class WorkspaceController(QObject):
             return False
         if self.structure_kind() == "0d":
             # Native embedded calculations need a real, separate host POTFIL.
-            from ase2sprkkr.potentials.potentials import Potential
+            from ase2sprkkr import Potential
 
             return isinstance(getattr(self.atoms, "embedding_host", None), Potential)
         return True
