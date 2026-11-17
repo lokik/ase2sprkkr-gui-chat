@@ -224,17 +224,17 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
 
 
 def test_cluster_file_detection_distinguishes_host_potfil(tmp_path):
-    from ase2sprkkr_gui.gui.flows.files import _is_cluster_potential
+    from ase2sprkkr import Potential
 
     host_file = tmp_path / "host.pot"
     host_file.write_text("GLOBAL SYSTEM PARAMETER\\nNQ 1\\n")
     cluster_file = tmp_path / "cluster.pot"
     cluster_file.write_text("GLOBAL SYSTEM PARAMETER\\nNQCLU 1\\n")
     native_file = tmp_path / "cluster.clu"
-    native_file.write_text("CLUPOT")
-    assert not _is_cluster_potential(host_file)
-    assert _is_cluster_potential(cluster_file)
-    assert _is_cluster_potential(native_file)
+    native_file.write_text("GLOBAL SYSTEM PARAMETER\\nNQCLU 1\\n")
+    assert not Potential.is_cluster_file(host_file)
+    assert Potential.is_cluster_file(cluster_file)
+    assert Potential.is_cluster_file(native_file)
 
 
 def test_open_native_cluster_with_explicit_host_preserves_reference(
@@ -263,6 +263,9 @@ def test_open_native_cluster_with_explicit_host_preserves_reference(
         @property
         def atoms(self):
             return expected
+
+        def host_geometry_warning(self):
+            return None
 
     calls = []
     monkeypatch.setattr(Potential, "from_file",
@@ -421,3 +424,30 @@ def test_embedding_snapshot_has_single_uncopied_host_link():
     assert snapshot.info["sprkkr_embedding_host"] is parent
     assert not hasattr(snapshot, "embedding_host")
     assert snapshot.to_atoms().embedding_host is parent
+
+
+def test_inplane_cells_is_an_actual_cell_count():
+    dialog = BuildEmbeddingDialog(host())
+    dialog.inplane_cells.setValue(4)
+    assert dialog.cells.rowCount() == 4
+    assert dialog.cells.columnCount() == 4
+    assert dialog._inplane_offsets() == (-2, -1, 0, 1)
+    dialog.inplane_cells.setValue(5)
+    assert dialog.cells.rowCount() == 5
+    assert dialog._inplane_offsets() == (-2, -1, 0, 1, 2)
+
+
+def test_unchanged_embedding_editor_does_not_restart_workspace(monkeypatch):
+    parent = host()
+    draft = EmbeddingDraft(parent)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    generation = controller.structure_generation
+    monkeypatch.setattr(
+        "ase2sprkkr_gui.gui.dialogs.structures.embedding.select_build_embedding_structure",
+        lambda source, _parent: source,
+    )
+    assert structure_flows.build_embedding_structure(controller, None) is None
+    assert controller.atoms is cluster
+    assert controller.structure_generation == generation
