@@ -433,7 +433,7 @@ def configure_and_run_host_scf(
                 parent, "Host Potential Not Loaded",
                 "The host calculation has finished, but its resulting potential "
                 "could not be loaded. The embedded cluster still uses its "
-                f"previous host potential.\\n{exc}",
+                f"previous host potential.\n{exc}",
             )
             return adoption
         try:
@@ -442,7 +442,7 @@ def configure_and_run_host_scf(
             QMessageBox.warning(
                 parent, "Cannot Update Embedded Host",
                 "The new host potential was saved in the result history, but "
-                f"could not be attached to the embedded cluster:\\n{exc}",
+                f"could not be attached to the embedded cluster:\n{exc}",
             )
             return adoption
         if not adopted:
