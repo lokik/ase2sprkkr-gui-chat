@@ -255,6 +255,15 @@ class BuildEmbeddingDialog(QDialog):
             return None
 
     def _layer_changed(self, _value):
+        if (
+            self._selected_site is not None
+            and not self.occupation.is_valid()
+            and self._selected_cell[2] != self.layer.value()
+        ):
+            self.layer.blockSignals(True)
+            self.layer.setValue(self._selected_cell[2])
+            self.layer.blockSignals(False)
+            return
         self._refresh_cells()
         self._refresh_sites()
 
@@ -339,8 +348,17 @@ class BuildEmbeddingDialog(QDialog):
         cell = item.data(Qt.ItemDataRole.UserRole)
         if cell is None:
             return
+        if (
+            tuple(cell) != self._selected_cell
+            and self._selected_site is not None
+            and not self.occupation.is_valid()
+        ):
+            # An unfinished mixture must not disappear when changing cells.
+            self._refresh_cells()
+            return
         self._selected_cell = tuple(cell)
         self._selected_site = None
+        self._occupation_overwrite_approval = None
         self._refresh_sites()
 
     def _refresh_sites(self, *, preserve_occupation=False):
@@ -377,6 +395,17 @@ class BuildEmbeddingDialog(QDialog):
         row = self.sites.currentRow()
         if 0 <= row < len(self._site_rows):
             next_site = self._site_rows[row]
+            if (
+                next_site != self._selected_site
+                and self._selected_site is not None
+                and not self.occupation.is_valid()
+            ):
+                # Do not silently discard invalid in-progress occupation rows.
+                if self._selected_site in self._site_rows:
+                    self.sites.blockSignals(True)
+                    self.sites.selectRow(self._site_rows.index(self._selected_site))
+                    self.sites.blockSignals(False)
+                return
             if next_site != self._selected_site:
                 self._occupation_overwrite_approval = None
             self._selected_site = next_site
