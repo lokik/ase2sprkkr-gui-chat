@@ -491,3 +491,47 @@ def test_versioned_cluster_history_restores_native_file_using_same_host(
     assert restored.embedding_host is parent
     assert restored.sites[0].occupation.to_dict(True) == {"Fe": 1.0}
     assert calls == [(path.resolve(), parent)]
+
+
+def test_mismatched_host_requires_confirmation_before_workspace_replacement(
+    monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+    from ase2sprkkr import Potential
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from PyQt6.QtWidgets import QMessageBox
+    from ase2sprkkr_gui.gui.flows import files as file_flows
+
+    parent = host()
+    draft = EmbeddingDraft(parent)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+
+    path = tmp_path / "unmatched.clu"
+    path.write_text("NQCLU 1\\n", encoding="utf-8")
+    original = host()
+    controller = WorkspaceController(WorkspaceState(atoms=original))
+    before = controller.structure_generation
+    prompts = []
+
+    monkeypatch.setattr(Potential, "from_file",
+                        staticmethod(lambda *_args: SimpleNamespace(LATTICE=object())))
+    monkeypatch.setattr(
+        ClusterPotential, "from_file",
+        staticmethod(lambda *args, **kwargs: SimpleNamespace(
+            atoms=cluster,
+            host_geometry_warning=lambda: "Host mismatch",
+        )),
+    )
+    monkeypatch.setattr(file_flows, "run_modal_task",
+                        lambda _parent, fn, **_kw: fn())
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *args: (prompts.append(args) or QMessageBox.StandardButton.Cancel),
+    )
+    assert not file_flows.load_embedded_cluster(
+        controller, None, path, None, host_path=tmp_path / "host.pot"
+    )
+    assert controller.atoms is original
+    assert controller.structure_generation == before
+    assert len(prompts) == 1
