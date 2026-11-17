@@ -399,18 +399,13 @@ def configure_and_run_host_scf(
         parameters = select_guided_input_parameters(
             "scf", parent=parent, atoms=host.atoms,
             dataset_default_mode=dataset_default_mode,
+            dataset_prefix="host_",
         )
     except GuidedTaskUnavailable as exc:
         QMessageBox.critical(parent, "Task Unavailable", str(exc))
         return None
     if parameters is None:
         return None
-
-    # The host is a separate physical calculation: avoid colliding with
-    # cluster input/potential files if both runs share a working directory.
-    dataset = dataset_value(parameters)
-    if dataset and not dataset.startswith("host_"):
-        parameters.CONTROL.DATASET.set(f"host_{dataset}")
 
     request = CalculationRequest(
         atoms=host.atoms,
