@@ -336,11 +336,15 @@ class WorkspaceController(QObject):
         # does not affect the original or lose edits to sites/occupations.
         updated = atoms.copy()
         updated.embedding_host = new_host
-        # A new host invalidates the cluster's previous SCF convergence.
-        # Preserve radial site data for the next SCF, but create a fresh native
-        # cluster Potential on demand from those sites and the new host.
+        # A different host invalidates the earlier embedded SCF, even if
+        # the cluster sites still carry a full set of radial data. Attach an
+        # explicit START ClusterPotential rather than allowing the atom data
+        # to be misinterpreted as an already converged cluster.
+        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+
         updated._potential = None
-        updated.info.pop("sprkkr_embedding_scf_status", None)
+        updated.info["sprkkr_embedding_scf_status"] = "START"
+        updated._potential = ClusterPotential.from_atoms(updated, scf_status="START")
 
         parent_id = self.state_id
         state_id = self._results.new_child_state(
