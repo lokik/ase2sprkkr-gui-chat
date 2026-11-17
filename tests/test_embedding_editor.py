@@ -590,7 +590,7 @@ def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
 
     assert "Cluster: 1/1" in dialog.preview_info.text()
     assert "Displayed:" in dialog.preview_info.text()
-    assert "Cell (0, 0, 0)" in dialog.local_info.text()
+    assert "Layer at " in dialog.local_info.text()
     assert dialog.axes.get_title() == ""
     assert dialog.axes.get_xlabel() == ""
     assert dialog.axes.get_ylabel() == ""
@@ -804,7 +804,8 @@ def test_local_preview_contains_only_regular_sites_in_one_host_cell():
     dialog._selected_cell = (1, 0)
     assert special in dialog.draft.cell_sites((1, 0))  # still editable in table
     dialog._render_local()
-    assert dialog._local_sites == [HostSite(0, (1, 0))]
+    assert HostSite(0, (1, 0)) in dialog._local_sites
+    assert len(dialog._local_sites) == dialog.inplane_cells.value() ** 2
     assert special not in dialog._local_sites
 
 
