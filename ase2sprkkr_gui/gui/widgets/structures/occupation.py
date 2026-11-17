@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterable, Mapping
 
 from PyQt6.QtCore import QEvent, pyqtSignal
 from PyQt6.QtWidgets import (
-    QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QCheckBox, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QStyle, QVBoxLayout, QWidget,
 )
 from ase2sprkkr_gui.ase.element_assignment import (
@@ -61,9 +61,14 @@ class OccupationEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         controls = QHBoxLayout()
         controls.addStretch(1)
-        self.normalize_btn = QPushButton("Normalize")
-        self.normalize_btn.clicked.connect(self.normalize)
-        controls.addWidget(self.normalize_btn)
+        self.normalize_check = QCheckBox("Normalize")
+        self.normalize_check.setChecked(True)
+        self.normalize_check.setToolTip(
+            "Keep the sum at 1 by adjusting the other components"
+        )
+        self.normalize_check.setVisible(False)
+        self.normalize_check.toggled.connect(self._normalization_toggled)
+        controls.addWidget(self.normalize_check)
         self.restore_btn = QPushButton("Restore original")
         self.restore_btn.setToolTip("Restore the original occupation for this site")
         self.restore_btn.setVisible(False)
@@ -87,6 +92,7 @@ class OccupationEditor(QWidget):
         self.entries = list(entries)
         for entry in self.entries:
             self._append_row(entry)
+        self._update_normalize_visibility()
         self._validate()
 
     def set_occupation(self, occupation: dict[str, float]) -> None:
@@ -133,6 +139,7 @@ class OccupationEditor(QWidget):
         entry = self._on_add() if self._on_add is not None else OccupancyEntry("", 0.0)
         self.entries.append(entry)
         self._append_row(entry)
+        self._update_normalize_visibility()
         self._validate()
 
     def _append_row(self, entry: OccupancyEntry) -> None:
@@ -209,11 +216,57 @@ class OccupationEditor(QWidget):
         self._validate()
         self.occupationEdited.emit()
 
-    def _value_changed(self, entry: OccupancyEntry, value: float) -> None:
+    def _set_value(self, entry: OccupancyEntry, value: float) -> None:
+        """Update the owner and the control without recursively emitting edits."""
         if self._on_value is not None:
             self._on_value(entry, value)
         else:
             entry.value = value
+        for row in self.rows:
+            if row["entry"] is entry:
+                spin = row["occ"]
+                blocked = spin.blockSignals(True)
+                try:
+                    spin.setValue(value)
+                finally:
+                    spin.blockSignals(blocked)
+                break
+
+    def _balance(self, entries: list[OccupancyEntry], units: int) -> None:
+        """Allocate thousandths proportionally, preserving an exact total."""
+        if not entries:
+            return
+        weights = [max(0.0, entry.value) for entry in entries]
+        if not sum(weights):
+            weights = [1.0] * len(entries)
+        weight_sum = sum(weights)
+        quotas = [units * weight / weight_sum for weight in weights]
+        allocations = [int(quota) for quota in quotas]
+        remaining = units - sum(allocations)
+        # Largest remainder keeps all displayed three-decimal values in sync
+        # with the underlying model, including mixtures of three or more.
+        order = sorted(
+            range(len(entries)),
+            key=lambda i: (quotas[i] - allocations[i], -i),
+            reverse=True,
+        )
+        for index in order[:remaining]:
+            allocations[index] += 1
+        for entry, allocated in zip(entries, allocations):
+            self._set_value(entry, allocated / 1000)
+
+    def _update_normalize_visibility(self) -> None:
+        self.normalize_check.setVisible(len(self.entries) > 1)
+
+    def _normalization_toggled(self, checked: bool) -> None:
+        if checked and len(self.entries) > 1:
+            self.normalize()
+
+    def _value_changed(self, entry: OccupancyEntry, value: float) -> None:
+        self._set_value(entry, value)
+        if self.normalize_check.isChecked() and len(self.entries) > 1:
+            others = [item for item in self.entries if item is not entry]
+            self._balance(others, 1000 - round(value * 1000))
         self._validate()
         self.occupationEdited.emit()
 
@@ -227,21 +280,22 @@ class OccupationEditor(QWidget):
         self.rows.remove(row)
         row["w"].setParent(None)
         row["w"].deleteLater()
+        self._update_normalize_visibility()
+        if self.normalize_check.isChecked():
+            self._normalize_values()
         self._validate()
         self.occupationEdited.emit()
 
-    def normalize(self) -> None:
-        if self._on_normalize is not None:
+    def _normalize_values(self) -> None:
+        if self._on_normalize is not None and sum(
+            entry.value for entry in self.entries
+        ) > 0:
             self._on_normalize()
-        else:
-            total = sum(e.value for e in self.entries)
-            if total > 0:
-                for entry in self.entries:
-                    entry.value /= total
-        for row in self.rows:
-            row["occ"].blockSignals(True)
-            row["occ"].setValue(row["entry"].value)
-            row["occ"].blockSignals(False)
+        self._balance(self.entries, 1000)
+
+    def normalize(self) -> None:
+        """Normalize current values (also used when checking Normalize)."""
+        self._normalize_values()
         self._validate()
         self.occupationEdited.emit()
 
