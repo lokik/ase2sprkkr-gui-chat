@@ -590,7 +590,7 @@ def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
 
     assert "Cluster: 1/1" in dialog.preview_info.text()
     assert "Displayed:" in dialog.preview_info.text()
-    assert "Layer at " in dialog.local_info.text()
+    assert "Host layer n3=0" in dialog.local_info.text()
     assert dialog.axes.get_title() == ""
     assert dialog.axes.get_xlabel() == ""
     assert dialog.axes.get_ylabel() == ""
@@ -1002,21 +1002,23 @@ def test_2d_multilayer_host_shows_full_repeated_structure_and_one_atomic_plane()
     dialog._render()
     n_cells = dialog.inplane_cells.value() ** 2
     assert len(dialog._site_rows) == 40  # Site table: one host unit cell
-    assert len(dialog._local_sites) == n_cells  # Layer: across all visible cells
+    assert len(dialog._local_sites) == 40 * n_cells  # Full 2D transition region
     assert len(dialog._rendered_sites) == 40 * n_cells  # Whole host viewport
     assert "Host: 1000" in dialog.preview_info.text()
+    assert "Transition region" in dialog.local_info.text()
     assert "Cluster: 0/0" in dialog.preview_info.text()
 
-    # Choosing another basis atom chooses another physical atomic plane.
+    # Choosing another basis atom changes the highlighted site without
+    # discarding the other 39 basis sites of the 2D transition region.
     dialog.sites.selectRow(30)
     dialog._render_local()
-    assert len(dialog._local_sites) == n_cells
-    assert all(site.original_site == 30 for site in dialog._local_sites)
+    assert len(dialog._local_sites) == 40 * n_cells
+    assert HostSite(30, (0, 0)) in dialog._local_sites
 
     dialog.global_scope.setCurrentIndex(1)
     dialog._render_global()
-    assert len(dialog._rendered_sites) == n_cells
-    assert all(site.original_site == 30 for site in dialog._rendered_sites)
+    assert len(dialog._rendered_sites) == 40 * n_cells
+    assert set(dialog._local_sites) <= set(dialog._rendered_sites)
 
     dialog.global_scope.setCurrentIndex(0)
     dialog._render_global()
