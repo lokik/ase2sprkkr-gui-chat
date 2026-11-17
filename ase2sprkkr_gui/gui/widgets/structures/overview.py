@@ -1,6 +1,8 @@
 """Compact, read-only structure information in the Guided workflow sidebar."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 from ase.data.colors import jmol_colors
 from PyQt6.QtCore import Qt
@@ -46,6 +48,21 @@ def _periodicity(atoms) -> str:
     return ", ".join(axes) + f" ({len(axes)}D)"
 
 
+def _element_symbols(atoms) -> str:
+    """Include mixed-occupancy species, not only ASE's representative atoms."""
+    symbols = set(atoms.get_chemical_symbols())
+    occupancies = getattr(atoms, "info", {}).get("occupancy")
+    if isinstance(occupancies, Mapping):
+        for occupation in occupancies.values():
+            if isinstance(occupation, Mapping):
+                symbols.update(str(symbol) for symbol in occupation)
+    if (getattr(atoms, "are_sites_inited", None) is not None
+            and atoms.are_sites_inited()):
+        for site in atoms.sites:
+            symbols.update(t.symbol for t in site.occupation.atomic_types())
+    return ", ".join(sorted(symbols))
+
+
 def structure_facts(atoms, *, kind=None, status=None) -> str:
     """Plain-text structure facts, including meaningful cell data if periodic."""
     if atoms is None:
@@ -54,7 +71,7 @@ def structure_facts(atoms, *, kind=None, status=None) -> str:
     lines = [
         f"Type: {structure_kind_label(kind) or 'Unknown structure'}",
         f"Composition: {structure_formula(atoms)}",
-        "Elements: " + ", ".join(sorted(set(atoms.get_chemical_symbols()))),
+        f"Elements: {_element_symbols(atoms)}",
         f"Sites: {len(atoms)}",
         f"Periodicity: {_periodicity(atoms)}",
     ]
