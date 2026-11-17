@@ -97,8 +97,24 @@ class BuildEmbeddingDialog(QDialog):
         self.cells.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.cells.horizontalHeader().setDefaultSectionSize(58)
         self.cells.verticalHeader().setDefaultSectionSize(46)
-        self.cells.itemSelectionChanged.connect(self._cell_changed)
-        left_v.addWidget(self.cells, 1)
+        # The previous itemSelectionChanged/currentItem pair could read the
+        # *previous* current item during a mouse selection transition.
+        self.cells.currentCellChanged.connect(self._cell_changed)
+        cells_and_actions = QHBoxLayout()
+        cells_and_actions.addWidget(self.cells, 1)
+        cell_actions = QVBoxLayout()
+        include = QPushButton("Include")
+        include.clicked.connect(self._include)
+        cell_actions.addWidget(include)
+        exclude = QPushButton("Exclude")
+        exclude.clicked.connect(self._exclude)
+        cell_actions.addWidget(exclude)
+        centre = QPushButton("Set centre")
+        centre.clicked.connect(self._set_centre)
+        cell_actions.addWidget(centre)
+        cell_actions.addStretch(1)
+        cells_and_actions.addLayout(cell_actions)
+        left_v.addLayout(cells_and_actions, 1)
         explanation = QLabel(
             "Blue: included sites   •   Orange: changed occupation or position   "
             "•   Purple: symmetry preview"
@@ -122,18 +138,6 @@ class BuildEmbeddingDialog(QDialog):
         self.sites.horizontalHeader().setStretchLastSection(True)
         self.sites.itemSelectionChanged.connect(self._site_changed)
         right_v.addWidget(self.sites, 1)
-
-        selection_row = QHBoxLayout()
-        include = QPushButton("Include")
-        include.clicked.connect(self._include)
-        selection_row.addWidget(include)
-        exclude = QPushButton("Exclude")
-        exclude.clicked.connect(self._exclude)
-        selection_row.addWidget(exclude)
-        centre = QPushButton("Set centre")
-        centre.clicked.connect(self._set_centre)
-        selection_row.addWidget(centre)
-        right_v.addLayout(selection_row)
 
         self.symmetric = QCheckBox("Apply to symmetry-equivalent sites")
         self.symmetric.toggled.connect(self._update_symmetry_preview)
@@ -311,8 +315,14 @@ class BuildEmbeddingDialog(QDialog):
                 item = QTableWidgetItem("★" if changed else str(count) if count else "·")
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setData(Qt.ItemDataRole.UserRole, cell)
-                if highlighted:
+                # Selected cell and symmetry-related *other* cells have
+                # different semantics; never mark orbit members as selected.
+                if cell == self._selected_cell:
+                    item.setBackground(QBrush(QColor("#e5bd68")))
+                    item.setToolTip("Selected cell")
+                elif highlighted and self.symmetric.isChecked():
                     item.setBackground(QBrush(QColor("#bba5e8")))
+                    item.setToolTip("Contains symmetry-equivalent sites")
                 elif changed:
                     item.setBackground(QBrush(QColor("#f3bd81")))
                 elif count:
@@ -339,10 +349,10 @@ class BuildEmbeddingDialog(QDialog):
         return (entry.occupation != site.occupation(self.draft.host)
                 or np.linalg.norm(entry.displacement) > 1e-8)
 
-    def _cell_changed(self):
-        if self._grid_updating:
+    def _cell_changed(self, row, column, *_):
+        if self._grid_updating or row < 0 or column < 0:
             return
-        item = self.cells.currentItem()
+        item = self.cells.item(row, column)
         if item is None:
             return
         cell = item.data(Qt.ItemDataRole.UserRole)
@@ -359,6 +369,7 @@ class BuildEmbeddingDialog(QDialog):
         self._selected_cell = tuple(cell)
         self._selected_site = None
         self._occupation_overwrite_approval = None
+        self._refresh_cells()
         self._refresh_sites()
 
     def _refresh_sites(self, *, preserve_occupation=False):
@@ -624,8 +635,15 @@ class BuildEmbeddingDialog(QDialog):
         return scatter
 
     def _render_local(self):
-        """The only pickable 3D view: one host cell/2D transition region."""
-        self._local_sites = list(self.draft.cell_sites(self._selected_cell))
+        """The pickable view contains one *regular* host cell only.
+
+        The site table also lists exceptional native 5-vector translations
+        to permit lossless editing; they do not belong to this physical cell.
+        """
+        self._local_sites = [
+            HostSite(i, self._selected_cell).canonical(self.draft.host)
+            for i in sorted(self.draft.allowed)
+        ]
         self._local_scatter = self._draw_sites(
             self.local_axes, self.local_canvas, self._local_sites, pick=True
         )
