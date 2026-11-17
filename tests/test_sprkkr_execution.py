@@ -287,3 +287,46 @@ def test_persistent_job_observer_failure_does_not_fail_calculation(
     monkeypatch.setattr(execution_module, "load_result", lambda *_args, **_kwargs: object())
 
     assert execution.run() is not None
+
+
+def test_embedded_execution_forwards_original_host_to_result_reader(
+    monkeypatch, tmp_path
+):
+    from ase2sprkkr import SPRKKRAtoms
+
+    host = Atoms("Cu", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
+    cluster = SPRKKRAtoms.from_embedding(
+        host, [(0, (0, 0, 0), "Fe")]
+    )
+    request = CalculationRequest(
+        atoms=cluster, input_parameters=object(), directory=str(tmp_path),
+        structure_id=1, state_id=1,
+    )
+    calls = []
+
+    class Runner:
+        id = "cluster-run"
+
+        def submit(self):
+            pass
+
+        def wait(self):
+            return object()
+
+    class Calculator:
+        def create_run(self, **kwargs):
+            assert kwargs["atoms"].embedding_host is host
+            assert kwargs["empty_spheres"] is False
+            return Runner()
+
+    execution = SprkkrExecution(request, _Cancellation())
+    monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
+
+    def read_result(_result, **kwargs):
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(execution_module, "load_result", read_result)
+    execution.run()
+    assert calls[0]["embedding_host"] is host
+    assert calls[0]["fallback_directory"] == str(tmp_path)
