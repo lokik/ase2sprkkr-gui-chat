@@ -94,6 +94,7 @@ class QLetterRow(QWidget):
                 self.site, entry, value
             ),
             on_normalize=lambda: self.draft.normalize_occupancy(self.site),
+            on_restore=self._restore_initial_occupation,
             on_validation=lambda msg: self._notify_occupation_validation(msg),
             on_focus=lambda: (
                 self._on_activity(self.label)
@@ -102,6 +103,7 @@ class QLetterRow(QWidget):
             selector=select_element,
         )
         self.vbox.addWidget(self.occupation_editor)
+        self.occupation_editor.set_initial_occupation(self.site.occupancies)
         # Splitting symmetry changes the grouping of Wyckoff positions, not
         # their occupation. Keep this bulk-only action outside the shared widget.
         self.break_btn = QPushButton("Break symmetry")
@@ -253,6 +255,12 @@ class QLetterRow(QWidget):
         # Ensure preview updates immediately when positions change
         if callable(self._on_activity):
             self._on_activity(self.label, row, True)
+
+    def _restore_initial_occupation(
+        self, original: list[OccupancyEntry]
+    ) -> list[OccupancyEntry]:
+        self.site.occupancies[:] = original
+        return self.site.occupancies
 
     def load_occupancy(self) -> None:
         """Load the site's model entries into the common occupation editor."""
