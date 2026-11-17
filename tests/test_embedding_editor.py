@@ -227,11 +227,11 @@ def test_cluster_file_detection_distinguishes_host_potfil(tmp_path):
     from ase2sprkkr import Potential
 
     host_file = tmp_path / "host.pot"
-    host_file.write_text("GLOBAL SYSTEM PARAMETER\\nNQ 1\\n")
+    host_file.write_text("GLOBAL SYSTEM PARAMETER\nNQ 1\n")
     cluster_file = tmp_path / "cluster.pot"
-    cluster_file.write_text("GLOBAL SYSTEM PARAMETER\\nNQCLU 1\\n")
+    cluster_file.write_text("GLOBAL SYSTEM PARAMETER\nNQCLU 1\n")
     native_file = tmp_path / "cluster.clu"
-    native_file.write_text("GLOBAL SYSTEM PARAMETER\\nNQCLU 1\\n")
+    native_file.write_text("GLOBAL SYSTEM PARAMETER\nNQCLU 1\n")
     assert not Potential.is_cluster_file(host_file)
     assert Potential.is_cluster_file(cluster_file)
     assert Potential.is_cluster_file(native_file)
