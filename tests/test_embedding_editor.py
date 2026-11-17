@@ -882,3 +882,24 @@ def test_bulk_restore_original_occupation_restores_model_values():
     assert editor._draft.sites[0].occupancies[0].symbol == "Fe"
     row.occupation_editor.restore_initial()
     assert editor._draft.sites[0].occupancies[0].symbol == "Cu"
+
+
+def test_pending_displacement_is_not_lost_when_occupation_changes():
+    dialog = BuildEmbeddingDialog(host())
+    site = dialog.draft.center
+    dialog.deltas[2].setValue(0.08)
+    assert dialog._displacement_timer.isActive()
+    dialog.occupation.rows[0]["elem"].setText("Fe")
+    assert not dialog._displacement_timer.isActive()
+    entry = dialog.draft.entries[site]
+    assert entry.displacement[2] == pytest.approx(0.08)
+    assert entry.occupation == {"Fe": 1.0}
+
+
+def test_exclude_after_pending_displacement_does_not_reinclude_atom():
+    dialog = BuildEmbeddingDialog(host())
+    site = dialog.draft.center
+    dialog.deltas[0].setValue(0.14)
+    dialog._exclude()
+    assert not dialog._displacement_timer.isActive()
+    assert site not in dialog.draft.entries
