@@ -115,7 +115,7 @@ class QLetterRow(QWidget):
         )
         # Compatibility handles used by this dialog's older callers/tests.
         self.rows = self.occupation_editor.rows
-        self.normalize_btn = self.occupation_editor.normalize_btn
+        self.normalize_check = self.occupation_editor.normalize_check
         self.add_btn = self.occupation_editor.add_btn
         self.rows_box = self.occupation_editor.rows_box
 
