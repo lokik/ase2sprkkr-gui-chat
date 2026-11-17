@@ -388,17 +388,11 @@ def build_embedding_structure(
             "Load a 3D bulk, 2D layered host or an existing embedded cluster first.",
         )
         return None
-    try:
-        from ase2sprkkr_gui.gui.dialogs.structures.embedding import (
-            select_build_embedding_structure,
-        )
-    except ImportError as exc:
-        QMessageBox.warning(
-            parent, "Embedding Backend Unavailable",
-            "The current ASE2SPRKKR installation does not provide the "
-            f"embedding editor backend yet:\\n{exc}",
-        )
-        return None
+    # Embedding is part of the required ASE2SPRKKR 4.x backend.
+    # A missing module is an installation error, not an optional GUI feature.
+    from ase2sprkkr_gui.gui.dialogs.structures.embedding import (
+        select_build_embedding_structure,
+    )
 
     generation = controller.structure_generation
     source = controller.atoms
