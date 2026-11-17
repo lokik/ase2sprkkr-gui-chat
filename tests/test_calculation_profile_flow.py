@@ -468,7 +468,7 @@ def test_prepare_only_selection_writes_inputs_without_creating_run(monkeypatch, 
     monkeypatch.setattr(
         calculation_flow, "_select_profile",
         lambda _parent, **_kw: (
-            True, None, RunIdentification("Fe", "SCF"), str(tmp_path), None, True,
+            True, None, None, str(tmp_path), None, True,
         ),
     )
 

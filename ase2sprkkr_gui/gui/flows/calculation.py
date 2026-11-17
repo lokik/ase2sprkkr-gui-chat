@@ -193,10 +193,10 @@ def run_calculation(
             QMessageBox.critical(parent, "Save SPR-KKR Files Failed", str(exc))
             return None
         cluster_file = written.CONTROL.POTFIL_CLU()
-        additional = f"\\nCluster potential: {cluster_file}" if cluster_file else ""
+        additional = f"\nCluster potential: {cluster_file}" if cluster_file else ""
         QMessageBox.information(
             parent, "SPR-KKR Files Prepared",
-            f"Input: {input_file}\\nHost potential: {host_file}{additional}\\n"
+            f"Input: {input_file}\nHost potential: {host_file}{additional}\n"
             "No calculation was started.",
         )
         return None

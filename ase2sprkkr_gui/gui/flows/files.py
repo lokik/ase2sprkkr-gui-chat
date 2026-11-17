@@ -300,7 +300,7 @@ def load_output_directory(
     )
     if not candidates:
         QMessageBox.information(
-            parent, "No Output Files", f"No output files found in:\\n{folder}"
+            parent, "No Output Files", f"No output files found in:\n{folder}"
         )
         return ()
 
@@ -332,18 +332,18 @@ def load_output_directory(
         imported.append(path)
 
     if failures:
-        summary = "\\n".join(
+        summary = "\n".join(
             f"{name}: {reason}" for name, reason in failures[:8]
         )
         QMessageBox.warning(
             parent, "Output Directory",
             f"Imported {len(imported)} result(s). "
-            f"Skipped {len(failures)} file(s):\\n{summary}",
+            f"Skipped {len(failures)} file(s):\n{summary}",
         )
     elif imported:
         QMessageBox.information(
             parent, "Output Directory",
-            f"Imported {len(imported)} result(s) from:\\n{folder}",
+            f"Imported {len(imported)} result(s) from:\n{folder}",
         )
     return tuple(imported)
 
@@ -550,7 +550,7 @@ def save_embedded_cluster(
     if host_path.exists():
         response = QMessageBox.question(
             parent, "Overwrite Host Potential?",
-            f"Saving the cluster also writes its host potential:\\n{host_path}\\n\\n"
+            f"Saving the cluster also writes its host potential:\n{host_path}\n\n"
             "Overwrite the existing host potential?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
@@ -591,7 +591,7 @@ def save_embedded_cluster(
     except Exception as exc:  # noqa: BLE001 - native writers may raise varied errors
         QMessageBox.critical(
             parent, "Save Embedded Cluster Failed",
-            f"Could not save the cluster and its host potential:\\n{exc}",
+            f"Could not save the cluster and its host potential:\n{exc}",
         )
         return False
     controller.mark_structure_saved(generation)
