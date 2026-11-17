@@ -25,6 +25,8 @@ from ase2sprkkr_gui.gui.workflow.model import (
     CreateStructureKind,
     Load,
     LoadKind,
+    LoadHostPotential,
+    CreateHostPotential,
     RunTask,
     SaveStructure,
     StartOver,
@@ -375,7 +377,9 @@ def test_embedded_structure_plan_offers_cluster_scf_and_save_without_host_potent
     )
     assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
     assert "host POTFIL" in plan.group(WorkflowSection.CALCULATE).actions[0].description
-    assert _commands(plan, WorkflowSection.CREATE) == (BuildEmbedding(),)
+    assert _commands(plan, WorkflowSection.CREATE) == (
+        LoadHostPotential(), CreateHostPotential(), BuildEmbedding(),
+    )
     assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
 
 

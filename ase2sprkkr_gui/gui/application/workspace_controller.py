@@ -120,10 +120,6 @@ class WorkspaceController(QObject):
         self._workspace = workspace or WorkspaceState()
         self._conflict_resolver = conflict_resolver
         self._results = ResultStore()
-        # A CLUPOT can be parsed without a host, but it cannot yet be turned
-        # into SPRKKRAtoms. Preserve it until a real host is attached.
-        self._pending_embedded_cluster = None
-        self._pending_embedded_cluster_path: Path | None = None
         # The loaded or written revision, not merely the presence of a file.
         self._saved_structure_generation: Generation | None = None
         self._saved_input_parameters_generation: Generation | None = None
@@ -144,26 +140,6 @@ class WorkspaceController(QObject):
                 ),
                 generation=structure_lock.generation,
             )
-
-    @property
-    def pending_embedded_cluster(self):
-        return self._pending_embedded_cluster
-
-    @property
-    def pending_embedded_cluster_path(self) -> Path | None:
-        return self._pending_embedded_cluster_path
-
-    def set_pending_embedded_cluster(self, potential, path: str | Path) -> None:
-        """Retain a parsed orphan CLUPOT without inventing a host geometry."""
-        self._pending_embedded_cluster = potential
-        self._pending_embedded_cluster_path = Path(path).resolve()
-        self.structureChanged.emit(self.atoms)
-
-    def clear_pending_embedded_cluster(self) -> None:
-        if self._pending_embedded_cluster is not None:
-            self._pending_embedded_cluster = None
-            self._pending_embedded_cluster_path = None
-            self.structureChanged.emit(self.atoms)
 
     @property
     def structure_state(self) -> StructureState:
@@ -840,8 +816,6 @@ class WorkspaceController(QObject):
 
     def reset(self) -> None:
         """Clear calculation values while preserving history and active project."""
-        self._pending_embedded_cluster = None
-        self._pending_embedded_cluster_path = None
         structure = self.structure_state
         if (
             structure.atoms is not None

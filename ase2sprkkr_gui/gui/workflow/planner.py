@@ -40,7 +40,6 @@ from ase2sprkkr_gui.gui.workflow.model import (
     UseForNewCalculation,
     VisualizeStructure,
     SaveStructure,
-    SaveOrphanCluster,
     LoadHostPotential,
     CreateHostPotential,
     WorkflowCommand,
@@ -132,8 +131,6 @@ class WorkflowPlanner:
     def initial_plan(
         self,
         recent: RecentHistorySnapshot | None = None,
-        *,
-        pending_cluster: bool = False,
     ) -> WorkflowPlan:
         create_actions = (
 
@@ -173,23 +170,8 @@ class WorkflowPlanner:
                     ActionIcon.INTERFACE,
                 ),
             )
-        if pending_cluster:
-            create_actions = (
-                _action(
-                    LoadHostPotential(), "Load Host Potential",
-                    "Attach the host POTFIL required to interpret the loaded CLUPOT",
-                    "structure", ActionIcon.OPEN,
-                ),
-                _action(
-                    CreateHostPotential(), "Create Host Potential",
-                    "Create a periodic host structure and generate a START POTFIL",
-                    "structure", ActionIcon.BULK_CRYSTAL,
-                ),
-            ) + create_actions
         create = AvailableActionGroup(
-            WorkflowSection.CREATE,
-            "Create / attach host" if pending_cluster else "Create structure",
-            create_actions,
+            WorkflowSection.CREATE, "Create structure", create_actions
         )
         load_actions = [
             _action(
@@ -230,22 +212,13 @@ class WorkflowPlanner:
                     menu=_recent_menu(recent_presentation),
                 )
             )
-        if pending_cluster:
-            load_actions.append(_action(
-                SaveOrphanCluster(), "Save Embedded Potential",
-                "Save the original CLUPOT alone without a host POTFIL",
-                "neutral", ActionIcon.SAVE,
-            ))
         return WorkflowPlan(
-            ("CLUPOT loaded without a host. Load or create its matching "
-             "host potential to edit the embedded structure."
-             if pending_cluster else
-             "Start by creating a new atomic structure or loading an existing one."),
+            "Start by creating a new atomic structure or loading an existing one.",
             (
                 create,
                 AvailableActionGroup(
                     WorkflowSection.LOAD,
-                    "Load / save structure" if pending_cluster else "Load structure",
+                    "Load structure",
                     tuple(load_actions),
                 ),
             ),
@@ -258,9 +231,8 @@ class WorkflowPlanner:
         recent: RecentHistorySnapshot | None = None,
     ) -> WorkflowPlan:
         atoms = workspace.atoms
-        pending_cluster = getattr(workspace, "pending_embedded_cluster", None) is not None
         if atoms is None:
-            return self.initial_plan(recent, pending_cluster=pending_cluster)
+            return self.initial_plan(recent)
 
         status = workspace.scf_status()
         progress = classify_scf_progress(
@@ -345,11 +317,6 @@ class WorkflowPlanner:
                         "neutral",
                         ActionIcon.SAVE,
                     ),
-                    *((_action(
-                        SaveOrphanCluster(), "Save Embedded Potential",
-                        "Save the pending CLUPOT without its host",
-                        "neutral", ActionIcon.SAVE,
-                    ),) if pending_cluster else ()),
                 ),
             )
         )
@@ -385,7 +352,7 @@ class WorkflowPlanner:
             is_cluster
             and not getattr(workspace, "can_run_embedding", lambda: False)()
         )
-        if pending_cluster or missing_native_host:
+        if missing_native_host:
             derived[:0] = [
                 _action(
                     LoadHostPotential(), "Load Host Potential",
@@ -401,7 +368,7 @@ class WorkflowPlanner:
         if derived:
             groups.append(AvailableActionGroup(
                 WorkflowSection.CREATE,
-                "Create / attach host" if (pending_cluster or missing_native_host)
+                "Create / attach host" if missing_native_host
                 else "Create derived structure", tuple(derived),
             ))
 

@@ -117,11 +117,6 @@ class SaveStructure:
 
 
 @dataclass(frozen=True)
-class SaveOrphanCluster:
-    """Write an existing native CLUPOT without requiring its host."""
-
-
-@dataclass(frozen=True)
 class LoadHostPotential:
     """Associate a matching host POTFIL with an embedded cluster."""
 
@@ -152,7 +147,6 @@ WorkflowCommand = Union[
     ContinueRecent,
     VisualizeStructure,
     SaveStructure,
-    SaveOrphanCluster,
     LoadHostPotential,
     CreateHostPotential,
     UseForNewCalculation,

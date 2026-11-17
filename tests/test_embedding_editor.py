@@ -244,7 +244,7 @@ def test_embedded_structure_missing_host_cannot_silently_export_as_ase(
     )
 
     assert not file_flows.save_structure(controller, None, None)
-    assert messages and "host structure" in messages[0][2]
+    assert messages and "Host of embedded structure is missing" in messages[0][2]
     assert not (tmp_path / "cluster.xyz").exists()
 
 

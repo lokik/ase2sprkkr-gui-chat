@@ -143,9 +143,8 @@ def load_embedded_cluster(
     parent: QWidget,
     *,
     host_path: str | Path | None = None,
-    host_potential=None,
 ) -> bool:
-    """Load CLUPOT, retaining it as pending if there is no host POTFIL.
+    """Load CLUPOT only after a real host potential has been supplied.
 
     The cluster file is not self-contained. Keep the host Potential as a
     shared reference in the resulting embedded Atoms and do not overwrite the
@@ -154,33 +153,23 @@ def load_embedded_cluster(
     structure_generation = controller.structure_generation
     directory_generation = controller.directory_generation
     path = Path(file_path).expanduser().resolve()
-    if host_path is None and host_potential is None and _companion_host_path(path).is_file():
+    if host_path is None and _companion_host_path(path).is_file():
         host_path = _companion_host_path(path)
-    host = (host_potential if host_potential is not None
-            else None if host_path is not None else _current_host_potential(controller))
-    if host is None and host_path is None:
-        # Native CLUPOT can be read without a host, but does not contain the
-        # host lattice needed to reconstruct editable cluster atoms.
-        try:
-            from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
-            potential = run_modal_task(
-                parent, lambda: ClusterPotential.from_file(path),
-                title="Loading Embedded Potential", label="Reading CLUPOT…",
-            )
-        except Exception as exc:  # noqa: BLE001 - user-provided native file
-            QMessageBox.critical(parent, "Embedded Cluster Load Error", str(exc))
-            return False
-        controller.set_pending_embedded_cluster(potential, path)
-        recent_files.remember("structure", path)
-        QMessageBox.information(
-            parent, "Host Potential Missing",
-            "CLUPOT was loaded without its host potential. The native file is "
-            "preserved, but editing and calculations require a matching host. "
-            "Use Load Host Potential or Create Host Potential under "
-            "Create / attach host.",
-        )
-        return True
+    host = None if host_path is not None else _current_host_potential(controller)
     if host is None:
+        if host_path is None:
+            selected, _ = QFileDialog.getOpenFileName(
+                parent, "Select Host SPR-KKR Potential",
+                str(path.parent), "SPR-KKR host POTFIL (*.pot *.pot_new);;All Files (*)",
+            )
+            if not selected:
+                QMessageBox.warning(
+                    parent, "Host Potential Required",
+                    "A matching host POTFIL is required to open a CLUPOT as "
+                    "an editable embedded structure. Nothing was loaded.",
+                )
+                return False
+            host_path = selected
         try:
             host = run_modal_task(
                 parent,
@@ -188,7 +177,7 @@ def load_embedded_cluster(
                 title="Loading Host Potential",
                 label="Reading host POTFIL…",
             )
-        except Exception as exc:  # noqa: BLE001 - parser errors presented to the user
+        except Exception as exc:  # noqa: BLE001 - native file validation
             QMessageBox.critical(parent, "Host Potential Load Error", str(exc))
             return False
     try:
@@ -226,7 +215,6 @@ def load_embedded_cluster(
     if not document_change_applied(parent, change):
         return False
     controller.mark_structure_saved(controller.structure_generation)
-    controller.clear_pending_embedded_cluster()
     recent_files.remember("structure", path)
     return True
 
@@ -492,8 +480,6 @@ def save_structure(
 ) -> bool:
     atoms = controller.atoms
     if atoms is None:
-        if controller.pending_embedded_cluster is not None:
-            return save_orphan_cluster(controller, recent_files, parent)
         return False
     # Never fall back to a generic ASE writer for an embedded structure:
     # it cannot preserve the original-site/cell mapping and host reference.
@@ -532,50 +518,6 @@ def save_structure(
     return True
 
 
-def _save_cluster_only(potential, controller, recent_files, parent) -> bool:
-    """Save an already parsed native CLUPOT when its host cannot be supplied."""
-    answer = QMessageBox.question(
-        parent,
-        "Host Potential Missing",
-        "Host potential of embedded structure is missing. "
-        "Should I save only the embedded potential?",
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        QMessageBox.StandardButton.Cancel,
-    )
-    if answer != QMessageBox.StandardButton.Yes:
-        return False
-    file_path, _ = QFileDialog.getSaveFileName(
-        parent, "Save Embedded Potential (without Host)", "",
-        "SPR-KKR embedded potential (*.clu *.pot);;All Files (*)",
-    )
-    if not file_path:
-        return False
-    path = Path(file_path).expanduser().resolve()
-    if not path.suffix:
-        path = path.with_suffix(".clu")
-    try:
-        potential.save_to_file(path)
-    except Exception as exc:  # noqa: BLE001 - native writer is external
-        QMessageBox.critical(parent, "Save Embedded Potential Failed", str(exc))
-        return False
-    recent_files.remember("structure", path)
-    if controller.atoms is not None:
-        controller.mark_structure_saved(controller.structure_generation)
-    return True
-
-
-def save_orphan_cluster(controller, recent_files, parent) -> bool:
-    """Save a loaded CLUPOT that has not yet been associated with its host."""
-    potential = controller.pending_embedded_cluster
-    if potential is None:
-        return False
-    if not _save_cluster_only(potential, controller, recent_files, parent):
-        return False
-    # No atoms were fabricated, and the pending CLUPOT remains available
-    # for later attachment.
-    return True
-
-
 def save_embedded_cluster(
     controller: WorkspaceController,
     recent_files: RecentFiles,
@@ -591,16 +533,12 @@ def save_embedded_cluster(
     atoms = controller.atoms
     source_host = getattr(atoms, "embedding_host", None)
     if source_host is None:
-        checker = getattr(atoms, "has_potential", None)
-        native = atoms.potential if callable(checker) and checker() else None
-        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
-        if isinstance(native, ClusterPotential):
-            return _save_cluster_only(native, controller, recent_files, parent)
         QMessageBox.warning(
             parent, "Cannot Save Embedded Cluster",
-            "Host potential of embedded structure is missing. The cluster "
-            "also has no native CLUPOT that can be saved independently. "
-            "Load or create its matching host potential first.",
+            "Host of embedded structure is missing. This is an inconsistent "
+            "embedding state, not a valid editable cluster. The structure "
+            "cannot be saved without its host; reload the original data "
+            "or rebuild the cluster.",
         )
         return False
     generation = controller.structure_generation
@@ -734,18 +672,8 @@ def load_host_potential(
     recent_files: RecentFiles,
     parent: QWidget,
 ) -> bool:
-    """Resolve a pending CLUPOT, or upgrade an ASE-hosted cluster."""
-    pending = controller.pending_embedded_cluster_path
-    if pending is None:
-        return ensure_embedded_host_potential(controller, parent)
-    path, _ = QFileDialog.getOpenFileName(
-        parent, "Load Host Potential for Embedded Cluster",
-        str(pending.parent),
-        "SPR-KKR host POTFIL (*.pot *.pot_new);;All Files (*)",
-    )
-    return bool(path and load_embedded_cluster(
-        controller, recent_files, pending, parent, host_path=path,
-    ))
+    """Attach a matching native host to an existing embedded structure."""
+    return ensure_embedded_host_potential(controller, parent)
 
 
 def create_host_potential(
@@ -753,42 +681,30 @@ def create_host_potential(
     recent_files: RecentFiles,
     parent: QWidget,
 ) -> bool:
-    """Build a host POTFIL from existing host geometry or a new 3D structure."""
+    """Generate a native host Potential from the cluster's existing host geometry.
+
+    This is never used to invent a missing embedding host. A missing reference
+    is an invalid structure that must be repaired at its source.
+    """
     atoms = controller.atoms
-    pending = controller.pending_embedded_cluster_path
-    host_atoms = getattr(atoms, "embedding_host", None)
-    if host_atoms is None:
-        if atoms is not None and controller.structure_kind() in {"2d", "3d"}:
-            host_atoms = atoms
-        else:
-            # Reuse the ordinary host-structure creation wizard without first
-            # committing the candidate as an unrelated workspace document.
-            from ase2sprkkr_gui.gui.flows.structure_candidates import create_structure_candidate
-            from ase2sprkkr_gui.gui.dialogs.structures.spacegroup_selector import select_spacegroup
-            from ase2sprkkr_gui.gui.dialogs.structures.element_assignment import select_site_elements
-            from ase2sprkkr_gui.gui.misc.dialog_flow import chain_dialogs
-            candidate = create_structure_candidate(
-                parent, chain=chain_dialogs,
-                spacegroup_selector=select_spacegroup,
-                site_selector=select_site_elements,
-            )
-            if candidate is None:
-                return False
-            host_atoms = candidate.atoms
+    source_host = getattr(atoms, "embedding_host", None)
+    if source_host is None:
+        QMessageBox.warning(
+            parent, "Cannot Create Host Potential",
+            "The embedded structure has no host geometry. Rebuild the "
+            "cluster from its original periodic structure.",
+        )
+        return False
     try:
         potential = run_modal_task(
             parent,
-            lambda: Potential.from_atoms(host_atoms),
+            lambda: Potential.from_atoms(source_host),
             title="Creating Host Potential",
             label="Preparing host POTFIL from structure…",
         )
-    except Exception as exc:  # noqa: BLE001 - native Potential creation
+    except Exception as exc:  # noqa: BLE001 - backend conversion
         QMessageBox.warning(parent, "Cannot Create Host Potential", str(exc))
         return False
-    if pending is not None:
-        return load_embedded_cluster(
-            controller, recent_files, pending, parent, host_potential=potential,
-        )
     return ensure_embedded_host_potential(
         controller, parent, host_potential=potential,
     )
