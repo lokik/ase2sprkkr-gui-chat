@@ -65,6 +65,8 @@ class WorkflowWorkspace(Protocol):
 
     def can_build_embedding(self) -> bool: ...
 
+    def can_run_embedding(self) -> bool: ...
+
     def scf_status(self) -> str | None: ...
 
     def is_scf_converged(self) -> bool: ...
@@ -256,7 +258,7 @@ class WorkflowPlanner:
         if is_cluster:
             supported_tasks = (
                 tuple(d for d in supported_tasks if _cluster_task_supported(d))
-                if getattr(workspace, "can_calculate", lambda: False)()
+                if getattr(workspace, "can_run_embedding", lambda: False)()
                 else ()
             )
         for definition in supported_tasks:
