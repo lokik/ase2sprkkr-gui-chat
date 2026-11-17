@@ -4,7 +4,9 @@ import logging
 from typing import Any, Callable
 
 from PyQt6.QtCore import QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtWidgets import QMessageBox
 from kkrunner import RunState
+from kkrunner.backends.contracts import SubmissionNotStarted
 from kkrunner.runs import DuplicateSubmissionError
 from kkrunner.runs.conflicts import submission_conflicts
 
@@ -26,6 +28,7 @@ class _SprkkrRunWorker(RunMonitorWorker):
 
     persistentJobChanged = pyqtSignal(str)
     conflict = pyqtSignal(object)
+    submissionRejected = pyqtSignal(str)
 
     def __init__(
         self,
@@ -64,6 +67,9 @@ class _SprkkrRunWorker(RunMonitorWorker):
             # Preserve the RunRecords and per-file collisions for the UI.
             self.conflict.emit(exc)
             self.cancelled.emit()
+        except SubmissionNotStarted as exc:
+            self.submissionRejected.emit(str(exc))
+            self.cancelled.emit()
         except Exception as exc:  # noqa: BLE001 - worker/backend boundary
             logger.exception("SPR-KKR calculation or result loading failed")
             self.error.emit(str(exc))
@@ -95,6 +101,7 @@ class SprkkrRunWindow(RunMonitorWindow):
         self.launch_project_id = project_id
         self._project_id: str | None = project_id
         self._back_to_setup = on_back_to_setup
+        self._submission_error: str | None = None
 
         def worker_factory(cancellation: RunCancellation) -> _SprkkrRunWorker:
             worker = _SprkkrRunWorker(
@@ -106,6 +113,7 @@ class SprkkrRunWindow(RunMonitorWindow):
             )
             worker.persistentJobChanged.connect(self._persistent_job_changed_received)
             worker.conflict.connect(self._on_conflict)
+            worker.submissionRejected.connect(self._on_submission_rejected)
             return worker
 
         # Ownership and execution/project context are established by the caller
@@ -156,6 +164,28 @@ class SprkkrRunWindow(RunMonitorWindow):
         callback = self._back_to_setup
         self.close()
         QTimer.singleShot(0, callback)
+
+    @pyqtSlot(str)
+    def _on_submission_rejected(self, message: str) -> None:
+        self._on_error(message)
+        self._set_status("Calculation not started")
+        self._submission_error = message
+        if self._thread is None or not self._thread.isRunning():
+            self._show_submission_error()
+
+    @pyqtSlot()
+    def _thread_finished(self) -> None:
+        super()._thread_finished()
+        if not self._close_requested:
+            self._show_submission_error()
+
+    def _show_submission_error(self) -> None:
+        message = self._submission_error
+        if message is None or self._close_requested:
+            return
+        self._submission_error = None
+        QMessageBox.critical(self, "Could Not Start Calculation", message)
+        self._return_to_setup()
 
     @pyqtSlot(object)
     def _on_conflict(self, conflict: DuplicateSubmissionError) -> None:

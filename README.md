@@ -36,6 +36,11 @@ is available.
 The GUI requires the ASE2SPRKKR Python backend. Running actual SPR-KKR
 calculations also requires a separately installed SPR-KKR executable.
 
+If a calculation cannot start, for example because its executable is missing
+or not executable, the GUI shows the reason and returns to execution-profile
+selection with the previous profile, directory and run names preserved.
+Choosing another profile requires confirming a new launch.
+
 ## Development
 
 Source: https://github.com/ase2sprkkr/ase2sprkkr-gui
