@@ -195,9 +195,18 @@ class BuildEmbeddingDialog(QDialog):
         opt_row.addStretch(1)
         root.addWidget(options)
 
-        preview_group = QGroupBox("Cluster preview (blue = included, orange = modified)")
+        preview_group = QGroupBox("Cluster preview")
         preview_layout = QVBoxLayout(preview_group)
+        preview_header = QHBoxLayout()
+        self.preview_info = QLabel()
+        preview_header.addWidget(self.preview_info)
+        preview_header.addStretch(1)
+        preview_header.addWidget(QLabel(
+            "Blue: included   Orange: modified   Purple: symmetry   Gray: host"
+        ))
+        preview_layout.addLayout(preview_header)
         self.figure = Figure(figsize=(9, 3.1))
+        self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
         self.canvas = FigureCanvas(self.figure)
         self.canvas.mpl_connect("pick_event", self._preview_pick)
         self.axes = self.figure.add_subplot(111, projection="3d")
@@ -484,6 +493,7 @@ class BuildEmbeddingDialog(QDialog):
     def _render(self):
         ax = self.axes
         ax.clear()
+        ax.set_axis_off()
         offsets = self._inplane_offsets()
         layer = self.layer.value() if self.layer else 0
         xs, ys, zs, colors, sizes = [], [], [], [], []
@@ -524,13 +534,10 @@ class BuildEmbeddingDialog(QDialog):
             self._scatter = ax.scatter(
                 xs, ys, zs, c=colors, s=sizes, depthshade=False, picker=5
             )
-        ax.set_xlabel("x (Å)")
-        ax.set_ylabel("y (Å)")
-        ax.set_zlabel("z (Å)")
-        ax.set_title(
-            f"Host layer {layer}; cluster: {len(self.draft.entries)} sites"
+        self.preview_info.setText(
+            f"Host layer {layer} · Cluster: {len(self.draft.entries)} sites "
+            f"· Displayed: {len(self._rendered_sites)} atoms"
         )
-        self.figure.tight_layout()
         self.canvas.draw_idle()
 
     def _preview_pick(self, event):
