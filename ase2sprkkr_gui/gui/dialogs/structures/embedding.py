@@ -770,9 +770,7 @@ class BuildEmbeddingDialog(QDialog):
                 }
                 overlay = {
                     site for site in overlay
-                    if site.cell_index[:3] == (
-                        *site.cell_index[:2], self.layer.value()
-                    )
+                    if site.cell_index[2] == self.layer.value()
                 }
         self._rendered_sites = sorted(host_context | overlay)
         self._scatter = self._draw_sites(
