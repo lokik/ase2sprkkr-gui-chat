@@ -671,3 +671,102 @@ def test_occupation_editor_rejects_unnamed_positive_fraction():
     assert not dialog.occupation.is_valid()
     with pytest.raises(ValueError, match="element is required"):
         dialog.occupation.occupation()
+
+
+def test_embedding_occupation_is_committed_automatically_only_when_valid(monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    dialog = BuildEmbeddingDialog(host())
+    site = dialog.draft.center
+    prompts = []
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args: prompts.append(args)
+    )
+    # Editing the selected site's occupation should not ask for a second Apply.
+    dialog.occupation.rows[0]["elem"].setText("Fe")
+    assert dialog.draft.entries[site].occupation == {"Fe": 1.0}
+
+    # A temporary incomplete mixture must not corrupt the already valid state.
+    dialog.occupation.add_row()
+    dialog.occupation.rows[0]["occ"].setValue(0.7)
+    dialog.occupation.rows[1]["elem"].setText("Ni")
+    assert not dialog.occupation.is_valid()
+    assert dialog.draft.entries[site].occupation == {"Fe": 1.0}
+
+    row = dialog.occupation.rows[1]
+    row["occ"].setValue(0.3)
+    assert dialog.occupation.is_valid()
+    assert dialog.draft.entries[site].occupation == {"Fe": 0.7, "Ni": 0.3}
+    assert dialog.occupation.rows[1] is row  # No focus-destroying rebuild
+    assert prompts == []
+
+
+def test_embedding_auto_occupation_overwrites_other_symmetry_sites_only_with_consent(
+    monkeypatch,
+):
+    from PyQt6.QtWidgets import QMessageBox
+
+    dialog = BuildEmbeddingDialog(host())
+    selected = HostSite(0, (1, 0, 0))
+    dialog._selected_cell = selected.cell_index
+    dialog._selected_site = selected
+    dialog._refresh_sites()
+    dialog.symmetric.setChecked(True)
+    orbit = dialog.draft.targets(selected, symmetric=True)
+    assert len(orbit) > 1
+
+    dialog.occupation.rows[0]["elem"].setText("Fe")
+    assert all(dialog.draft.entries[s].occupation == {"Fe": 1.0} for s in orbit)
+
+    other = next(s for s in orbit if s != selected)
+    dialog.draft.set_occupation([other], {"Ni": 1.0})
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args: (
+            messages.append(args) or QMessageBox.StandardButton.Cancel
+        ),
+    )
+
+    dialog.occupation.rows[0]["elem"].setText("Co")
+    assert dialog.draft.entries[other].occupation == {"Ni": 1.0}
+    assert dialog.occupation.occupation() == {"Fe": 1.0}  # Restored after Cancel
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args: (
+            messages.append(args) or QMessageBox.StandardButton.Yes
+        ),
+    )
+    dialog.occupation.rows[0]["elem"].setText("Co")
+    assert all(dialog.draft.entries[s].occupation == {"Co": 1.0} for s in orbit)
+
+    dialog.occupation.rows[0]["elem"].setText("Mn")
+    assert all(dialog.draft.entries[s].occupation == {"Mn": 1.0} for s in orbit)
+    assert len(messages) == 2  # Cancel once, then approve the edit sequence
+
+
+def test_incomplete_occupation_is_not_discarded_by_selection_or_ok(monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    # A two-site host makes it possible to navigate the selected site's rows.
+    source = Atoms(
+        "Cu2", positions=[[0, 0, 0], [1, 1, 1]],
+        cell=[2, 2, 2], pbc=True
+    )
+    dialog = BuildEmbeddingDialog(source)
+    selected = dialog._selected_site
+    dialog.occupation.rows[0]["occ"].setValue(0.4)
+    assert not dialog.occupation.is_valid()
+
+    # Switching the displayed site would silently discard the partial mixture.
+    other_row = 1 if selected == dialog._site_rows[0] else 0
+    dialog.sites.selectRow(other_row)
+    assert dialog._selected_site == selected
+    assert dialog.occupation.rows[0]["occ"].value() == 0.4
+
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *args: warnings.append(args)
+    )
+    dialog._accept()
+    assert dialog.result_atoms is None
+    assert warnings
