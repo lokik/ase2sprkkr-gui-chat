@@ -661,3 +661,13 @@ def test_bulk_occupation_uses_the_same_widget_as_embedding():
     assert editor._draft.sites[0].occupancies[0].value == 0.6
     row.occupation_editor.normalize()
     assert editor._draft.sites[0].occupancies[0].value == 1.0
+
+
+def test_occupation_editor_rejects_unnamed_positive_fraction():
+    dialog = BuildEmbeddingDialog(host())
+    dialog.occupation.set_occupation({"Fe": 0.5})
+    dialog.occupation.add_row()
+    dialog.occupation.rows[-1]["occ"].setValue(0.5)
+    assert not dialog.occupation.is_valid()
+    with pytest.raises(ValueError, match="element is required"):
+        dialog.occupation.occupation()
