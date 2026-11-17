@@ -11,6 +11,56 @@ from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 
 
+def test_embedded_scf_loads_new_clupot_instead_of_registered_start(tmp_path):
+    start = tmp_path / "cluster.clupot"
+    produced = tmp_path / "cluster.clupot_new"
+    start.touch()
+    produced.touch()
+    output_atoms = Atoms("Fe")
+    result = SimpleNamespace(
+        files={"potential": start.name},
+        directory=str(tmp_path),
+        task_name="scf",
+        is_embedded=True,
+        potential_filename=produced.name,
+        potential=SimpleNamespace(atoms=output_atoms),
+    )
+    result.path_to = lambda key: result.files[key]
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert loaded.potential_path == produced.resolve()
+    assert loaded.atoms is output_atoms
+    assert loaded.potential_error is None
+
+
+def test_scf_output_without_converged_registration_overrides_input(tmp_path, monkeypatch):
+    start = tmp_path / "Fe.pot"
+    produced = tmp_path / "Fe.pot_new"
+    start.touch()
+    produced.touch()
+    output_atoms = Atoms("Fe")
+
+    def read(path, *, check_file_unchanged):
+        assert check_file_unchanged
+        assert path == str(produced.resolve())
+        return SimpleNamespace(atoms=output_atoms)
+
+    monkeypatch.setattr(result_loading_module.Potential, "from_file", staticmethod(read))
+    result = SimpleNamespace(
+        files={"potential": start.name},
+        directory=str(tmp_path),
+        task_name="scf",
+        potential_filename=produced.name,
+    )
+    result.path_to = lambda key: result.files[key]
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert loaded.potential_path == produced.resolve()
+    assert loaded.atoms is output_atoms
+
+
 def test_result_loading_resolves_relative_artifacts_from_result_directory(
     tmp_path, monkeypatch
 ):

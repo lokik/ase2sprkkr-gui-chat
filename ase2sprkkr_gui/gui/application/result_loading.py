@@ -185,6 +185,19 @@ def _result_files(
 
     potential = _registered_path(result, "converged")
     if potential is None:
+        # The FILES entry named "potential" is the *input* POTFIL for SCF.
+        # ScfResult.potential_filename, in contrast, points to the newly
+        # produced POTFIL/CLUPOT (_new). Never adopt the input as SCF output.
+        try:
+            is_scf = str(getattr(result, "task_name", "")).casefold() == "scf"
+        except (AttributeError, KeyError, ValueError):
+            is_scf = False
+        if is_scf:
+            try:
+                potential = getattr(result, "potential_filename", None)
+            except (AttributeError, KeyError, ValueError):
+                potential = None
+    if potential is None:
         potential = _registered_path(result, "potential")
     if potential is None:
         try:

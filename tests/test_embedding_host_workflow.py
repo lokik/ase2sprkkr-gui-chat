@@ -94,6 +94,28 @@ def test_created_cluster_reuses_native_host_during_scf(monkeypatch, tmp_path, so
     assert controller.atoms.embedding_host is hosts[0]
 
 
+def test_converged_cluster_offers_post_scf_tasks_instead_of_scf():
+    from ase2sprkkr_gui.gui.workflow.model import WorkflowSection, RunTask
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+
+    host = SPRKKRAtoms.promote_ase_atoms(
+        bulk("Fe", "bcc", a=2.87, cubic=True)
+    ).potential
+    host.SCF_INFO.SCFSTATUS = "CONVERGED"
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    cluster.potential.SCF_INFO.SCFSTATUS = "CONVERGED"
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+
+    plan = WorkflowPlanner().for_workspace(controller)
+    calculate = plan.group(WorkflowSection.CALCULATE)
+    commands = [action.command for action in calculate.actions]
+    assert RunTask("scf") not in commands
+    assert RunTask("dos") in commands
+    assert "SCF status: CONVERGED" in plan.subtitle
+
+
 def test_failed_host_creation_never_opens_embedding_editor(monkeypatch):
     source = bulk("Fe", "bcc", a=2.87, cubic=True)
     controller = WorkspaceController(WorkspaceState(atoms=source))
