@@ -67,11 +67,15 @@ def require_potential_version_current(version: PotentialFileVersion) -> None:
         )
 
 
-def load_potential_version(version: PotentialFileVersion) -> Any:
-    """Load exactly ``version`` of a POTFIL, rejecting pre/read/post races."""
+def load_potential_version(
+    version: PotentialFileVersion, *, embedding_host=None
+) -> Any:
+    """Load a versioned POTFIL or CLUPOT, rejecting pre/read/post races."""
     require_potential_version_current(version)
     try:
-        atoms = load_potential_atoms(version.path)
+        atoms = load_potential_atoms(
+            version.path, embedding_host=embedding_host
+        )
     except PotentialFileChanged as exc:
         raise PotentialVersionChanged(
             f"Potential file changed while it was being read: {version.path}"
