@@ -297,6 +297,18 @@ class WorkspaceController(QObject):
 
         return isinstance(getattr(self.atoms, "embedding_host", None), Potential)
 
+    def embedding_host_scf_status(self) -> str | None:
+        """Raw host SCFSTATUS; a START host is not a converged input for embedding."""
+        if self.structure_kind() != "0d":
+            return None
+        from ase2sprkkr import Potential
+
+        host = getattr(self.atoms, "embedding_host", None)
+        if not isinstance(host, Potential):
+            return None
+        status = host.SCF_INFO.SCFSTATUS()
+        return str(status).strip().upper() if status is not None else None
+
     def can_calculate(self) -> bool:
         """Whether a fully configured calculation can be launched."""
         if self.atoms is None or self.input_parameters is None:
