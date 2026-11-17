@@ -267,6 +267,9 @@ def test_open_native_cluster_with_explicit_host_preserves_reference(
         def host_geometry_warning(self):
             return None
 
+        def host_geometry_warning(self):
+            return None
+
     calls = []
     monkeypatch.setattr(Potential, "from_file",
                         staticmethod(lambda path: original_host))
@@ -451,3 +454,40 @@ def test_unchanged_embedding_editor_does_not_restart_workspace(monkeypatch):
     assert structure_flows.build_embedding_structure(controller, None) is None
     assert controller.atoms is cluster
     assert controller.structure_generation == generation
+
+
+def test_versioned_cluster_history_restores_native_file_using_same_host(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+    from ase2sprkkr_gui.gui.application.historical_state import _restore_state_atoms
+
+    parent = host()
+    draft = EmbeddingDraft(parent)
+    draft.set_occupation([draft.center], {"Fe": 1.0})
+    atoms = draft.to_atoms()
+
+    path = tmp_path / "calculated.clu"
+    path.write_text("NQCLU 1\\n", encoding="utf-8")
+    controller = WorkspaceController(WorkspaceState(
+        atoms=atoms, potential_path=str(path)
+    ))
+    state = controller.result_store.state(controller.state_id)
+    assert state.potential_version is not None
+    assert state.structure_snapshot is not None
+    assert state.structure_snapshot.info["sprkkr_embedding_host"] is parent
+
+    calls = []
+    monkeypatch.setattr(
+        ClusterPotential,
+        "from_file",
+        staticmethod(lambda path, *, host: (
+            calls.append((path, host)) or SimpleNamespace(atoms=atoms.copy())
+        )),
+    )
+
+    restored = _restore_state_atoms(state)
+    assert restored.embedding_host is parent
+    assert restored.sites[0].occupation.to_dict(True) == {"Fe": 1.0}
+    assert calls == [(path.resolve(), parent)]
