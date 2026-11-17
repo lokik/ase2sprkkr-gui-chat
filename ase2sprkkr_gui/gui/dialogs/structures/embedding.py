@@ -405,10 +405,12 @@ class BuildEmbeddingDialog(QDialog):
     def _site_changed(self):
         if self._site_updating:
             return
-        self._apply_pending_displacement()
         row = self.sites.currentRow()
         if 0 <= row < len(self._site_rows):
+            # A pending displacement commit refreshes the site table. Preserve
+            # the user's intended *new* site across that refresh.
             next_site = self._site_rows[row]
+            self._apply_pending_displacement()
             if (
                 next_site != self._selected_site
                 and self._selected_site is not None
@@ -423,6 +425,10 @@ class BuildEmbeddingDialog(QDialog):
             if next_site != self._selected_site:
                 self._occupation_overwrite_approval = None
             self._selected_site = next_site
+            if next_site in self._site_rows:
+                self.sites.blockSignals(True)
+                self.sites.selectRow(self._site_rows.index(next_site))
+                self.sites.blockSignals(False)
             self._display_site()
             self._update_symmetry_preview()
 
@@ -582,7 +588,7 @@ class BuildEmbeddingDialog(QDialog):
             self.draft.set_displacement(
                 self._selected_site, values, symmetric=self.symmetric.isChecked()
             )
-            self._changed()
+            self._changed(preserve_occupation=True)
         self._guard(action)
 
     def _add_radius(self):
