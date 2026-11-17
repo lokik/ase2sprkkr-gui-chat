@@ -476,6 +476,8 @@ def save_structure(
 ) -> bool:
     atoms = controller.atoms
     if atoms is None:
+        if controller.pending_embedded_cluster is not None:
+            return save_orphan_cluster(controller, recent_files, parent)
         return False
     # Never fall back to a generic ASE writer for an embedded structure:
     # it cannot preserve the original-site/cell mapping and host reference.
@@ -514,6 +516,50 @@ def save_structure(
     return True
 
 
+def _save_cluster_only(potential, controller, recent_files, parent) -> bool:
+    """Save an already parsed native CLUPOT when its host cannot be supplied."""
+    answer = QMessageBox.question(
+        parent,
+        "Host Potential Missing",
+        "Host potential of embedded structure is missing. "
+        "Should I save only the embedded potential?",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        QMessageBox.StandardButton.Cancel,
+    )
+    if answer != QMessageBox.StandardButton.Yes:
+        return False
+    file_path, _ = QFileDialog.getSaveFileName(
+        parent, "Save Embedded Potential (without Host)", "",
+        "SPR-KKR embedded potential (*.clu *.pot);;All Files (*)",
+    )
+    if not file_path:
+        return False
+    path = Path(file_path).expanduser().resolve()
+    if not path.suffix:
+        path = path.with_suffix(".clu")
+    try:
+        potential.save_to_file(path)
+    except Exception as exc:  # noqa: BLE001 - native writer is external
+        QMessageBox.critical(parent, "Save Embedded Potential Failed", str(exc))
+        return False
+    recent_files.remember("structure", path)
+    if controller.atoms is not None:
+        controller.mark_structure_saved(controller.structure_generation)
+    return True
+
+
+def save_orphan_cluster(controller, recent_files, parent) -> bool:
+    """Save a loaded CLUPOT that has not yet been associated with its host."""
+    potential = controller.pending_embedded_cluster
+    if potential is None:
+        return False
+    if not _save_cluster_only(potential, controller, recent_files, parent):
+        return False
+    # No atoms were fabricated, and the pending CLUPOT remains available
+    # for later attachment.
+    return True
+
+
 def save_embedded_cluster(
     controller: WorkspaceController,
     recent_files: RecentFiles,
@@ -529,9 +575,16 @@ def save_embedded_cluster(
     atoms = controller.atoms
     source_host = getattr(atoms, "embedding_host", None)
     if source_host is None:
+        checker = getattr(atoms, "has_potential", None)
+        native = atoms.potential if callable(checker) and checker() else None
+        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+        if isinstance(native, ClusterPotential):
+            return _save_cluster_only(native, controller, recent_files, parent)
         QMessageBox.warning(
             parent, "Cannot Save Embedded Cluster",
-            "An embedded cluster must reference its host structure.",
+            "Host potential of embedded structure is missing. The cluster "
+            "also has no native CLUPOT that can be saved independently. "
+            "Load or create its matching host potential first.",
         )
         return False
     generation = controller.structure_generation
