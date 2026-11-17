@@ -85,6 +85,9 @@ class CalculationRequest:
     structure_id: int
     state_id: int
     restart_scf: bool = False
+    # An explicit host Potential can be used without rebuilding it from a copy
+    # of its atoms (which would lose its native SCFSTATUS).
+    potential: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -308,6 +311,56 @@ class WorkspaceController(QObject):
             return None
         status = host.SCF_INFO.SCFSTATUS()
         return str(status).strip().upper() if status is not None else None
+
+    def replace_embedding_host_if_current(self, expected_host, new_host) -> bool:
+        """Attach a completed host SCF to the *latest* embedded cluster.
+
+        Cluster edits made during the host calculation must survive. Only a
+        different host reference (or switching away from the cluster) prevents
+        adoption. The previous cluster SCF is no longer considered converged.
+        """
+        from ase2sprkkr import Potential
+        from ase2sprkkr_gui.gui.application.structure_snapshot import StructureSnapshot
+
+        if not isinstance(new_host, Potential):
+            raise TypeError("Host SCF must produce a periodic SPR-KKR Potential.")
+        atoms = self.atoms
+        if (self.structure_kind() != "0d" or
+                getattr(atoms, "embedding_host", None) is not expected_host):
+            return False
+        if self.state_id is None:
+            return False
+
+        # Work on the latest cluster rather than the launch-time snapshot.
+        # SPRKKRAtoms.copy retains the host by reference; updating the copy
+        # does not affect the original or lose edits to sites/occupations.
+        updated = atoms.copy()
+        updated.embedding_host = new_host
+        # A new host invalidates the cluster's previous SCF convergence.
+        # Preserve radial site data for the next SCF, but create a fresh native
+        # cluster Potential on demand from those sites and the new host.
+        updated._potential = None
+        updated.info.pop("sprkkr_embedding_scf_status", None)
+
+        parent_id = self.state_id
+        state_id = self._results.new_child_state(
+            parent_id,
+            potential_path=None,
+            structure_snapshot=StructureSnapshot.capture(updated),
+            empty_spheres=None,
+            new_branch=True,
+        )
+        state = self._results.state(state_id)
+        self._workspace.structure.force_change(StructureState(
+            atoms=updated,
+            potential_path=None,
+            structure_id=state.structure_id,
+            state_id=state.id,
+            empty_spheres=None,
+            restarted=False,
+        ))
+        self.structureChanged.emit(updated)
+        return True
 
     def can_calculate(self) -> bool:
         """Whether a fully configured calculation can be launched."""
