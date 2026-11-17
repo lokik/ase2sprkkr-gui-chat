@@ -256,13 +256,14 @@ class WorkspaceController(QObject):
 
     def can_calculate(self) -> bool:
         """Allow supported execution setup before choosing a working directory."""
-        # A 0D cluster cannot be run through the periodic SCF launch path.
-        # Enable this only after CLUPOT/host execution is supported.
-        return (
-            self.structure_kind() != "0d"
-            and self.atoms is not None
-            and self.input_parameters is not None
-        )
+        if self.atoms is None or self.input_parameters is None:
+            return False
+        if self.structure_kind() == "0d":
+            # Native embedded calculations need a real, separate host POTFIL.
+            from ase2sprkkr.potentials.potentials import Potential
+
+            return isinstance(getattr(self.atoms, "embedding_host", None), Potential)
+        return True
 
     def can_build_2d(self) -> bool:
         return self.structure_kind() == "3d"
@@ -312,6 +313,10 @@ class WorkspaceController(QObject):
         ):
             raise CalculationNotReady(
                 "Structure, input parameters, working directory and calculation state are required."
+            )
+        if not self.can_calculate():
+            raise CalculationNotReady(
+                "An embedded calculation requires a host SPR-KKR Potential."
             )
         return CalculationRequest(
             atoms=atoms,
@@ -491,7 +496,9 @@ class WorkspaceController(QObject):
             structure_id=structure_id,
             state_id=state_id,
             empty_spheres=None,
-            restarted=True,
+            # New embedded clusters already start with SCFSTATUS=START.
+            # Do not request another restart (which would discard radial data).
+            restarted="sprkkr_embedding" not in getattr(atoms, "arrays", {}),
         )
         self._commit_locked(
             self._workspace.structure,
