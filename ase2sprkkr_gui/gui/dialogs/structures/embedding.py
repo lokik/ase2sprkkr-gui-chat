@@ -30,6 +30,7 @@ class BuildEmbeddingDialog(QDialog):
         self.result_atoms = None
         self._selected_cell = (0,) * self.draft.dimension
         self._selected_site: HostSite | None = None
+        self._occupation_overwrite_approval = None
         self._site_rows: list[HostSite] = []
         self._grid_updating = False
         self._site_updating = False
@@ -147,15 +148,13 @@ class BuildEmbeddingDialog(QDialog):
         self.occupation = OccupationEditor(
             right, require_full=True, allow_duplicates=False
         )
+        # An incomplete mixture stays in this control. Once its fractions
+        # are valid, publish the edit to the cluster without another button.
+        self.occupation.occupationEdited.connect(self._occupation_edited)
         right_v.addWidget(self.occupation)
-        edit_row = QHBoxLayout()
-        assign = QPushButton("Apply occupation")
-        assign.clicked.connect(self._assign_occupation)
-        edit_row.addWidget(assign)
-        reset = QPushButton("Restore host")
+        reset = QPushButton("Restore host occupation")
         reset.clicked.connect(self._restore_occupation)
-        edit_row.addWidget(reset)
-        right_v.addLayout(edit_row)
+        right_v.addWidget(reset)
 
         right_v.addWidget(QLabel("Displacement from host position (Å)"))
         displacement_row = QHBoxLayout()
@@ -344,7 +343,7 @@ class BuildEmbeddingDialog(QDialog):
         self._selected_site = None
         self._refresh_sites()
 
-    def _refresh_sites(self):
+    def _refresh_sites(self, *, preserve_occupation=False):
         self._site_updating = True
         self.sites.blockSignals(True)
         self._site_rows = list(self.draft.cell_sites(self._selected_cell))
@@ -368,7 +367,7 @@ class BuildEmbeddingDialog(QDialog):
             self._selected_site = None
         self.sites.blockSignals(False)
         self._site_updating = False
-        self._display_site()
+        self._display_site(preserve_occupation=preserve_occupation)
         self._update_symmetry_preview()
         self._refresh_summary()
 
@@ -377,18 +376,22 @@ class BuildEmbeddingDialog(QDialog):
             return
         row = self.sites.currentRow()
         if 0 <= row < len(self._site_rows):
-            self._selected_site = self._site_rows[row]
+            next_site = self._site_rows[row]
+            if next_site != self._selected_site:
+                self._occupation_overwrite_approval = None
+            self._selected_site = next_site
             self._display_site()
             self._update_symmetry_preview()
 
-    def _display_site(self):
+    def _display_site(self, *, preserve_occupation=False):
         site = self._selected_site
         if site is None:
             return
         entry = self.draft.entries.get(site)
-        self.occupation.set_occupation(
-            entry.occupation if entry else site.occupation(self.draft.host)
-        )
+        if not preserve_occupation:
+            self.occupation.set_occupation(
+                entry.occupation if entry else site.occupation(self.draft.host)
+            )
         values = entry.displacement if entry else (0, 0, 0)
         for spin, value in zip(self.deltas, values):
             spin.setValue(float(value))
@@ -424,8 +427,12 @@ class BuildEmbeddingDialog(QDialog):
         self._schedule_local_render()
 
     def _confirm_overwrite(self, targets, occupation=None):
+        # Editing the selected site is intentional. Only overwriting independent
+        # modifications of *other* symmetry-equivalent sites needs approval.
         conflicts = []
         for site in targets:
+            if site == self._selected_site:
+                continue
             entry = self.draft.entries.get(site)
             if entry is None:
                 continue
@@ -433,13 +440,20 @@ class BuildEmbeddingDialog(QDialog):
                 conflicts.append(site)
         if not conflicts:
             return True
+        key = (self._selected_site, frozenset(targets))
+        if key == self._occupation_overwrite_approval:
+            return True
         response = QMessageBox.question(
             self, "Replace previous edits?",
-            f"{len(conflicts)} site(s) already have a modification. Replace them?",
+            f"{len(conflicts)} other site(s) already have a modification. "
+            "Apply this occupation to them too?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
-        return response == QMessageBox.StandardButton.Yes
+        if response == QMessageBox.StandardButton.Yes:
+            self._occupation_overwrite_approval = key
+            return True
+        return False
 
     def _include(self):
         def action():
@@ -463,14 +477,30 @@ class BuildEmbeddingDialog(QDialog):
             self._changed()
         self._guard(action)
 
+    def _occupation_edited(self):
+        # Keystrokes during a mixed-occupation edit can have an incomplete
+        # total. Keep them local, but never commit a partial physical state.
+        if self._selected_site is not None and self.occupation.is_valid():
+            self._assign_occupation()
+
     def _assign_occupation(self):
         def action():
             occupation = self.occupation.occupation()
             targets = self._targets()
+            if all(
+                site in self.draft.entries
+                and self.draft.entries[site].occupation == occupation
+                for site in targets
+            ):
+                return
             if not self._confirm_overwrite(targets, occupation):
+                # A rejected multi-site overwrite must not leave controls
+                # displaying an occupation different from the model.
+                self._display_site()
                 return
             self.draft.set_occupation(targets, occupation)
-            self._changed()
+            # Do not replace the live row controls while the user is typing.
+            self._changed(preserve_occupation=True)
         self._guard(action)
 
     def _restore_occupation(self):
@@ -497,8 +527,8 @@ class BuildEmbeddingDialog(QDialog):
     def _add_shells(self):
         self._guard(lambda: (self.draft.add_shells(self.shells.value()), self._changed()))
 
-    def _changed(self):
-        self._refresh_sites()
+    def _changed(self, *, preserve_occupation=False):
+        self._refresh_sites(preserve_occupation=preserve_occupation)
         self._refresh_summary()
         self._schedule_global_render()
         self._schedule_local_render()
@@ -617,6 +647,10 @@ class BuildEmbeddingDialog(QDialog):
 
     def _accept(self):
         def action():
+            if self._selected_site is not None and not self.occupation.is_valid():
+                raise ValueError(
+                    "Finish or restore the incomplete occupation before accepting."
+                )
             radial_reset = self.draft.would_discard_radial_data()
             if radial_reset:
                 choice = QMessageBox.warning(
