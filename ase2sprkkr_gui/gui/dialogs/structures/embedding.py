@@ -259,7 +259,6 @@ class BuildEmbeddingDialog(QDialog):
             return None
 
     def _layer_changed(self, _value):
-        self._apply_pending_displacement()
         if (
             self._selected_site is not None
             and not self.occupation.is_valid()
@@ -269,6 +268,7 @@ class BuildEmbeddingDialog(QDialog):
             self.layer.setValue(self._selected_cell[2])
             self.layer.blockSignals(False)
             return
+        self._apply_pending_displacement()
         self._refresh_cells()
         self._refresh_sites()
 
