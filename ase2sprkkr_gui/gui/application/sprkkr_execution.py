@@ -6,7 +6,7 @@ import warnings
 from dataclasses import replace
 from typing import Any, Callable
 
-from ase2sprkkr import SPRKKR
+from ase2sprkkr import SPRKKR, Potential
 from kkrunner.runs import MpiNotFoundWarning
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import (
@@ -89,9 +89,14 @@ class SprkkrExecution:
 
     def _create_runner(self, calculator: SPRKKR):
         input_file, potential_file, output_file = self.file_names()
+        embedded = "sprkkr_embedding" in self.request.atoms.arrays
+        source = (
+            {"potential": Potential.from_atoms(self.request.atoms)}
+            if embedded else {"atoms": self.request.atoms}
+        )
         return self._with_mpi_warnings(
             lambda: calculator.create_run(
-                atoms=self.request.atoms,
+                **source,
                 input_parameters=self.request.input_parameters,
                 directory=self.request.directory,
                 input_file=input_file,
