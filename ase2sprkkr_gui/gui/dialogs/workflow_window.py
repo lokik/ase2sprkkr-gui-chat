@@ -128,9 +128,17 @@ class WorkflowWindow(QMainWindow):
         root.addWidget(splitter)
         self._layout_splitter = splitter
 
+        # Treat the first two columns as one resize unit. Their equal
+        # layout stretches keep them the same width when Results is resized.
+        action_columns = QWidget(splitter)
+        action_columns.setObjectName("workflowActionColumns")
+        action_columns_layout = QHBoxLayout(action_columns)
+        action_columns_layout.setContentsMargins(0, 0, 0, 0)
+        action_columns_layout.setSpacing(splitter.handleWidth())
+
         # The first column owns both current-structure information and all
         # structural workflows. Its content scrolls as a single unit.
-        structure_column = QWidget(splitter)
+        structure_column = QWidget(action_columns)
         structure_column.setObjectName("workflowStructureColumn")
         structure_column.setMinimumWidth(300)
         structure_layout = QVBoxLayout(structure_column)
@@ -139,7 +147,7 @@ class WorkflowWindow(QMainWindow):
         self._structure_title = QLabel("Structure", structure_column)
         self._structure_title.setObjectName("workflowStructureTitle")
         self._structure_title.setFont(
-            heading_font(self._structure_title.font(), "window")
+            heading_font(self._structure_title.font(), "dialog")
         )
         structure_layout.addWidget(self._structure_title)
 
@@ -168,17 +176,17 @@ class WorkflowWindow(QMainWindow):
         structure_body_layout.addStretch(1)
         structure_scroll.setWidget(structure_body)
         structure_layout.addWidget(structure_scroll, 1)
-        splitter.addWidget(structure_column)
+        action_columns_layout.addWidget(structure_column, 1)
 
         # Calculation commands have their own column, independently scrollable
         # from structure actions and from the persistent results sidebar.
-        content = QWidget(splitter)
-        content.setMinimumWidth(360)
+        content = QWidget(action_columns)
+        content.setMinimumWidth(300)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, SPACE_XL, 0)
         title = QLabel("Calculate", content)
         title.setObjectName("workflowCalculateTitle")
-        title.setFont(heading_font(title.font(), "window"))
+        title.setFont(heading_font(title.font(), "dialog"))
         content_layout.addWidget(title)
 
         self._calculate_notice = QLabel(content)
@@ -198,7 +206,8 @@ class WorkflowWindow(QMainWindow):
         action_scroll.setWidget(self._actions)
         content_layout.addWidget(action_scroll, 1)
 
-        splitter.addWidget(content)
+        action_columns_layout.addWidget(content, 1)
+        splitter.addWidget(action_columns)
 
         # The sidebar is only a layout container: the result view and the
         # bottom navigation must be independent, visually separate panels.
@@ -209,16 +218,18 @@ class WorkflowWindow(QMainWindow):
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(SPACE_SM)
 
+        result_actions_title = QLabel("Results", side)
+        result_actions_title.setObjectName("workflowResultsTitle")
+        result_actions_title.setFont(
+            heading_font(result_actions_title.font(), "dialog")
+        )
+        side_layout.addWidget(result_actions_title)
+
         self._result_actions = QFrame(side)
         self._result_actions.setFrameShape(QFrame.Shape.StyledPanel)
         result_actions_layout = QVBoxLayout(self._result_actions)
         result_actions_layout.setContentsMargins(SPACE_SM, SPACE_SM, SPACE_SM, SPACE_SM)
         result_actions_layout.setSpacing(SPACE_XS)
-        result_actions_title = QLabel("Results...", self._result_actions)
-        result_actions_title.setFont(
-            heading_font(result_actions_title.font(), "section")
-        )
-        result_actions_layout.addWidget(result_actions_title)
         self._result_actions_widget = ResultActionsWidget(
             lambda value, action: execute_value_action(value, action, self),
             show_values_without_actions=False,
@@ -297,10 +308,9 @@ class WorkflowWindow(QMainWindow):
         )
         side_layout.addWidget(navigation, alignment=Qt.AlignmentFlag.AlignBottom)
         splitter.addWidget(side)
-        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 1)
-        splitter.setSizes([360, 520, 380])
+        splitter.setSizes([880, 380])
 
     def _refresh(self) -> None:
         plan = self._workflow_planner.for_workspace(
