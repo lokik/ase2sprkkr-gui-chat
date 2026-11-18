@@ -5,7 +5,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QFrame, QGroupBox, QMessageBox, QToolButton
+from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QGroupBox, QLabel, QMessageBox, QToolButton
 
 from ase2sprkkr_gui.gui.widgets.browser_panel import BrowserPanel
 
@@ -18,6 +18,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
+    EditStructure,
     Load,
     LoadKind,
     LoadHostPotential,
@@ -78,6 +79,45 @@ def test_workflow_and_expert_share_one_workspace(tmp_path, monkeypatch):
     window.close()
 
 
+def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+
+    def names(widget):
+        return {
+            button.accessibleName()
+            for button in widget.findChildren(QAbstractButton)
+        }
+
+    assert window._structure_title.text() == "Start with..."
+    assert window.findChild(QLabel, "workflowCalculateTitle").text() == "Calculate"
+    assert "Create a 3D Structure" in names(window._structure_actions)
+    assert "Load a Structure" in names(window._structure_actions)
+    assert not window._actions.has_actions
+    assert "Load or create" in window._calculate_notice.text()
+
+    window.controller.replace_structure(
+        Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
+    )
+    application.processEvents()
+
+    assert window._structure_title.text() == "Structure"
+    assert not window._structure_overview.isHidden()
+    assert "Edit Structure" in names(window._structure_actions)
+    assert "Visualize Structure" in names(window._structure_actions)
+    assert "Save Structure" in names(window._structure_actions)
+    assert window._actions.has_actions
+    assert "Edit Structure" not in names(window._actions)
+    assert "Visualize Structure" not in names(window._actions)
+    assert all("SCF" not in name for name in names(window._structure_actions))
+
+    window.controller.reset()
+    application.processEvents()
+    assert window._structure_title.text() == "Start with..."
+    assert not window._actions.has_actions
+    window.close()
+
+
 def test_workspace_signals_refresh_semantic_plan(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
@@ -133,9 +173,9 @@ def test_python_bulk_keeps_embedding_action_reachable_in_small_window(tmp_path, 
         window.resize(1120, 600)
         application.processEvents()
         assert window.height() == 600
-        scroll = window.findChild(QScrollArea, "workflowActionScrollArea")
+        scroll = window.findChild(QScrollArea, "workflowStructureActionsScrollArea")
         assert scroll is not None
-        buttons = window._actions.findChildren(QPushButton)
+        buttons = window._structure_actions.findChildren(QPushButton)
         embedding = next(b for b in buttons if b.accessibleName() == "Build Embedded Cluster")
         assert scroll.verticalScrollBar().maximum() > 0
         scroll.ensureWidgetVisible(embedding, 0, 0)
@@ -195,6 +235,10 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         lambda kind, path: events.append(("recent", kind, path)),
     )
     monkeypatch.setattr(window, "_visualize_structure", lambda: events.append("view"))
+    monkeypatch.setattr(
+        workflow_module.structure_flows, "edit_site_elements",
+        lambda *_args: events.append("edit"),
+    )
     monkeypatch.setattr(window, "_save_structure", lambda: events.append("save"))
     monkeypatch.setattr(
         workflow_module.file_flows, "load_host_potential",
@@ -225,6 +269,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         Load(LoadKind.OUTPUT),
         ContinueRecent("output", "/tmp/result.out"),
         VisualizeStructure(),
+        EditStructure(),
         SaveStructure(),
         LoadHostPotential(),
         CreateHostPotential(),
@@ -250,6 +295,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         "load-output",
         ("recent", "output", "/tmp/result.out"),
         "view",
+        "edit",
         "save",
         "load-host",
         "create-host",
