@@ -360,35 +360,39 @@ class WorkflowPlanner:
                 )
             )
 
+        structure_actions = [
+            _action(
+                VisualizeStructure(),
+                "Visualize Structure",
+                "Open the current structure in the configured ASE viewer",
+                "neutral",
+                ActionIcon.VIEW,
+            ),
+        ]
+        if not invalid_cluster:
+            structure_actions.append(
+                _action(
+                    EditStructure(),
+                    "Edit Structure",
+                    "Edit the current structure's site elements and occupations",
+                    "structure",
+                    ActionIcon.EDIT,
+                )
+            )
+        structure_actions.append(
+            _action(
+                SaveStructure(),
+                "Save Structure",
+                "Write the current structure to a file without calculating",
+                "neutral",
+                ActionIcon.SAVE,
+            )
+        )
         groups.append(
             AvailableActionGroup(
                 WorkflowSection.VIEW,
                 "Structure",
-                (
-                    _action(
-                        VisualizeStructure(),
-                        "Visualize Structure",
-                        "Open the current structure in the configured ASE viewer",
-                        "neutral",
-                        ActionIcon.VIEW,
-                    ),
-                    *(() if invalid_cluster else (
-                        _action(
-                            EditStructure(),
-                            "Edit Structure",
-                            "Edit the current structure's site elements and occupations",
-                            "structure",
-                            ActionIcon.EDIT,
-                        ),
-                    )),
-                    _action(
-                        SaveStructure(),
-                        "Save Structure",
-                        "Write the current structure to a file without calculating",
-                        "neutral",
-                        ActionIcon.SAVE,
-                    ),
-                ),
+                tuple(structure_actions),
             )
         )
 
