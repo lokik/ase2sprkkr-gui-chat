@@ -64,18 +64,23 @@ def _element_symbols(atoms) -> str:
     return ", ".join(sorted(symbols))
 
 
-def structure_facts(atoms, *, kind=None, status=None) -> str:
-    """Plain-text structure facts, including meaningful cell data if periodic."""
-    if atoms is None:
-        return ""
+def _structure_summary_lines(atoms, *, kind=None) -> list[str]:
+    """Structure identity fields shared by the full and compact presentations."""
     kind = detect_structure_kind(atoms) if kind is None else kind
-    lines = [
+    return [
         f"Type: {structure_kind_label(kind) or 'Unknown structure'}",
         f"Composition: {structure_formula(atoms)}",
         f"Elements: {_element_symbols(atoms)}",
         f"Sites: {len(atoms)}",
         f"Periodicity: {_periodicity(atoms)}",
     ]
+
+
+def structure_facts(atoms, *, kind=None, status=None) -> str:
+    """Plain-text structure facts, including meaningful cell data if periodic."""
+    if atoms is None:
+        return ""
+    lines = _structure_summary_lines(atoms, kind=kind)
     if any(atoms.get_pbc()):
         # The third length in a 2D slab may denote vacuum/lead separation;
         # report the actual simulation cell, not an inferred bulk lattice.
@@ -93,7 +98,7 @@ def _host_fact_columns(atoms, *, status: str | None = None) -> tuple[str, str]:
     """Compact host facts: identity on the left, cell/SCF state on the right."""
     if atoms is None:
         return "", ""
-    summary = "\n".join(structure_facts(atoms).splitlines()[:5])
+    summary = "\n".join(_structure_summary_lines(atoms))
     geometry = []
     if any(atoms.get_pbc()):
         a, b, c, alpha, beta, gamma = atoms.cell.cellpar()
