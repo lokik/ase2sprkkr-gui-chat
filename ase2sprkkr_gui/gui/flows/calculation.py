@@ -82,8 +82,9 @@ def _select_profile(
     position_like_window: str | None = None,
     selected_profile_name: str | None = None,
     initial_identification: RunIdentification | None = None,
+    initial_clear_cache: bool = False,
     directory_is_explicit: bool = False,
-) -> tuple[bool, str | None, RunIdentification | None, str | None, str | None, bool]:
+) -> tuple[bool, str | None, RunIdentification | None, str | None, str | None, bool, bool]:
     """Choose a run or preparation-only operation with the same identifiers."""
     dialog = ProfileSelectionDialog(
         parent,
@@ -93,14 +94,16 @@ def _select_profile(
         active_project_id=active_project_id,
         selected_profile_name=selected_profile_name,
         initial_identification=initial_identification,
+        initial_clear_cache=initial_clear_cache,
         directory_is_explicit=directory_is_explicit,
     )
     _position_like_window(dialog, position_like_window)
     if dialog.exec() != dialog.DialogCode.Accepted:
-        return False, None, None, None, None, False
+        return False, None, None, None, None, False, False
     return (
         True, dialog.profile_name(), dialog.identification(),
         dialog.directory_name(), dialog.project_id(), dialog.save_only_selected(),
+        dialog.clear_cache_selected(),
     )
 
 
@@ -124,6 +127,7 @@ def run_calculation(
     profile_name: str | None = None,
     position_like_window: str | None = None,
     initial_identification: RunIdentification | None = None,
+    initial_clear_cache: bool = False,
     restore_run_directory: bool = False,
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
@@ -166,6 +170,10 @@ def run_calculation(
     identification = initial_identification
     project_id = controller.active_project_id
     prepare_only = False
+    clear_cache = (
+        request_override.clear_cache if request_override is not None
+        else initial_clear_cache
+    )
     if select_profile:
         # Resolve the directory only after input-parameter editing. Cancelling
         # execution setup must not change the workspace.
@@ -188,10 +196,12 @@ def run_calculation(
             position_like_window=position_like_window,
             selected_profile_name=profile_name,
             initial_identification=initial_identification,
+            initial_clear_cache=clear_cache,
             directory_is_explicit=restore_run_directory,
         )
         accepted, profile_name, identification, directory, project_id = selection[:5]
         prepare_only = bool(selection[5]) if len(selection) > 5 else False
+        clear_cache = bool(selection[6]) if len(selection) > 6 else clear_cache
         if not accepted or not directory:
             return None
         # Selecting a project for a run also makes it the active project.
@@ -214,6 +224,7 @@ def run_calculation(
     except CalculationNotReady:
         return None
     _apply_run_identification(request.input_parameters, identification)
+    request = replace(request, clear_cache=clear_cache)
 
     if prepare_only:
         execution = SprkkrExecution(
@@ -266,6 +277,7 @@ def run_calculation(
             profile_name=profile_name,
             position_like_window=position_like_window,
             initial_identification=identification,
+            initial_clear_cache=clear_cache,
             restore_run_directory=True,
             track_launch_monitor=track_launch_monitor,
             project_repository=project_repository,

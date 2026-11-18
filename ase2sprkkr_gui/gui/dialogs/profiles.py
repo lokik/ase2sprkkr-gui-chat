@@ -102,6 +102,7 @@ class ProfileSelectionDialog(QDialog):
         active_project_id: str | None = None,
         selected_profile_name: str | None = None,
         initial_identification: RunIdentification | None = None,
+        initial_clear_cache: bool = False,
         directory_is_explicit: bool = False,
     ) -> None:
         super().__init__(parent)
@@ -198,6 +199,16 @@ class ProfileSelectionDialog(QDialog):
         self.description.setWordWrap(True)
         self.description.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         profile_layout.addWidget(self.description)
+        self.clear_cache_checkbox = QCheckBox(
+            "Discard existing cache and recalculate", profile_box
+        )
+        self.clear_cache_checkbox.setToolTip(
+            "Remove task-specific reusable cache before execution, including "
+            "TAUDIR. It is treated as an optional output and conflicting active "
+            "calculations are checked before deletion."
+        )
+        self.clear_cache_checkbox.setChecked(initial_clear_cache)
+        profile_layout.addWidget(self.clear_cache_checkbox)
         layout.addWidget(profile_box)
 
         self.project_box = QGroupBox("Project", self)
@@ -419,6 +430,10 @@ class ProfileSelectionDialog(QDialog):
         """True for the non-persistent file-preparation entry in the picker."""
         return bool(self.profiles.currentData(_SAVE_ONLY_ROLE))
 
+    def clear_cache_selected(self) -> bool:
+        """Whether to refresh task caches for this run."""
+        return not self.save_only_selected() and self.clear_cache_checkbox.isChecked()
+
     def _update_description(self) -> None:
         if self.save_only_selected():
             text = (
@@ -433,6 +448,7 @@ class ProfileSelectionDialog(QDialog):
             except (KeyError, TypeError, ValueError) as exc:
                 text = f"Profile cannot be resolved: {exc}"
         self.description.setText(text)
+        self.clear_cache_checkbox.setEnabled(not self.save_only_selected())
         self._confirm_button.setText(
             "Save files" if self.save_only_selected() else "Run"
         )

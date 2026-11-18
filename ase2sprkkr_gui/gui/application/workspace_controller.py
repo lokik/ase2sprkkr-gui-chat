@@ -85,6 +85,7 @@ class CalculationRequest:
     structure_id: int
     state_id: int
     restart_scf: bool = False
+    clear_cache: bool = False
     # An explicit host Potential can be used without rebuilding it from a copy
     # of its atoms (which would lose its native SCFSTATUS).
     potential: Any | None = None

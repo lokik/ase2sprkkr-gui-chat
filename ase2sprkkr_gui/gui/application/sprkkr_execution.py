@@ -109,6 +109,7 @@ class SprkkrExecution:
                 print_output=False,
                 project=self._project_context(),
                 restart_scf=self.request.restart_scf,
+                clear_cache=self.request.clear_cache,
             )
         )
 
