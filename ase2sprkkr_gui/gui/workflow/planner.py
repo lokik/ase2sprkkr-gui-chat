@@ -318,6 +318,11 @@ class WorkflowPlanner:
 
         stage = WorkflowStage.POST_SCF if converged else WorkflowStage.SCF
         supported_tasks = workflow_tasks(stage)
+        if is_cluster and progress is ScfProgress.ITERATING:
+            # Native CLUPOT may remain ITERATING after an embedded SCF has
+            # converged. Keep Continue SCF available, but also offer supported
+            # post-SCF calculations without changing its persisted SCFSTATUS.
+            supported_tasks += workflow_tasks(WorkflowStage.POST_SCF)
         if is_cluster:
             # A START host cannot provide usable embedding boundary conditions.
             # An iterating host is allowed with an explicit reliability warning.

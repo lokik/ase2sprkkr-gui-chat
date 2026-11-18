@@ -162,6 +162,58 @@ def test_completed_embedded_scf_output_unlocks_post_scf_tasks_when_clupot_still_
     assert "SCF status: CONVERGED" in plan.subtitle
 
 
+
+
+@pytest.mark.parametrize(
+    ("cluster_status", "host_status", "allow_scf", "allow_post_scf"),
+    (
+        ("START", "CONVERGED", True, False),
+        ("ITERATING", "CONVERGED", True, True),
+        ("CONVERGED", "CONVERGED", False, True),
+        ("ITERATING", "START", False, False),
+    ),
+)
+def test_embedded_iteration_allows_post_scf_without_changing_native_status(
+    cluster_status, host_status, allow_scf, allow_post_scf,
+):
+    """Native ITERATING is usable for supported post-SCF tasks after reopening.
+
+    The planner must not infer or persist CONVERGED, and a START host remains
+    unusable as embedding boundary conditions.
+    """
+    from ase2sprkkr_gui.gui.workflow.model import WorkflowSection, RunTask
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+
+    host = SPRKKRAtoms.promote_ase_atoms(
+        bulk("Fe", "bcc", a=2.87, cubic=True)
+    ).potential
+    host.SCF_INFO.SCFSTATUS = host_status
+
+    def open_cluster():
+        cluster = EmbeddingDraft(host)
+        cluster.include([cluster.center])
+        atoms = cluster.to_atoms()
+        atoms.potential.SCF_INFO.SCFSTATUS = cluster_status
+        return WorkspaceController(WorkspaceState(atoms=atoms))
+
+    for _ in range(2):
+        # Independent workspace sessions must present the same actions solely
+        # from the stored native status, not previous result-parser state.
+        workspace = open_cluster()
+        plan = WorkflowPlanner().for_workspace(workspace)
+        actions = plan.group(WorkflowSection.CALCULATE).actions
+        commands = [action.command for action in actions]
+        assert (RunTask("scf") in commands) is allow_scf
+        assert (RunTask("dos") in commands) is allow_post_scf
+        if cluster_status == "ITERATING" and allow_scf:
+            scf = next(action for action in actions if action.command == RunTask("scf"))
+            assert scf.title == "Continue SCF"
+            assert "SCF status: iterating SCF" in plan.subtitle
+        assert workspace.scf_status() == cluster_status
+        assert workspace.atoms.potential.SCF_INFO.SCFSTATUS() == cluster_status
+        assert host.SCF_INFO.SCFSTATUS() == host_status
+
+
 def test_failed_host_creation_never_opens_embedding_editor(monkeypatch):
     source = bulk("Fe", "bcc", a=2.87, cubic=True)
     controller = WorkspaceController(WorkspaceState(atoms=source))
