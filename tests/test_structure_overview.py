@@ -94,7 +94,9 @@ def test_overview_shows_separate_host_and_cluster_information(application):
 
 def test_host_facts_use_columns_when_wide_and_stack_when_narrow(application):
     host = SPRKKRAtoms.promote_ase_atoms(bulk("Fe", "bcc", a=2.87)).potential
-    cluster = EmbeddingDraft(host).to_atoms()
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
     widget = StructureOverviewWidget()
     widget.set_structure(cluster, kind="0d")
     widget.resize(500, 620)
