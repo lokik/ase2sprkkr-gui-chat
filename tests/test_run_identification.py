@@ -86,6 +86,37 @@ def test_empty_dataset_means_automatic_naming(application, tmp_path):
     dialog.close()
 
 
+@pytest.mark.parametrize("field,value", [
+    ("dataset_edit", "-3"), ("dataset_edit", "Fe$(id)"),
+    ("dataset_edit", "Fe;id"), ("adsi_edit", "bad/name"),
+    ("adsi_edit", "bad$(id)"), ("adsi_edit", "bad name"),
+])
+def test_run_dialog_rejects_unsafe_identifiers(application, monkeypatch, tmp_path, field, value):
+    from ase2sprkkr_gui.gui.dialogs import profiles
+
+    dialog = ProfileSelectionDialog(
+        input_parameters=_Parameters(), store=_Profiles(), directory=str(tmp_path),
+    )
+    warnings = []
+    monkeypatch.setattr(profiles.QMessageBox, "warning", lambda *_args: warnings.append(_args))
+    getattr(dialog, field).setText(value)
+    dialog.accept()
+    assert warnings
+    assert dialog.result() == dialog.DialogCode.Rejected
+    dialog.close()
+
+
+def test_run_dialog_allows_empty_adsi(application, tmp_path):
+    dialog = ProfileSelectionDialog(
+        input_parameters=_Parameters(), store=_Profiles(), directory=str(tmp_path),
+    )
+    dialog.adsi_edit.clear()
+    dialog.accept()
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert dialog.identification().adsi == ""
+    dialog.close()
+
+
 def test_accepted_run_identification_overrides_only_request(application, monkeypatch, tmp_path):
     parameters = _Parameters()
     controller = WorkspaceController(

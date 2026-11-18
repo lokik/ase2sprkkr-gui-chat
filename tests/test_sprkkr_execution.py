@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from ase import Atoms
 from types import SimpleNamespace
+import pytest
+from kkrunner import ExecutionOutcome
 
 from ase2sprkkr_gui.gui.application import sprkkr_execution as execution_module
 from ase2sprkkr_gui.gui.application.execution_cancellation import ExecutionCancelled
@@ -18,6 +20,35 @@ class _Cancellation:
     def register(self, runner):
         self.runner = runner
         return self._register and not self.requested
+
+
+@pytest.mark.parametrize("code", [1, None, 0])
+def test_raw_execution_outcome_is_reported_before_result_loading(monkeypatch, tmp_path, code):
+    outcome = ExecutionOutcome(
+        output_file=str(tmp_path / "Fe_SCF.out"),
+        error_file=str(tmp_path / "Fe_SCF.out.err"),
+        return_code=code,
+    )
+    runner = SimpleNamespace(wait=lambda: outcome, id="failed-run", failure_message="Native execution stopped")
+    statuses = []
+    execution = SprkkrExecution(_request(tmp_path), _Cancellation(), status=statuses.append)
+    monkeypatch.setattr(execution, "_calculator", lambda: object())
+    monkeypatch.setattr(execution, "_submit", lambda _calculator: runner)
+
+    def forbid_load(*_args, **_kwargs):
+        raise AssertionError("Raw execution diagnostics must not be adopted as TaskResult")
+
+    monkeypatch.setattr(execution_module, "load_result", forbid_load)
+    with pytest.raises(RuntimeError) as caught:
+        execution.run()
+    message = str(caught.value)
+    assert "Native execution stopped" in message
+    assert str(outcome.output_file) in message
+    assert str(outcome.error_file) in message
+    if code == 1:
+        assert "exit code 1" in message
+    assert "Loading result…" not in statuses
+    assert "Finished" not in statuses
 
 
 def _request(tmp_path, *, restart_scf: bool = False, clear_cache: bool = False) -> CalculationRequest:
@@ -62,6 +93,33 @@ def test_execution_constructs_sprkkr_with_selected_profile(monkeypatch, tmp_path
     ).run()
 
     assert captured == {"profile": "cluster"}
+
+
+def test_execution_retains_request_structure_without_copying(monkeypatch, tmp_path):
+    request = _request(tmp_path)
+
+    def forbid_copy():
+        raise AssertionError("Execution must use the authoritative structure as is")
+
+    monkeypatch.setattr(request.atoms, "copy", forbid_copy)
+    execution = SprkkrExecution(request, _Cancellation())
+    assert execution.request is request
+    captured = []
+
+    class Calculator:
+        def create_run(self, **kwargs):
+            captured.append(kwargs["atoms"])
+            return object()
+
+        def save_input(self, **kwargs):
+            captured.append(kwargs["atoms"])
+            return object()
+
+    calculator = Calculator()
+    monkeypatch.setattr(execution, "_calculator", lambda: calculator)
+    execution._create_runner(calculator)
+    execution.prepare_files()
+    assert all(atoms is request.atoms for atoms in captured)
 
 
 def test_execution_requests_persistent_backend_run(monkeypatch, tmp_path):

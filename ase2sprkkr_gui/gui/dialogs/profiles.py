@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ase2sprkkr.sprkkr.projects import default_project_repository
+from ase2sprkkr.input_parameters.identifiers import dataset_error, adsi_error
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -152,11 +153,13 @@ class ProfileSelectionDialog(QDialog):
             self.dataset_edit.setPlaceholderText("Automatic naming")
             self.dataset_edit.setValidator(
                 QRegularExpressionValidator(
-                    QRegularExpression(r"[A-Za-z0-9_.-]*"), self.dataset_edit
+                    QRegularExpression(r"(?:[A-Za-z0-9_][A-Za-z0-9_.-]*)?"), self.dataset_edit
                 )
             )
             self.dataset_edit.setToolTip(
                 "SPR-KKR CONTROL.DATASET. Base name for output files. "
+                "Use letters, digits, underscores, periods and hyphens; "
+                "start with a letter, digit or underscore. "
                 "Use a different name for simultaneous runs in the same directory."
             )
             identifier_form.addRow("Output file prefix:", self.dataset_edit)
@@ -168,13 +171,19 @@ class ProfileSelectionDialog(QDialog):
             identifier_form.addRow("", dataset_hint)
 
             self.adsi_edit = QLineEdit(identifiers)
+            self.adsi_edit.setValidator(
+                QRegularExpressionValidator(
+                    QRegularExpression(r"[A-Za-z0-9_.-]*"), self.adsi_edit
+                )
+            )
             adsi = (
                 input_parameters.CONTROL.ADSI() if initial_identification is None
                 else initial_identification.adsi
             )
             self.adsi_edit.setText("" if adsi is None else str(adsi))
             self.adsi_edit.setToolTip(
-                "SPR-KKR CONTROL.ADSI. An additional identifier for the calculation."
+                "SPR-KKR CONTROL.ADSI. Optional suffix using letters, digits, "
+                "underscores, periods and hyphens."
             )
             identifier_form.addRow("Calculation label:", self.adsi_edit)
             adsi_hint = QLabel(
@@ -486,21 +495,26 @@ class ProfileSelectionDialog(QDialog):
         if self.dataset_edit is not None and not self.dataset_edit.hasAcceptableInput():
             QMessageBox.warning(
                 self, "Invalid output prefix",
-                "Use only letters, digits, periods, underscores and hyphens.",
+                "Start with a letter, digit or underscore; use only letters, "
+                "digits, periods, underscores and hyphens.",
             )
             return
         if self.dataset_edit is not None:
             dataset = self.dataset_edit.text().strip()
-            if dataset and filename_component(dataset) != dataset:
+            if dataset and (dataset_error(dataset) or filename_component(dataset) != dataset):
                 QMessageBox.warning(
                     self, "Invalid output prefix",
                     "The output prefix must be a valid single filename component.",
                 )
                 return
-        if self.adsi_edit is not None and not self.adsi_edit.text().strip():
+        if self.adsi_edit is not None and (
+            not self.adsi_edit.hasAcceptableInput()
+            or adsi_error(self.adsi_edit.text())
+        ):
             QMessageBox.warning(
-                self, "Missing calculation label",
-                "Enter a calculation label (SPR-KKR CONTROL.ADSI).",
+                self, "Invalid calculation label",
+                "Use only letters, digits, periods, underscores and hyphens. "
+                "Leave the label empty for no suffix.",
             )
             return
         if (

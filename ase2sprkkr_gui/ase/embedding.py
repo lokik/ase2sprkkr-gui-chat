@@ -14,6 +14,8 @@ import numpy as np
 from ase.data import atomic_numbers
 from ase.geometry import minkowski_reduce
 from ase2sprkkr import Potential, SPRKKRAtoms
+
+from ase2sprkkr_gui.ase.copy import copy_for_edit
 from ase2sprkkr.sprkkr.embedding import embedding_data, host_atoms, host_dimension
 from ase2sprkkr.sprkkr.embedding_geometry import (
     EmbeddingSymmetry,
@@ -354,7 +356,7 @@ class EmbeddingDraft:
         """Build independent atoms without silently losing radial results.
 
         Existing radial data can only be reset after explicit caller approval.
-        An unchanged cluster returns a full copy with its original data.
+        An unchanged cluster is returned as is, including its native potential.
         """
         if self.would_discard_radial_data() and not allow_radial_reset:
             raise ValueError(
@@ -362,7 +364,7 @@ class EmbeddingDraft:
                 "Pass allow_radial_reset=True only after explicit confirmation."
             )
         if self.is_unchanged():
-            return self.original_cluster.copy()
+            return self.original_cluster
         if not self.entries:
             raise ValueError("The cluster must contain at least one site")
         atoms = SPRKKRAtoms.from_embedding(
@@ -402,13 +404,13 @@ def prepare_embedding_source(atoms):
     if callable(has_potential) and has_potential():
         potential = host.potential
     else:
-        detached = host.copy()
-        # ASE-style copies do not retain SPR-KKR's layered-region objects.
-        for region in getattr(host, "regions", {}).values():
-            region.copy_for_atoms(detached)
+        detached = copy_for_edit(host)
         potential = Potential.from_atoms(detached)
     if cluster is None:
         return potential
-    prepared = cluster.copy()
+    if cluster.embedding_host is potential:
+        return cluster
+    # Replacing a geometry-only host is an explicit structure edit.
+    prepared = copy_for_edit(cluster)
     prepared.embedding_host = potential
     return prepared

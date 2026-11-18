@@ -54,7 +54,7 @@ def edit_current_structure(
     *,
     error_title: str,
 ) -> bool:
-    """Edit a detached copy of the current structure and publish on success."""
+    """Show the current structure and publish the editor's independent result."""
     generation = controller.structure_generation
     if controller.atoms is None:
         QMessageBox.information(
@@ -65,6 +65,7 @@ def edit_current_structure(
     change = controller.apply_structure_edit(
         lambda candidate: editor(candidate, parent=parent),
         expected_structure_generation=generation,
+        copy_source=False,
     )
     if change is None:
         return False
@@ -208,7 +209,7 @@ def create_2d_from_new_structure(
 
     bulk = candidate.atoms
     result = select_build_2d_structure(
-        bulk.copy(),
+        bulk,
         parent=parent,
         recent_files=recent_files,
         surface_mode=surface_mode,
@@ -267,6 +268,7 @@ def build_2d_structure(
     change = controller.apply_structure_edit(
         lambda candidate: edit(candidate, parent=parent),
         expected_structure_generation=generation,
+        copy_source=False,
     )
     if change is None:
         return None
@@ -410,6 +412,7 @@ def build_embedding_structure(
         change = controller.apply_structure_edit(
             edit_embedding,
             expected_structure_generation=generation,
+            copy_source=False,
         )
     except (ValueError, TypeError, NotImplementedError) as exc:
         QMessageBox.warning(parent, "Embedded Cluster", str(exc))

@@ -114,8 +114,12 @@ def run_modal_task(
         receiver.failed,
         Qt.ConnectionType.QueuedConnection,
     )
-    worker.succeeded.connect(thread.quit)
-    worker.failed.connect(thread.quit)
+    # QThread lives in the GUI thread, so AutoConnection would queue quit()
+    # there. Closing the dialog can leave that call pending when wait() below
+    # blocks the GUI thread. quit() is thread-safe: request it directly from
+    # the worker so shutdown never depends on another GUI event-loop turn.
+    worker.succeeded.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+    worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
     worker.succeeded.connect(worker.deleteLater)
     worker.failed.connect(worker.deleteLater)
     thread.started.connect(worker.run)

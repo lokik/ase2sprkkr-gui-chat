@@ -12,6 +12,7 @@ from ase2sprkkr import SPRKKRAtoms
 from ase2sprkkr.sprkkr.atomic_types import AtomicType
 from ase2sprkkr.sprkkr.sites import Site, SiteType
 
+from ase2sprkkr_gui.ase.copy import copy_for_edit
 from ase2sprkkr_gui.ase.utils import labels_for_partitions, partition_by_kinds
 
 
@@ -230,7 +231,7 @@ class ElementAssignmentDraft:
 
         source = self._source_atoms
         if atoms is None or atoms is source:
-            atoms = source.copy()
+            atoms = copy_for_edit(source)
         changed = self._partition_changed()
 
         if changed:
@@ -290,7 +291,7 @@ class ElementAssignmentDraft:
             if origin is None:
                 site_type = SiteType(atoms, occupation)
             else:
-                site_type = source_sites[origin].site_type.copy(atoms=atoms)
+                site_type = source_sites[origin].site_type.copy(atoms=atoms, shallow=True)
                 site_type.occupation.set(
                     self._occupation_with_preserved_types(
                         site_type, occupation

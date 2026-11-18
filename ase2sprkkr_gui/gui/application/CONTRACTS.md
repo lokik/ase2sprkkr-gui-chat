@@ -22,3 +22,11 @@ editor result.
 The controller may still update workspace provenance that necessarily changes
 when a new structure is accepted, such as structure/state lineage,
 `potential_path`, and restart intent.
+
+Mutating editors receive a shallow editing copy: geometry and site/type
+containers are independent, while radial arrays and attached-potential option
+values are shared. Such editors may replace values, but must use an independent
+copy before writing into shared arrays. Read-only dialogs use
+`copy_source=False`, retain the original structure for display, and return an
+independent result only when changed. Returning the source leaves the workspace
+unchanged.

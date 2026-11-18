@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import warnings
-from dataclasses import replace
 from typing import Any, Callable
 
 from ase2sprkkr import SPRKKR
@@ -38,7 +37,7 @@ class SprkkrExecution:
         warning: Callable[[str], None] | None = None,
         persistent_job_changed: Callable[[str], None] | None = None,
     ) -> None:
-        self.request = replace(request, atoms=request.atoms.copy())
+        self.request = request
         self.cancellation = cancellation
         self.profile_name = profile_name
         self.execution_manager = execution_manager

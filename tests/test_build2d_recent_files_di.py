@@ -70,8 +70,9 @@ def test_build2d_flow_threads_recent_files_to_selector(tmp_path, monkeypatch):
         def can_build_2d(self):
             return True
 
-        def apply_structure_edit(self, edit, *, expected_structure_generation):
+        def apply_structure_edit(self, edit, *, expected_structure_generation, copy_source):
             assert expected_structure_generation is self.structure_generation
+            assert copy_source is False
             self.atoms = edit(self.atoms)
             return object()
 

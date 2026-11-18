@@ -6,6 +6,8 @@ from typing import Any, Literal
 import numpy as np
 from ase2sprkkr import SPRKKRAtoms
 
+from ase2sprkkr_gui.ase.copy import copy_for_edit
+
 StructureKind = Literal["0d", "2d", "3d", "unknown"]
 
 
@@ -75,6 +77,6 @@ def match_structure_axis_length(source, target, axis):
         )
 
     source_cell[axis] = source_vector / source_length * target_length
-    result = source.copy()
+    result = copy_for_edit(source)
     result.set_cell(source_cell, scale_atoms=True)
     return result

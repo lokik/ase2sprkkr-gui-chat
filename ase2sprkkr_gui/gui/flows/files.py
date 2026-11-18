@@ -14,6 +14,7 @@ from ase.io.formats import ioformats
 from ase2sprkkr import InputParameters, Potential
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
+from ase2sprkkr_gui.ase.copy import copy_for_edit
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles, RecentKind
 from ase2sprkkr_gui.gui.application.result_loading import (
     LoadedResult,
@@ -613,7 +614,7 @@ def save_embedded_cluster(
             cluster_atoms = atoms
         else:
             # Do not replace the host of the authoritative workspace atoms.
-            cluster_atoms = atoms.copy()
+            cluster_atoms = copy_for_edit(atoms)
             cluster_atoms.embedding_host = host_potential
         if (host_potential is source_host and atoms.has_potential()
                 and isinstance(atoms.potential, ClusterPotential)):

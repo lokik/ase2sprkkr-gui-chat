@@ -10,6 +10,7 @@ from typing import Any
 from ase import Atoms
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from ase2sprkkr_gui.ase.copy import copy_for_edit
 from ase2sprkkr_gui.gui.application.historical_state import (
     HistoricalStateAlreadyActive,
     NewHistoricalPotential,
@@ -71,8 +72,8 @@ class CalculationRequest:
 
     ``atoms`` identifies the authoritative launch input and is the sole physical
     authority for its potential; potential paths are provenance/artifact metadata
-    only. The execution service copies the request atoms before ASE2SPRKKR sees
-    them, so backend bookkeeping cannot mutate the workspace structure.
+    only. Storage and execution retain this exact structure and its attached
+    native potential. Explicit edits produce independent structures.
 
     ``restart_scf`` snapshots the pending workspace execution intent. It asks
     ASE2SPRKKR to serialize ``SCFSTATUS START`` for this run without mutating the
@@ -335,7 +336,7 @@ class WorkspaceController(QObject):
         # Work on the latest cluster rather than the launch-time snapshot.
         # SPRKKRAtoms.copy retains the host by reference; updating the copy
         # does not affect the original or lose edits to sites/occupations.
-        updated = atoms.copy()
+        updated = copy_for_edit(atoms)
         updated.embedding_host = new_host
         # A different host invalidates the earlier embedded SCF, even if
         # the cluster sites still carry a full set of radial data. Attach an
@@ -574,7 +575,13 @@ class WorkspaceController(QObject):
         edit: Callable[[Any], Any],
         *,
         expected_structure_generation: Generation,
+        copy_source: bool = True,
     ) -> DocumentChange | None:
+        """Apply an edit transactionally, using a shallow editing copy by default.
+
+        Read-only dialogs that create their own result use ``copy_source=False``
+        to retain the source identity until an actual edit is accepted.
+        """
         rejected, _ = self._prepare_change(
             ((
                 "structure",
@@ -589,8 +596,8 @@ class WorkspaceController(QObject):
         if source is None:
             raise ValueError("No structure is loaded.")
         edit_generation = self.structure_generation
-        atoms = edit(source.copy())
-        if atoms is None:
+        atoms = edit(copy_for_edit(source) if copy_source else source)
+        if atoms is None or atoms is source:
             return None
 
         rejected, force = self._prepare_change(
@@ -1056,7 +1063,7 @@ class WorkspaceController(QObject):
         baseline = self.structure_generation
         previous_state = self.empty_spheres
         previous_count = previous_state.count if previous_state is not None else 0
-        updated, count, structure_changed = edit(source.copy(), previous_count)
+        updated, count, structure_changed = edit(copy_for_edit(source), previous_count)
 
         rejected, force = self._prepare_change(
             (("structure", self._workspace.structure, baseline),)

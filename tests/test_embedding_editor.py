@@ -289,7 +289,7 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
             filename.write_text("CLUPOT", encoding="utf-8")
 
     def make_writer(atoms):
-        assert atoms is not cluster
+        assert atoms is cluster
         assert atoms.embedding_host is host_potential
         return Writer()
 
@@ -716,7 +716,7 @@ def test_2d_editor_can_reopen_special_native_translation_vectors():
     assert draft.to_atoms().sites[0].embedding.translation_vector == (1, 0, 0, 0, 1)
 
 
-def test_reopening_unmodified_cluster_returns_lossless_copy():
+def test_reopening_unmodified_cluster_returns_original_structure():
     parent = host()
     original_draft = EmbeddingDraft(parent)
     original_draft.set_occupation([original_draft.center], {"Fe": 1.0})
@@ -725,7 +725,7 @@ def test_reopening_unmodified_cluster_returns_lossless_copy():
     editor_draft = EmbeddingDraft(parent, cluster)
     assert editor_draft.is_unchanged()
     restored = editor_draft.to_atoms()
-    assert restored is not cluster
+    assert restored is cluster
     assert restored.embedding_host is parent
     np.testing.assert_array_equal(restored.sites[0].magnetisation,
                                   cluster.sites[0].magnetisation)
@@ -823,7 +823,7 @@ def test_versioned_cluster_history_restores_native_file_using_same_host(
     atoms = draft.to_atoms()
 
     path = tmp_path / "calculated.clu"
-    path.write_text("NQCLU 1\\n", encoding="utf-8")
+    path.write_text("GLOBAL SYSTEM PARAMETER\nNQCLU 1\n", encoding="utf-8")
     controller = WorkspaceController(WorkspaceState(
         atoms=atoms, potential_path=str(path)
     ))
@@ -912,6 +912,7 @@ def test_guided_cluster_scf_is_available_without_input_parameters():
     from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
 
     native_host = Potential.from_atoms(host())
+    native_host.SCF_INFO.SCFSTATUS = "CONVERGED"
     cluster = SPRKKRAtoms.from_embedding(
         native_host, [(0, (0, 0, 0), "Fe")]
     )
@@ -926,12 +927,12 @@ def test_guided_cluster_scf_is_available_without_input_parameters():
 
 @pytest.mark.parametrize("dimension", [2, 3])
 @pytest.mark.parametrize("host_status", ["START", "CONVERGED"])
-def test_building_cluster_from_regular_potential_offers_scf(
+def test_building_cluster_from_regular_potential_offers_required_scf(
     monkeypatch, gete_host, dimension, host_status,
 ):
     from ase2sprkkr import SPRKKRAtoms
 
-    from ase2sprkkr_gui.gui.workflow.model import RunTask, WorkflowSection
+    from ase2sprkkr_gui.gui.workflow.model import ConvergeHostScf, RunTask, WorkflowSection
     from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
 
     potential = (gete_host.potential if dimension == 2
@@ -959,7 +960,8 @@ def test_building_cluster_from_regular_potential_offers_scf(
     plan = WorkflowPlanner().for_workspace(controller)
     calculation = plan.group(WorkflowSection.CALCULATE)
     assert calculation is not None
-    assert [action.command for action in calculation.actions] == [RunTask("scf")]
+    expected = ConvergeHostScf() if host_status == "START" else RunTask("scf")
+    assert [action.command for action in calculation.actions] == [expected]
     assert potential.SCF_INFO.SCFSTATUS() == host_status
 
 
