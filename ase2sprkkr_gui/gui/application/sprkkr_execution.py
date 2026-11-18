@@ -85,7 +85,15 @@ class SprkkrExecution:
             # Even an unassigned clean-cache run needs the same reservation
             # store as project runs. Without an injected manager, ASE2SPRKKR
             # supplies its default persistent manager for clear_cache=True.
-            return self.execution_manager if self.request.clear_cache else None
+            if not self.request.clear_cache or self.execution_manager is None:
+                return None
+            from kkrunner.runs.manager import RunManager
+            # ProjectRunManager cannot create unassigned jobs; an ordinary
+            # RunManager can reserve against the very same shared RunStore.
+            return RunManager(
+                self.execution_manager.store,
+                client_pool=self.execution_manager.client_pool,
+            )
         if self.execution_manager is None:
             return self.project_id
         return self.execution_manager.for_project(self.project_id)
