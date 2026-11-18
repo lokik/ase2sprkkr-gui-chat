@@ -9,7 +9,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 import pytest
 from ase import Atoms
 from ase.build import bulk
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QBoxLayout
 
 from ase2sprkkr import SPRKKRAtoms
 from ase2sprkkr_gui.ase.embedding import EmbeddingDraft
@@ -66,16 +66,57 @@ def test_overview_shows_separate_host_and_cluster_information(application):
     assert "Periodicity: None" in widget.details.text()
     assert "Host structure" == widget.host_heading.text()
     assert "Bulk (3D)" in widget.host_details.text()
-    assert "Cell (Å)" in widget.host_details.text()
-    assert "SCF status: ITR" in widget.host_details.text()
-    assert widget.preview_source.count() == 2
+    assert "Composition:" in widget.host_details.text()
+    assert "Cell (Å)" in widget.host_geometry.text()
+    assert "SCF status: ITR" in widget.host_geometry.text()
 
-    widget.preview_source.setCurrentIndex(1)
-    assert widget.preview_source.currentData() == "host"
+    # The scope selector is a mutually exclusive radio group in the
+    # right-hand control rail, above projection (3D) and Fit.
+    assert widget.host_radio.text() == "Host"
+    assert widget.cluster_radio.text() == "Cluster"
+    assert widget.cluster_radio.isChecked()
+    assert not widget.host_radio.isChecked()
+    assert not widget._view_selector.isHidden()
+    assert widget.preview.layout().itemAt(0).widget() is widget.preview.canvas
+    assert widget.preview.layout().itemAt(1).layout() is not None
+    assert widget.preview.projection.currentText() == "3D"
+    assert widget.preview.fit_button.text() == "Fit"
+
+    widget.host_radio.setChecked(True)
+    assert not widget.cluster_radio.isChecked()
     assert len(widget.preview._positions) == len(host.atoms)
 
-    widget.preview_source.setCurrentIndex(0)
+    widget.cluster_radio.setChecked(True)
+    assert not widget.host_radio.isChecked()
     assert len(widget.preview._positions) == len(cluster)
+    widget.close()
+
+
+def test_host_facts_use_columns_when_wide_and_stack_when_narrow(application):
+    host = SPRKKRAtoms.promote_ase_atoms(bulk("Fe", "bcc", a=2.87)).potential
+    cluster = EmbeddingDraft(host).to_atoms()
+    widget = StructureOverviewWidget()
+    widget.set_structure(cluster, kind="0d")
+    widget.resize(500, 620)
+    widget.show()
+    application.processEvents()
+    assert widget._host_layout.direction() == QBoxLayout.Direction.LeftToRight
+
+    widget.resize(340, 620)
+    application.processEvents()
+    assert widget._host_layout.direction() == QBoxLayout.Direction.TopToBottom
+    widget.close()
+
+
+def test_simple_structure_hides_host_cluster_selector(application):
+    widget = StructureOverviewWidget()
+    widget.set_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
+    assert widget._view_selector.isHidden()
+    assert widget.host_heading.isHidden()
+    assert widget._host_info.isHidden()
+    assert widget.cluster_radio.isChecked()
+    assert widget.preview.projection.currentText() == "3D"
+    assert len(widget.preview._positions) == 1
     widget.close()
 
 
