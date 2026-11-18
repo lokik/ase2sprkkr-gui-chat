@@ -279,6 +279,15 @@ def test_interrupted_scf_preserves_exact_stage(status, description):
     assert action.description == description
 
 
+
+@pytest.mark.parametrize("status", ("ITR", "ITERATING", "ITR-BULK"))
+def test_periodic_iteration_does_not_unlock_post_scf_tasks(status):
+    plan = WorkflowPlanner().for_workspace(
+        Workspace(atoms=FormulaAtoms(), status=status, kind="3d")
+    )
+    assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
+
+
 def test_unknown_scf_status_remains_visible_for_forward_compatibility():
     plan = WorkflowPlanner().for_workspace(
         Workspace(atoms=FormulaAtoms(), status="future-status")
