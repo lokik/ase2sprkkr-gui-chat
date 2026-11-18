@@ -43,9 +43,18 @@ class EmbeddingPreview(QWidget):
         self._scatter = None
         self._label_artists = []
         self._label_index = None
-        layout = QVBoxLayout(self) if compact else QHBoxLayout(self)
+        # Compact previews normally stack their controls above the canvas.
+        # The Guided structure overview instead uses a narrow vertical rail
+        # to the right without changing the embedding editor's layout.
+        layout = (
+            QVBoxLayout(self) if compact and not controls_on_right
+            else QHBoxLayout(self)
+        )
         layout.setContentsMargins(0, 0, 0, 0)
-        controls = QHBoxLayout() if compact else QVBoxLayout()
+        controls = (
+            QHBoxLayout() if compact and not controls_on_right
+            else QVBoxLayout()
+        )
         if controls_header is not None:
             controls.addWidget(controls_header)
         self.projection = QComboBox()
