@@ -1,6 +1,8 @@
 """Qt renderer for an already-resolved Guided workflow plan."""
 from __future__ import annotations
 
+from typing import Literal
+
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QPalette
 from PyQt6.QtWidgets import (
@@ -17,7 +19,29 @@ from PyQt6.QtWidgets import (
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 from ase2sprkkr_gui.gui.style import SPACE_LG, SPACE_SM, heading_font
 from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
-from ase2sprkkr_gui.gui.workflow.model import ActionIcon, AvailableAction, WorkflowPlan
+from ase2sprkkr_gui.gui.workflow.model import (
+    ActionIcon,
+    AvailableAction,
+    ConvergeHostScf,
+    RunTask,
+    UpdateEmptySpheres,
+    UseForNewCalculation,
+    WorkflowPlan,
+    WorkflowSection,
+)
+
+
+_CALCULATION_COMMANDS = (
+    RunTask,
+    ConvergeHostScf,
+    UpdateEmptySpheres,
+    UseForNewCalculation,
+)
+
+
+def _action_column(action: AvailableAction) -> Literal["structure", "calculate"]:
+    """Separate workflow actions by command semantics, never their display text."""
+    return "calculate" if isinstance(action.command, _CALCULATION_COMMANDS) else "structure"
 
 
 class WorkflowActionsWidget(QWidget):
@@ -25,8 +49,14 @@ class WorkflowActionsWidget(QWidget):
 
     commandRequested = pyqtSignal(object)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        column: Literal["structure", "calculate"] | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._column = column
         self._plan: WorkflowPlan | None = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -40,23 +70,52 @@ class WorkflowActionsWidget(QWidget):
     def plan(self) -> WorkflowPlan | None:
         return self._plan
 
+    @property
+    def has_actions(self) -> bool:
+        return self._plan is not None and any(
+            self._visible_actions(group.actions)
+            for group in self._plan.groups
+        )
+
+    def _visible_actions(
+        self, actions: tuple[AvailableAction, ...]
+    ) -> tuple[AvailableAction, ...]:
+        return tuple(
+            action for action in actions
+            if self._column is None or _action_column(action) == self._column
+        )
+
     def set_plan(self, plan: WorkflowPlan) -> None:
-        """Replace the rendered actions with ``plan`` exactly as ordered."""
+        """Render the actions belonging to this column, retaining their commands."""
         self._clear()
         self._plan = plan
         for group in plan.groups:
+            actions = self._visible_actions(group.actions)
+            if not actions:
+                continue
             group_widget = QWidget(self)
             group_layout = QVBoxLayout(group_widget)
             group_layout.setContentsMargins(0, 0, 0, 0)
             group_layout.setSpacing(SPACE_SM)
 
-            label = QLabel(group.title, group_widget)
-            label.setObjectName("workflowActionGroupLabel")
-            label.setForegroundRole(QPalette.ColorRole.WindowText)
-            label.setFont(heading_font(label.font(), "section"))
-            group_layout.addWidget(label)
+            heading = group.title
+            if self._column == "structure" and group.section is WorkflowSection.VIEW:
+                heading = ""
+            elif self._column == "calculate" and group.section is WorkflowSection.CALCULATE:
+                heading = ""
+            elif self._column is not None and group.section is WorkflowSection.OTHER:
+                heading = (
+                    "Change structure" if self._column == "structure"
+                    else "More calculations"
+                )
+            if heading:
+                label = QLabel(heading, group_widget)
+                label.setObjectName("workflowActionGroupLabel")
+                label.setForegroundRole(QPalette.ColorRole.WindowText)
+                label.setFont(heading_font(label.font(), "section"))
+                group_layout.addWidget(label)
 
-            for action in group.actions:
+            for action in actions:
                 group_layout.addWidget(self._action_button(action, group_widget))
             self._layout.addWidget(group_widget)
 
@@ -141,6 +200,7 @@ class WorkflowActionsWidget(QWidget):
             ActionIcon.FILE: QStyle.StandardPixmap.SP_FileIcon,
             ActionIcon.RESULT: QStyle.StandardPixmap.SP_FileDialogContentsView,
             ActionIcon.VIEW: QStyle.StandardPixmap.SP_FileDialogContentsView,
+            ActionIcon.EDIT: QStyle.StandardPixmap.SP_FileDialogDetailedView,
             ActionIcon.SAVE: QStyle.StandardPixmap.SP_DialogSaveButton,
             ActionIcon.CONTINUE: QStyle.StandardPixmap.SP_ArrowForward,
             ActionIcon.RESET: QStyle.StandardPixmap.SP_BrowserReload,
