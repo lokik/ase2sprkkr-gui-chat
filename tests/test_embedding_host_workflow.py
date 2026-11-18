@@ -116,6 +116,52 @@ def test_converged_cluster_offers_post_scf_tasks_instead_of_scf():
     assert "SCF status: CONVERGED" in plan.subtitle
 
 
+
+
+def test_completed_embedded_scf_output_unlocks_post_scf_tasks_when_clupot_still_iterating(
+    tmp_path,
+):
+    """An SCF OUT reporting convergence overrides native ITERATING in memory."""
+    from ase2sprkkr.outputs.readers.scf import ScfResult
+    from ase2sprkkr_gui.gui.application.result_loading import load_result
+    from ase2sprkkr_gui.gui.workflow.model import WorkflowSection, RunTask
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+
+    host = SPRKKRAtoms.promote_ase_atoms(
+        bulk("Fe", "bcc", a=2.87, cubic=True)
+    ).potential
+    host.SCF_INFO.SCFSTATUS = "CONVERGED"
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    native_cluster = cluster.potential
+    native_cluster.SCF_INFO.SCFSTATUS = "ITERATING"
+    assert not cluster.sprkkr_is_scf_converged()
+
+    parameters = InputParameters.create("SCF")
+    parameters.CONTROL.CLUTYPE = "embedded"
+    parameters.CONTROL.POTFIL = "host.pot"
+    parameters.CONTROL.POTFIL_CLU = "cluster.pot"
+    result = ScfResult(parameters, None, tmp_path)
+    result.iterations = [{"converged": lambda: True}]
+    result.require_current_file = lambda _path: None
+    result._read_potential = lambda _path: native_cluster
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+    assert loaded.atoms is cluster
+    assert loaded.potential_error is None
+    assert loaded.atoms.sprkkr_is_scf_converged()
+    assert loaded.atoms.info["sprkkr_embedding_scf_status"] == "CONVERGED"
+    assert loaded.atoms.embedding_host is host
+
+    workspace = WorkspaceController(WorkspaceState(atoms=loaded.atoms))
+    plan = WorkflowPlanner().for_workspace(workspace)
+    commands = [action.command for action in plan.group(WorkflowSection.CALCULATE).actions]
+    assert RunTask("scf") not in commands
+    assert RunTask("dos") in commands
+    assert "SCF status: CONVERGED" in plan.subtitle
+
+
 def test_failed_host_creation_never_opens_embedding_editor(monkeypatch):
     source = bulk("Fe", "bcc", a=2.87, cubic=True)
     controller = WorkspaceController(WorkspaceState(atoms=source))
