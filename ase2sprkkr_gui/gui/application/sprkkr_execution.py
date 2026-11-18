@@ -82,7 +82,10 @@ class SprkkrExecution:
 
     def _project_context(self):
         if self.project_id is None:
-            return None
+            # Even an unassigned clean-cache run needs the same reservation
+            # store as project runs. Without an injected manager, ASE2SPRKKR
+            # supplies its default persistent manager for clear_cache=True.
+            return self.execution_manager if self.request.clear_cache else None
         if self.execution_manager is None:
             return self.project_id
         return self.execution_manager.for_project(self.project_id)
