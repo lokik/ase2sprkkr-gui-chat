@@ -410,9 +410,12 @@ def _finish_output_load(
     recent_files: RecentFiles,
     file_path: str | Path,
     parent: QWidget,
+    *,
+    show_potential_warning: bool = True,
 ) -> None:
     recent_files.remember("output", file_path)
-    _show_potential_warning(adoption, parent)
+    if show_potential_warning:
+        _show_potential_warning(adoption, parent)
     _show_input_parameters_warning(adoption, parent)
 
 
@@ -451,12 +454,24 @@ def continue_output(
 
     state = controller.result_store.state_for_result(record)
     if state is None:
-        QMessageBox.warning(
-            parent,
-            "Cannot Continue Calculation",
-            "The selected result has no reusable calculation state.",
+        if adoption.potential_error is not None:
+            message = (
+                "Cannot continue calculation because the potential could not be loaded:\n"
+                f"{adoption.potential_error}\n\n"
+                "The result was imported into history, but no reusable "
+                "calculation state could be reconstructed."
+            )
+        else:
+            message = (
+                "The result was imported into history, but no reusable "
+                "calculation state could be reconstructed from it."
+            )
+        QMessageBox.warning(parent, "Cannot Continue Calculation", message)
+        # The potential error is already included in the explanation above.
+        _finish_output_load(
+            adoption, recent_files, file_path, parent,
+            show_potential_warning=False,
         )
-        _finish_output_load(adoption, recent_files, file_path, parent)
         return False
 
     if controller.state_id != state.id:
