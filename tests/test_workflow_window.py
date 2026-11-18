@@ -4,8 +4,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QGroupBox, QLabel, QMessageBox, QToolButton
+from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QGroupBox, QLabel, QMessageBox, QSplitter, QToolButton, QWidget
 
 from ase2sprkkr_gui.gui.widgets.browser_panel import BrowserPanel
 
@@ -140,6 +140,49 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     application.processEvents()
     assert window._structure_title.text() == "Start with..."
     assert not window._actions.has_actions
+    window.close()
+
+
+def test_column_headings_align_and_results_resize_both_action_columns(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.show()
+    application.processEvents()
+
+    structure = window.findChild(QWidget, "workflowStructureColumn")
+    action_columns = window.findChild(QWidget, "workflowActionColumns")
+    assert structure is not None
+    assert action_columns is not None
+    calculate = window.findChild(QLabel, "workflowCalculateTitle")
+    results = window.findChild(QLabel, "workflowResultsTitle")
+    assert calculate is not None and results is not None
+
+    headings = (window._structure_title, calculate, results)
+    assert len({heading.font().pointSizeF() for heading in headings}) == 1
+    assert len({heading.mapTo(window, QPoint(0, 0)).y() for heading in headings}) == 1
+
+    splitter = window._layout_splitter
+    assert isinstance(splitter, QSplitter)
+    assert splitter.count() == 2
+    assert splitter.widget(0) is action_columns
+    assert splitter.widget(1) is results.parentWidget()
+
+    # Both action columns have equal stretch, and share the space released
+    # when the user makes the Results sidebar wider.
+    initial_pair_width = action_columns.width()
+    initial_structure_width = structure.width()
+    initial_calculation_width = calculate.parentWidget().width()
+    initial_results_width = splitter.widget(1).width()
+    assert abs(initial_structure_width - initial_calculation_width) <= 1
+
+    splitter.moveSplitter(splitter.sizes()[0] - 80, 1)
+    application.processEvents()
+
+    assert splitter.widget(1).width() > initial_results_width
+    assert action_columns.width() < initial_pair_width
+    assert structure.width() < initial_structure_width
+    assert calculate.parentWidget().width() < initial_calculation_width
+    assert abs(structure.width() - calculate.parentWidget().width()) <= 1
     window.close()
 
 
