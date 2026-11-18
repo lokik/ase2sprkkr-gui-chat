@@ -138,7 +138,9 @@ class WorkflowWindow(QMainWindow):
 
         self._structure_title = QLabel("Structure", structure_column)
         self._structure_title.setObjectName("workflowStructureTitle")
-        self._structure_title.setFont(heading_font(self._structure_title.font(), "window"))
+        self._structure_title.setFont(
+            heading_font(self._structure_title.font(), "window")
+        )
         structure_layout.addWidget(self._structure_title)
 
         self._subtitle = QLabel(structure_column)
@@ -312,7 +314,7 @@ class WorkflowWindow(QMainWindow):
         )
         self._structure_overview.setVisible(atoms is not None)
         # Formula, dimensionality and SCF state belong to the structure panel.
-        # Keep the central subtitle for onboarding and diagnostic messages.
+        # Keep onboarding and diagnostic messages in the structure column.
         invalid_cluster = (
             kind == "0d" and getattr(atoms, "embedding_host", None) is None
         )
