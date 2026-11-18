@@ -354,3 +354,24 @@ def test_prepare_only_uses_save_input_without_creating_a_runner(monkeypatch, tmp
     assert captured["output_file"] is False
     assert captured["input_file"] == "%a_%T.inp"
     assert captured["potential_file"] == "%a.pot"
+
+
+def test_unassigned_clear_cache_uses_shared_project_run_store(tmp_path):
+    from kkrunner.projects import ProjectRepository, ProjectRunManager
+    from kkrunner.runs.manager import RunManager
+    from kkrunner.runs.records import RunStore
+
+    store = RunStore(tmp_path / "runs")
+    projects = ProjectRepository(tmp_path / "projects")
+    manager = ProjectRunManager(store=store, project_repository=projects)
+    execution = SprkkrExecution(
+        _request(tmp_path, clear_cache=True),
+        _Cancellation(),
+        execution_manager=manager,
+    )
+    reserved_manager = execution._project_context()
+    assert type(reserved_manager) is RunManager
+    assert reserved_manager.store is store
+
+    normal = SprkkrExecution(_request(tmp_path), _Cancellation(), execution_manager=manager)
+    assert normal._project_context() is None
