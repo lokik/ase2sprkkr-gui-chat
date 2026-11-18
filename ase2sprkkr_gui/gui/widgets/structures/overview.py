@@ -7,9 +7,11 @@ import numpy as np
 from ase.data.colors import jmol_colors
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QComboBox,
+    QBoxLayout,
+    QButtonGroup,
     QFrame,
     QLabel,
+    QRadioButton,
     QVBoxLayout,
     QWidget,
 )
@@ -87,6 +89,25 @@ def structure_facts(atoms, *, kind=None, status=None) -> str:
     return "\n".join(lines)
 
 
+def _host_fact_columns(atoms, *, status: str | None = None) -> tuple[str, str]:
+    """Compact host facts: identity on the left, cell/SCF state on the right."""
+    if atoms is None:
+        return "", ""
+    summary = "\n".join(structure_facts(atoms).splitlines()[:5])
+    geometry = []
+    if any(atoms.get_pbc()):
+        a, b, c, alpha, beta, gamma = atoms.cell.cellpar()
+        geometry.extend((
+            "Cell (Å) / angles (°)",
+            f"a={a:.3f}    α={alpha:.1f}",
+            f"b={b:.3f}    β={beta:.1f}",
+            f"c={c:.3f}    γ={gamma:.1f}",
+        ))
+    if status:
+        geometry.append(f"SCF status: {status}")
+    return summary, "\n".join(geometry)
+
+
 class StructureOverviewWidget(QFrame):
     """Current cluster/bulk summary and, when applicable, its periodic host.
 
@@ -105,11 +126,30 @@ class StructureOverviewWidget(QFrame):
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(7)
 
-        self.preview_source = QComboBox(self)
-        self.preview_source.setObjectName("guidedStructurePreviewSource")
-        self.preview_source.currentIndexChanged.connect(self._render_preview)
-        outer.addWidget(self.preview_source)
-        self.preview = EmbeddingPreview(self, compact=True)
+        # The scope selector belongs beside the plot, together with the
+        # projection and Fit controls, rather than consuming a row above it.
+        self._view_selector = QWidget(self)
+        self._view_selector.setObjectName("guidedStructureViewSelector")
+        source_layout = QVBoxLayout(self._view_selector)
+        source_layout.setContentsMargins(0, 0, 0, 0)
+        source_layout.setSpacing(2)
+        self._view_group = QButtonGroup(self._view_selector)
+        self.host_radio = QRadioButton("Host", self._view_selector)
+        self.host_radio.setObjectName("guidedHostPreviewRadio")
+        self.cluster_radio = QRadioButton("Cluster", self._view_selector)
+        self.cluster_radio.setObjectName("guidedClusterPreviewRadio")
+        for button in (self.host_radio, self.cluster_radio):
+            self._view_group.addButton(button)
+            source_layout.addWidget(button)
+            button.toggled.connect(self._render_preview)
+        self.cluster_radio.setChecked(True)
+
+        self.preview = EmbeddingPreview(
+            self,
+            compact=True,
+            controls_on_right=True,
+            controls_header=self._view_selector,
+        )
         self.preview.setObjectName("guidedStructurePreview")
         self.preview.setMinimumHeight(190)
         self.preview.setMaximumHeight(240)
@@ -133,12 +173,27 @@ class StructureOverviewWidget(QFrame):
         self.host_heading.setFont(host_font)
         info.addWidget(self.host_heading)
 
-        self.host_details = QLabel(self._info_widget)
+        # A compact two-column host summary avoids a long single text block.
+        # Narrow overview panels fall back to stacking the same two groups.
+        self._host_info = QWidget(self._info_widget)
+        self._host_info.setObjectName("guidedHostColumns")
+        self._host_layout = QBoxLayout(
+            QBoxLayout.Direction.LeftToRight, self._host_info
+        )
+        self._host_layout.setContentsMargins(0, 0, 0, 0)
+        self._host_layout.setSpacing(8)
+        self.host_details = QLabel(self._host_info)
         self.host_details.setObjectName("guidedHostFacts")
-        self.host_details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.host_details.setTextFormat(Qt.TextFormat.PlainText)
-        self.host_details.setWordWrap(True)
-        info.addWidget(self.host_details)
+        self.host_geometry = QLabel(self._host_info)
+        self.host_geometry.setObjectName("guidedHostGeometry")
+        for label in (self.host_details, self.host_geometry):
+            label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setWordWrap(True)
+            self._host_layout.addWidget(label, 1)
+        info.addWidget(self._host_info)
         info.addStretch(1)
 
         outer.addWidget(self._info_widget)
@@ -151,30 +206,34 @@ class StructureOverviewWidget(QFrame):
         host_atoms = _host_atoms(self._host)
         has_host = host_atoms is not None
         self.host_heading.setVisible(has_host)
-        self.host_details.setVisible(has_host)
-        self.host_details.setText(
-            structure_facts(host_atoms, status=_host_status(self._host))
-            if has_host else ""
+        self._host_info.setVisible(has_host)
+        summary, geometry = _host_fact_columns(
+            host_atoms, status=_host_status(self._host)
         )
+        self.host_details.setText(summary)
+        self.host_geometry.setText(geometry)
+        self.host_geometry.setVisible(bool(geometry))
 
-        current = self.preview_source.currentData()
-        self.preview_source.blockSignals(True)
-        self.preview_source.clear()
-        if atoms is not None:
-            self.preview_source.addItem("Current structure", "current")
-            if has_host:
-                self.preview_source.addItem("Host structure", "host")
-            if current == "host" and has_host:
-                self.preview_source.setCurrentIndex(1)
-        self.preview_source.blockSignals(False)
-        self.preview_source.setVisible(has_host)
+        # Keep the selected source while the same kind of structure is
+        # refreshed. With no host, return to the ordinary structure preview.
+        self._view_selector.setVisible(has_host)
+        if not has_host:
+            self.cluster_radio.setChecked(True)
         self.preview.setVisible(atoms is not None)
         self._render_preview()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # Two columns are helpful only while they have enough room to read.
+        self._host_layout.setDirection(
+            QBoxLayout.Direction.LeftToRight
+            if self.width() >= 390 else QBoxLayout.Direction.TopToBottom
+        )
 
     def _render_preview(self, *_args) -> None:
         atoms = (
             _host_atoms(self._host)
-            if self.preview_source.currentData() == "host"
+            if self.host_radio.isChecked() and self._host is not None
             else self._atoms
         )
         if atoms is None:
