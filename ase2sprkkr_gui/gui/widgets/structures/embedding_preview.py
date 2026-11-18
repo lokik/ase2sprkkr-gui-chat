@@ -43,9 +43,18 @@ class EmbeddingPreview(QWidget):
         self._scatter = None
         self._label_artists = []
         self._label_index = None
-        layout = QVBoxLayout(self) if compact else QHBoxLayout(self)
+        # Compact previews normally stack their controls above the canvas.
+        # The Guided structure overview instead uses a narrow vertical rail
+        # to the right without changing the embedding editor's layout.
+        layout = (
+            QVBoxLayout(self) if compact and not controls_on_right
+            else QHBoxLayout(self)
+        )
         layout.setContentsMargins(0, 0, 0, 0)
-        controls = QHBoxLayout() if compact else QVBoxLayout()
+        controls = (
+            QHBoxLayout() if compact and not controls_on_right
+            else QVBoxLayout()
+        )
         if controls_header is not None:
             controls.addWidget(controls_header)
         self.projection = QComboBox()
@@ -78,7 +87,7 @@ class EmbeddingPreview(QWidget):
             self.site_numbers.setToolTip("The selected site's number is always visible")
             self.site_numbers.toggled.connect(self._update_labels)
             controls.addWidget(self.site_numbers)
-        if not compact:
+        if not compact or controls_on_right:
             controls.addStretch(1)
         self.figure = Figure(figsize=(4.5, 3))
         self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
