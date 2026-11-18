@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QGroupBox,
     QHBoxLayout,
+    QLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -60,6 +61,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     UpdateEmptySpheres,
     UseForNewCalculation,
     VisualizeStructure,
+    EditStructure,
     SaveStructure,
     LoadHostPotential,
     CreateHostPotential,
@@ -126,27 +128,65 @@ class WorkflowWindow(QMainWindow):
         root.addWidget(splitter)
         self._layout_splitter = splitter
 
-        # Structure context remains visible alongside calculation actions and
-        # results; no separate viewer or change to the active document is needed.
-        self._structure_overview = StructureOverviewWidget(splitter)
-        self._structure_overview.setMinimumWidth(245)
-        splitter.addWidget(self._structure_overview)
+        # The first column owns both current-structure information and all
+        # structural workflows. Its content scrolls as a single unit.
+        structure_column = QWidget(splitter)
+        structure_column.setObjectName("workflowStructureColumn")
+        structure_column.setMinimumWidth(300)
+        structure_layout = QVBoxLayout(structure_column)
+        structure_layout.setContentsMargins(0, 0, SPACE_XL, 0)
 
+        self._structure_title = QLabel("Structure", structure_column)
+        self._structure_title.setObjectName("workflowStructureTitle")
+        self._structure_title.setFont(heading_font(self._structure_title.font(), "window"))
+        structure_layout.addWidget(self._structure_title)
+
+        self._subtitle = QLabel(structure_column)
+        self._subtitle.setWordWrap(True)
+        self._subtitle.setStyleSheet(secondary_text_stylesheet(self.palette()))
+        structure_layout.addWidget(self._subtitle)
+
+        structure_scroll = QScrollArea(structure_column)
+        structure_scroll.setObjectName("workflowStructureActionsScrollArea")
+        structure_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        structure_scroll.setWidgetResizable(True)
+        structure_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        structure_body = QWidget(structure_scroll)
+        structure_body_layout = QVBoxLayout(structure_body)
+        structure_body_layout.setContentsMargins(0, SPACE_SM, SPACE_SM, 0)
+        structure_body_layout.setSpacing(SPACE_XL)
+        structure_body_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self._structure_overview = StructureOverviewWidget(structure_body)
+        structure_body_layout.addWidget(self._structure_overview)
+        self._structure_actions = WorkflowActionsWidget(
+            structure_body, column="structure"
+        )
+        self._structure_actions.commandRequested.connect(self.execute_workflow_command)
+        structure_body_layout.addWidget(self._structure_actions)
+        structure_body_layout.addStretch(1)
+        structure_scroll.setWidget(structure_body)
+        structure_layout.addWidget(structure_scroll, 1)
+        splitter.addWidget(structure_column)
+
+        # Calculation commands have their own column, independently scrollable
+        # from structure actions and from the persistent results sidebar.
         content = QWidget(splitter)
         content.setMinimumWidth(360)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, SPACE_XL, 0)
-        title = QLabel("What would you like to do?")
-        title.setObjectName("workflowTitle")
+        title = QLabel("Calculate", content)
+        title.setObjectName("workflowCalculateTitle")
         title.setFont(heading_font(title.font(), "window"))
         content_layout.addWidget(title)
-        self._subtitle = QLabel()
-        self._subtitle.setWordWrap(True)
-        self._subtitle.setStyleSheet(secondary_text_stylesheet(self.palette()))
-        content_layout.addWidget(self._subtitle)
-        content_layout.addSpacing(SPACE_XL)
 
-        self._actions = WorkflowActionsWidget(content)
+        self._calculate_notice = QLabel(content)
+        self._calculate_notice.setWordWrap(True)
+        self._calculate_notice.setStyleSheet(
+            secondary_text_stylesheet(self.palette())
+        )
+        content_layout.addWidget(self._calculate_notice)
+
+        self._actions = WorkflowActionsWidget(content, column="calculate")
         self._actions.commandRequested.connect(self.execute_workflow_command)
         action_scroll = QScrollArea(content)
         action_scroll.setObjectName("workflowActionScrollArea")
@@ -258,7 +298,7 @@ class WorkflowWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 1)
-        splitter.setSizes([290, 560, 380])
+        splitter.setSizes([360, 520, 380])
 
     def _refresh(self) -> None:
         plan = self._workflow_planner.for_workspace(
@@ -276,9 +316,22 @@ class WorkflowWindow(QMainWindow):
         invalid_cluster = (
             kind == "0d" and getattr(atoms, "embedding_host", None) is None
         )
-        self._subtitle.setText(plan.subtitle if atoms is None or invalid_cluster else "")
+        self._structure_title.setText(
+            "Structure" if atoms is not None else "Start with..."
+        )
+        self._subtitle.setText(plan.subtitle)
         self._subtitle.setVisible(atoms is None or invalid_cluster)
+        self._structure_actions.set_plan(plan)
         self._actions.set_plan(plan)
+        if atoms is None:
+            self._calculate_notice.setText(
+                "Load or create a structure to enable calculations."
+            )
+        else:
+            self._calculate_notice.setText(
+                "No calculation is available for the current structure."
+            )
+        self._calculate_notice.setVisible(not self._actions.has_actions)
 
     def execute_workflow_command(self, command: WorkflowCommand) -> None:
         """Mechanically route one already-approved workflow command."""
@@ -328,6 +381,9 @@ class WorkflowWindow(QMainWindow):
             return
         if isinstance(command, VisualizeStructure):
             self._visualize_structure()
+            return
+        if isinstance(command, EditStructure):
+            structure_flows.edit_site_elements(self.controller, self)
             return
         if isinstance(command, SaveStructure):
             self._save_structure()
