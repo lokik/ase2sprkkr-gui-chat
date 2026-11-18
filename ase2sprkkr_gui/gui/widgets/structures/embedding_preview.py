@@ -87,7 +87,7 @@ class EmbeddingPreview(QWidget):
             self.site_numbers.setToolTip("The selected site's number is always visible")
             self.site_numbers.toggled.connect(self._update_labels)
             controls.addWidget(self.site_numbers)
-        if not compact:
+        if not compact or controls_on_right:
             controls.addStretch(1)
         self.figure = Figure(figsize=(4.5, 3))
         self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
