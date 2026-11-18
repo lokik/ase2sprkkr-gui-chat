@@ -20,7 +20,7 @@ class _Cancellation:
         return self._register and not self.requested
 
 
-def _request(tmp_path, *, restart_scf: bool = False) -> CalculationRequest:
+def _request(tmp_path, *, restart_scf: bool = False, clear_cache: bool = False) -> CalculationRequest:
     return CalculationRequest(
         atoms=Atoms("Fe"),
         input_parameters=object(),
@@ -28,6 +28,7 @@ def _request(tmp_path, *, restart_scf: bool = False) -> CalculationRequest:
         structure_id=1,
         state_id=1,
         restart_scf=restart_scf,
+        clear_cache=clear_cache,
     )
 
 
@@ -80,7 +81,7 @@ def test_execution_requests_persistent_backend_run(monkeypatch, tmp_path):
             captured.update(kwargs)
             return Runner()
 
-    execution = SprkkrExecution(_request(tmp_path), _Cancellation())
+    execution = SprkkrExecution(_request(tmp_path, clear_cache=True), _Cancellation())
     monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
     monkeypatch.setattr(execution_module, "load_result", lambda *_args, **_kwargs: object())
 
@@ -89,6 +90,7 @@ def test_execution_requests_persistent_backend_run(monkeypatch, tmp_path):
     assert captured["project"] is None
     assert captured["print_output"] is False
     assert captured["empty_spheres"] is False
+    assert captured["clear_cache"] is True
 
 
 def test_execution_binds_persistent_manager_to_launch_project(monkeypatch, tmp_path):
