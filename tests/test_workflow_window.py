@@ -79,6 +79,31 @@ def test_workflow_and_expert_share_one_workspace(tmp_path, monkeypatch):
     window.close()
 
 
+def test_action_columns_classify_embedded_and_restart_workflows():
+    from ase2sprkkr_gui.gui.widgets.workflow_actions import _action_column
+    from ase2sprkkr_gui.gui.workflow.model import (
+        ActionIcon, AvailableAction, ConvergeHostScf,
+    )
+
+    def column(command):
+        return _action_column(
+            AvailableAction(command, "test", "", "neutral", ActionIcon.OPEN)
+        )
+
+    assert column(RunTask("dos")) == "calculate"
+    assert column(UpdateEmptySpheres()) == "calculate"
+    assert column(ConvergeHostScf()) == "calculate"
+    assert column(ConvergeHostScf(restart_scf=True)) == "calculate"
+    assert column(UseForNewCalculation()) == "calculate"
+    assert column(EditStructure()) == "structure"
+    assert column(Load(LoadKind.STRUCTURE)) == "structure"
+    assert column(CreateStructure(CreateStructureKind.THREE_D)) == "structure"
+    assert column(LoadHostPotential()) == "structure"
+    assert column(CreateHostPotential()) == "structure"
+    assert column(BuildEmbedding()) == "structure"
+    assert column(StartOver()) == "structure"
+
+
 def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
