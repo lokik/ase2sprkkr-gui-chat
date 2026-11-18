@@ -223,6 +223,13 @@ def run_calculation(
                    else controller.create_calculation_request())
     except CalculationNotReady:
         return None
+    # A completed run writes the input parameters to its calculation directory.
+    # Remember which workspace revision it came from: edits made while the
+    # calculation runs must remain unsaved. Explicit request overrides (e.g.
+    # host SCF) do not represent the workspace's input-parameter document.
+    submitted_input_generation = (
+        controller.input_parameters_generation if request_override is None else None
+    )
     _apply_run_identification(request.input_parameters, identification)
     request = replace(request, clear_cache=clear_cache)
 
@@ -259,6 +266,10 @@ def run_calculation(
         adoption = (controller.adopt_calculation_result(loaded, request=request)
                     if on_result_loaded is None else
                     on_result_loaded(loaded, request))
+        if submitted_input_generation is not None:
+            # The successful run has written its input file. Clear the unsaved
+            # flag only if the user has not edited the inputs since launch.
+            controller.mark_input_parameters_saved(submitted_input_generation)
         adoption_completed(adoption)
 
     try:

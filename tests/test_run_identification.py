@@ -181,6 +181,99 @@ def test_cancelling_run_dialog_leaves_workspace_unchanged(application, monkeypat
     assert controller.input_parameters_generation == generation
 
 
+
+@pytest.mark.parametrize("edited_while_running", [False, True])
+def test_completed_run_saves_only_submitted_input_revision(
+    application, monkeypatch, tmp_path, edited_while_running,
+):
+    """A finished DOS run has already written its input; later edits stay dirty."""
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+    from ase2sprkkr_gui.gui.application.workspace_controller import ResultAdoption
+
+    controller = WorkspaceController(
+        WorkspaceState(
+            atoms=Atoms("Fe"),
+            input_parameters=_Parameters(dataset="dos"),
+            directory=str(tmp_path),
+        )
+    )
+    assert controller.has_unsaved_input_parameters
+
+    launched = {}
+
+    class Window:
+        def __init__(self, **kwargs):
+            launched.update(kwargs)
+
+        def show(self):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
+    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+
+    assert calculation_flow.run_calculation(
+        controller, RecentFiles(tmp_path / "recent.json"), object(),
+        select_profile=False,
+        on_result_loaded=lambda _loaded, _request: ResultAdoption(),
+    ) is not None
+    # The draft is not saved just by opening the execution monitor.
+    assert controller.has_unsaved_input_parameters
+
+    if edited_while_running:
+        controller.replace_input_parameters(_Parameters(dataset="edited_during_run"))
+
+    launched["on_finished"](LoadedResult(
+        result=None, output_path=None, potential_path=None, atoms=None,
+        potential_error=None, directory=str(tmp_path),
+    ))
+    assert controller.has_unsaved_input_parameters is edited_while_running
+
+
+def test_finished_host_run_does_not_mark_unrelated_workspace_inputs_saved(
+    application, monkeypatch, tmp_path,
+):
+    """An explicit request override is not the workspace's input document."""
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+    from ase2sprkkr_gui.gui.application.workspace_controller import ResultAdoption
+
+    controller = WorkspaceController(
+        WorkspaceState(
+            atoms=Atoms("Fe"),
+            input_parameters=_Parameters(dataset="workspace"),
+            directory=str(tmp_path),
+        )
+    )
+    host_request = controller.create_calculation_request()
+    launched = {}
+
+    class Window:
+        def __init__(self, **kwargs):
+            launched.update(kwargs)
+
+        def show(self):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
+    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+    assert calculation_flow.run_calculation(
+        controller, RecentFiles(tmp_path / "recent.json"), object(),
+        select_profile=False, request_override=host_request,
+        on_result_loaded=lambda _loaded, _request: ResultAdoption(),
+    ) is not None
+
+    launched["on_finished"](LoadedResult(
+        result=None, output_path=None, potential_path=None, atoms=None,
+        potential_error=None, directory=str(tmp_path),
+    ))
+    assert controller.has_unsaved_input_parameters
+
+
 def test_execution_dialog_requires_working_directory_and_can_browse(
     application, monkeypatch, tmp_path
 ):
