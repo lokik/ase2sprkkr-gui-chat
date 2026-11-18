@@ -4,8 +4,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QFrame, QGroupBox, QMessageBox, QToolButton
+from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QGroupBox, QLabel, QMessageBox, QSplitter, QToolButton, QWidget
 
 from ase2sprkkr_gui.gui.widgets.browser_panel import BrowserPanel
 
@@ -18,6 +18,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
+    EditStructure,
     Load,
     LoadKind,
     LoadHostPotential,
@@ -78,6 +79,113 @@ def test_workflow_and_expert_share_one_workspace(tmp_path, monkeypatch):
     window.close()
 
 
+def test_action_columns_classify_embedded_and_restart_workflows():
+    from ase2sprkkr_gui.gui.widgets.workflow_actions import _action_column
+    from ase2sprkkr_gui.gui.workflow.model import (
+        ActionIcon, AvailableAction, ConvergeHostScf,
+    )
+
+    def column(command):
+        return _action_column(
+            AvailableAction(command, "test", "", "neutral", ActionIcon.OPEN)
+        )
+
+    assert column(RunTask("dos")) == "calculate"
+    assert column(UpdateEmptySpheres()) == "calculate"
+    assert column(ConvergeHostScf()) == "calculate"
+    assert column(ConvergeHostScf(restart_scf=True)) == "calculate"
+    assert column(UseForNewCalculation()) == "calculate"
+    assert column(EditStructure()) == "structure"
+    assert column(Load(LoadKind.STRUCTURE)) == "structure"
+    assert column(CreateStructure(CreateStructureKind.THREE_D)) == "structure"
+    assert column(LoadHostPotential()) == "structure"
+    assert column(CreateHostPotential()) == "structure"
+    assert column(BuildEmbedding()) == "structure"
+    assert column(StartOver()) == "structure"
+
+
+def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+
+    def names(widget):
+        return {
+            button.accessibleName()
+            for button in widget.findChildren(QAbstractButton)
+        }
+
+    assert window._structure_title.text() == "Start with..."
+    assert window.findChild(QLabel, "workflowCalculateTitle").text() == "Calculate"
+    assert "Create a 3D Structure" in names(window._structure_actions)
+    assert "Load a Structure" in names(window._structure_actions)
+    assert not window._actions.has_actions
+    assert "Load or create" in window._calculate_notice.text()
+
+    window.controller.replace_structure(
+        Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
+    )
+    application.processEvents()
+
+    assert window._structure_title.text() == "Structure"
+    assert not window._structure_overview.isHidden()
+    assert "Edit Structure" in names(window._structure_actions)
+    assert "Visualize Structure" in names(window._structure_actions)
+    assert "Save Structure" in names(window._structure_actions)
+    assert window._actions.has_actions
+    assert "Edit Structure" not in names(window._actions)
+    assert "Visualize Structure" not in names(window._actions)
+    assert all("SCF" not in name for name in names(window._structure_actions))
+
+    window.controller.reset()
+    application.processEvents()
+    assert window._structure_title.text() == "Start with..."
+    assert not window._actions.has_actions
+    window.close()
+
+
+def test_column_headings_align_and_results_resize_both_action_columns(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.show()
+    application.processEvents()
+
+    structure = window.findChild(QWidget, "workflowStructureColumn")
+    action_columns = window.findChild(QWidget, "workflowActionColumns")
+    assert structure is not None
+    assert action_columns is not None
+    calculate = window.findChild(QLabel, "workflowCalculateTitle")
+    results = window.findChild(QLabel, "workflowResultsTitle")
+    assert calculate is not None and results is not None
+
+    headings = (window._structure_title, calculate, results)
+    assert len({heading.font().pointSizeF() for heading in headings}) == 1
+    assert len({heading.mapTo(window, QPoint(0, 0)).y() for heading in headings}) == 1
+
+    splitter = window._layout_splitter
+    assert isinstance(splitter, QSplitter)
+    assert splitter.count() == 2
+    assert splitter.widget(0) is action_columns
+    assert splitter.widget(1) is results.parentWidget()
+
+    # Both action columns have equal stretch, and share the space released
+    # when the user makes the Results sidebar wider.
+    initial_pair_width = action_columns.width()
+    initial_structure_width = structure.width()
+    initial_calculation_width = calculate.parentWidget().width()
+    initial_results_width = splitter.widget(1).width()
+    assert abs(initial_structure_width - initial_calculation_width) <= 1
+
+    splitter.moveSplitter(splitter.sizes()[0] - 80, 1)
+    application.processEvents()
+
+    assert splitter.widget(1).width() > initial_results_width
+    assert action_columns.width() < initial_pair_width
+    assert structure.width() < initial_structure_width
+    assert calculate.parentWidget().width() < initial_calculation_width
+    assert abs(structure.width() - calculate.parentWidget().width()) <= 1
+    window.close()
+
+
 def test_workspace_signals_refresh_semantic_plan(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
@@ -133,9 +241,9 @@ def test_python_bulk_keeps_embedding_action_reachable_in_small_window(tmp_path, 
         window.resize(1120, 600)
         application.processEvents()
         assert window.height() == 600
-        scroll = window.findChild(QScrollArea, "workflowActionScrollArea")
+        scroll = window.findChild(QScrollArea, "workflowStructureActionsScrollArea")
         assert scroll is not None
-        buttons = window._actions.findChildren(QPushButton)
+        buttons = window._structure_actions.findChildren(QPushButton)
         embedding = next(b for b in buttons if b.accessibleName() == "Build Embedded Cluster")
         assert scroll.verticalScrollBar().maximum() > 0
         scroll.ensureWidgetVisible(embedding, 0, 0)
@@ -195,6 +303,10 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         lambda kind, path: events.append(("recent", kind, path)),
     )
     monkeypatch.setattr(window, "_visualize_structure", lambda: events.append("view"))
+    monkeypatch.setattr(
+        workflow_module.structure_flows, "edit_site_elements",
+        lambda *_args: events.append("edit"),
+    )
     monkeypatch.setattr(window, "_save_structure", lambda: events.append("save"))
     monkeypatch.setattr(
         workflow_module.file_flows, "load_host_potential",
@@ -225,6 +337,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         Load(LoadKind.OUTPUT),
         ContinueRecent("output", "/tmp/result.out"),
         VisualizeStructure(),
+        EditStructure(),
         SaveStructure(),
         LoadHostPotential(),
         CreateHostPotential(),
@@ -250,6 +363,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         "load-output",
         ("recent", "output", "/tmp/result.out"),
         "view",
+        "edit",
         "save",
         "load-host",
         "create-host",

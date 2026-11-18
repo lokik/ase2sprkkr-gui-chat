@@ -23,6 +23,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
+    EditStructure,
     Load,
     LoadKind,
     LoadHostPotential,
@@ -183,6 +184,7 @@ def test_current_structure_plan_has_canonical_group_order_without_output_loader(
     )
     assert plan.group(WorkflowSection.LOAD) is None
     assert plan.group(WorkflowSection.VIEW).title == "Structure"
+    assert EditStructure() in _commands(plan, WorkflowSection.VIEW)
     assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
     assert all(
         command != Load(LoadKind.OUTPUT)
@@ -407,6 +409,7 @@ def test_no_host_recovery_action_for_an_invalid_orphan_cluster():
     )
     assert plan.group(WorkflowSection.CREATE) is None
     assert _commands(plan, WorkflowSection.CALCULATE) == ()
+    assert EditStructure() not in _commands(plan, WorkflowSection.VIEW)
     assert "host" in plan.subtitle.lower()
 
 

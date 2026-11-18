@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
     QLabel,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -106,12 +105,6 @@ class StructureOverviewWidget(QFrame):
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(7)
 
-        title = QLabel("Structure", self)
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
-        outer.addWidget(title)
-
         self.preview_source = QComboBox(self)
         self.preview_source.setObjectName("guidedStructurePreviewSource")
         self.preview_source.currentIndexChanged.connect(self._render_preview)
@@ -122,10 +115,7 @@ class StructureOverviewWidget(QFrame):
         self.preview.setMaximumHeight(240)
         outer.addWidget(self.preview)
 
-        info_scroll = QScrollArea(self)
-        info_scroll.setWidgetResizable(True)
-        info_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._info_widget = QWidget(info_scroll)
+        self._info_widget = QWidget(self)
         info = QVBoxLayout(self._info_widget)
         info.setContentsMargins(0, 0, 0, 0)
         info.setSpacing(7)
@@ -151,8 +141,7 @@ class StructureOverviewWidget(QFrame):
         info.addWidget(self.host_details)
         info.addStretch(1)
 
-        info_scroll.setWidget(self._info_widget)
-        outer.addWidget(info_scroll, 1)
+        outer.addWidget(self._info_widget)
 
     def set_structure(self, atoms, *, kind=None, scf_status=None) -> None:
         """Refresh latest structure and its host, including in-place SCF updates."""

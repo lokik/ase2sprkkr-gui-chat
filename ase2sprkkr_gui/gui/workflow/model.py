@@ -49,6 +49,7 @@ class ActionIcon(Enum):
     RESULT = auto()
     VIEW = auto()
     SAVE = auto()
+    EDIT = auto()
     CONTINUE = auto()
     NEW_CALCULATION = auto()
     RESET = auto()
@@ -119,6 +120,11 @@ class VisualizeStructure:
 
 
 @dataclass(frozen=True)
+class EditStructure:
+    """Edit site elements and occupations in the current structure."""
+
+
+@dataclass(frozen=True)
 class SaveStructure:
     """Write the current structure without requiring a calculation."""
 
@@ -154,6 +160,7 @@ WorkflowCommand = Union[
     Load,
     ContinueRecent,
     VisualizeStructure,
+    EditStructure,
     SaveStructure,
     LoadHostPotential,
     CreateHostPotential,
