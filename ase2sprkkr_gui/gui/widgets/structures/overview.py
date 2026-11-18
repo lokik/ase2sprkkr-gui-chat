@@ -141,7 +141,6 @@ class StructureOverviewWidget(QFrame):
         for button in (self.host_radio, self.cluster_radio):
             self._view_group.addButton(button)
             source_layout.addWidget(button)
-            button.toggled.connect(self._render_preview)
         self.cluster_radio.setChecked(True)
 
         self.preview = EmbeddingPreview(
@@ -151,6 +150,8 @@ class StructureOverviewWidget(QFrame):
             controls_header=self._view_selector,
         )
         self.preview.setObjectName("guidedStructurePreview")
+        for button in (self.host_radio, self.cluster_radio):
+            button.toggled.connect(self._render_preview)
         self.preview.setMinimumHeight(190)
         self.preview.setMaximumHeight(240)
         outer.addWidget(self.preview)
