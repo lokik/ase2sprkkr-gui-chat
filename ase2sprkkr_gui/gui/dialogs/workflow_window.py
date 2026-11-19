@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QPalette
+from PyQt6.QtGui import QIcon, QKeySequence, QPalette
 from PyQt6.QtWidgets import (
     QFrame,
     QGroupBox,
@@ -292,17 +292,19 @@ class WorkflowWindow(QMainWindow):
             self._open_expert_mode,
         )
         self._settings_button = add_navigation_button(
-            "Settings", settings_icon(), "Configure Ase2sprkkr", self._open_settings
+            "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)", self._open_settings
         )
+        self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
         self._close_button = add_navigation_button(
             "Close",
             QIcon.fromTheme(
                 "application-exit",
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton),
             ),
-            "Close Ase2sprkkr",
+            "Close Ase2sprkkr (Ctrl+Q)",
             self.close,
         )
+        self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
         navigation.setStyleSheet(
             group_panel_stylesheet(
                 self.palette(), self.palette().color(QPalette.ColorRole.Highlight)
