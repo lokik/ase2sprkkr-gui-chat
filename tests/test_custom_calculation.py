@@ -54,6 +54,62 @@ def test_default_sort_then_column_primary_keeps_other_tie_breakers():
     )] == ["A", "C", "B", "Z"]
 
 
+def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatch):
+    _app()
+    task = SimpleNamespace(
+        name="TEST", experimental=False, executable="kkrgen",
+        supports_embedded_cluster=False,
+    )
+
+    class Registry(dict):
+        def names(self):
+            return tuple(self)
+
+    schema = SimpleNamespace(
+        info="Short purpose of the calculation.",
+        description="Long technical help about this calculation. More limitations.",
+    )
+    monkeypatch.setattr(task_chooser.InputParameters, "task_registry", Registry(TEST=task))
+    monkeypatch.setattr(
+        task_chooser.InputParameters, "input_parameters_registry",
+        SimpleNamespace(definition_for_task=lambda _task: schema),
+    )
+    monkeypatch.setattr(task_chooser, "detect_structure_kind", lambda _atoms: "3d")
+
+    chooser = TaskChooserDialog(object())
+    info_col = chooser._fields.index("info")
+    info_item = chooser.table.item(0, info_col)
+    assert info_item.text() == schema.info
+    assert info_item.toolTip() == schema.description
+    chooser.search.setText("limitations")
+    assert _names(chooser.table) == ["TEST"]
+    chooser.close()
+
+
+def test_info_falls_back_to_first_sentence_when_short_summary_is_missing(monkeypatch):
+    task = SimpleNamespace(
+        name="TEST", experimental=False, executable="kkrgen",
+        supports_embedded_cluster=False,
+    )
+
+    class Registry(dict):
+        def names(self):
+            return tuple(self)
+
+    schema = SimpleNamespace(
+        info="", description="An informative first sentence. Extended instructions.",
+    )
+    monkeypatch.setattr(task_chooser.InputParameters, "task_registry", Registry(TEST=task))
+    monkeypatch.setattr(
+        task_chooser.InputParameters, "input_parameters_registry",
+        SimpleNamespace(definition_for_task=lambda _task: schema),
+    )
+    rows = task_chooser.task_choices()
+    assert len(rows) == 1
+    assert rows[0].info == "An informative first sentence."
+    assert rows[0].details == schema.description
+
+
 def test_applicability_is_not_conflated_with_execution_readiness():
     task = SimpleNamespace(
         name="TEST", executable="kkrgen", supports_embedded_cluster=False,

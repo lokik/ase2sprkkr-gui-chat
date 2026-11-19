@@ -23,6 +23,7 @@ class TaskChoice:
     applicable: str
     info: str
     reason: str = ""
+    details: str = ""
 
 
 def applicability(task: Any, structure_kind: str | None) -> tuple[str, str]:
@@ -62,17 +63,26 @@ def task_choices(atoms: Any = None) -> tuple[TaskChoice, ...]:
         status, reason = applicability(task, kind)
         try:
             definition = InputParameters.input_parameters_registry.definition_for_task(task)
-            info = getattr(definition, "description", None) or getattr(definition, "info", None)
+            # Backend info is the short summary; description is detailed help.
+            info = getattr(definition, "info", None)
+            details = getattr(definition, "description", None)
             if callable(info):
                 info = info()
+            if callable(details):
+                details = details()
             if not isinstance(info, str):
                 info = ""
+            if not isinstance(details, str):
+                details = ""
         except (AttributeError, KeyError, ValueError):
-            info = ""
+            info, details = "", ""
+        if not info.strip() and details.strip():
+            # Only a short lead sentence when no dedicated summary exists.
+            info = " ".join(details.split()).split(". ", 1)[0].rstrip(".") + "."
         rows.append(TaskChoice(
             task.name.upper(), task.experimental, status,
             " ".join(info.split()) or f"SPR-KKR {task.executable} calculation",
-            reason,
+            reason, details.strip(),
         ))
     return tuple(rows)
 
@@ -191,7 +201,7 @@ class TaskChooserDialog(QDialog):
                       if self.applicability_filter is not None else "Any applicability")
         rows = [
             row for row in self._records
-            if (not text or text in (row.name + " " + row.info).casefold())
+            if (not text or text in (row.name + " " + row.info + " " + row.details).casefold())
             and (experimental == 0 or row.experimental == (experimental == 1))
             and (applicable == "Any applicability" or row.applicable == applicable)
         ]
@@ -208,7 +218,11 @@ class TaskChooserDialog(QDialog):
             for column, key in enumerate(self._fields):
                 item = QTableWidgetItem(values[key])
                 item.setData(Qt.ItemDataRole.UserRole, row.name)
-                item.setToolTip(row.reason if key == "applicable" else row.info)
+                item.setToolTip(
+                    row.reason if key == "applicable"
+                    else (row.details or row.info) if key == "info"
+                    else row.info
+                )
                 self.table.setItem(index, column, item)
         target = next((i for i, row in enumerate(rows) if row.name == previously), 0)
         if rows:
