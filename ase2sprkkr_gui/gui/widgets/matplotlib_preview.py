@@ -15,7 +15,7 @@ from matplotlib.backends.backend_qtagg import (
 )
 from matplotlib.figure import Figure
 from matplotlib.image import imread
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QPointF
 from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QPushButton, QToolButton, QVBoxLayout, QWidget,
@@ -44,12 +44,19 @@ def _fullscreen_icon() -> QIcon:
     pixmap = QPixmap(18, 18)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
-    painter.setPen(QPen(QColor("#171717"), 2))
-    # Four outward-facing corners, avoiding reliance on the platform icon theme.
-    for x, dx in ((3, 5), (15, -5)):
-        for y, dy in ((3, 5), (15, -5)):
-            painter.drawLine(x, y, x + dx, y)
-            painter.drawLine(x, y, x, y + dy)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor("#171717"))
+    pen.setWidthF(1.7)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    # Four diagonal arrows pointing outwards, not a square outline.
+    for dx in (-1, 1):
+        for dy in (-1, 1):
+            tip = QPointF(9 + dx * 6, 9 + dy * 6)
+            painter.drawLine(QPointF(9 + dx * 2, 9 + dy * 2), tip)
+            painter.drawLine(tip, QPointF(tip.x() - dx * 3.5, tip.y()))
+            painter.drawLine(tip, QPointF(tip.x(), tip.y() - dy * 3.5))
     painter.end()
     return QIcon(pixmap)
 
@@ -105,9 +112,9 @@ class PreviewFigureCanvas(FigureCanvasQTAgg):
         self.fullscreen_button.setIconSize(QSize(16, 16))
         self.fullscreen_button.setFixedSize(24, 24)
         self.fullscreen_button.setStyleSheet(
-            "QToolButton { background-color: #f8f8f8; color: #171717;"
-            " border: 1px solid #666; border-radius: 3px; padding: 1px; }"
-            "QToolButton:hover { background-color: white; border-color: black; }"
+            "QToolButton { background-color: rgba(248, 248, 248, 210);"
+            " border: none; border-radius: 3px; padding: 0; }"
+            "QToolButton:hover { background-color: white; }"
         )
         self.fullscreen_button.clicked.connect(self.open_fullscreen)
         self.fullscreen_button.move(6, 6)

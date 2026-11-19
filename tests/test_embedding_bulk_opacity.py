@@ -63,3 +63,46 @@ def test_embedding_dialog_fades_host_but_not_cluster_or_selection():
     np.testing.assert_allclose(preview._scatter.get_facecolors()[:, 3], expected)
     assert dialog.local_preview.bulk_opacity_slider is None
     dialog.close()
+
+
+def test_selected_outline_is_occluded_by_nearer_atoms():
+    preview = EmbeddingPreview()
+    preview.set_view(90, 0)  # Positive z is towards the viewer.
+    preview.set_points(
+        [[0, 0, 0], [0, 0, 1]],
+        ["#b0b0b0", "#a6aeb6"], [100, 400],
+        cell_corners=np.empty((0, 3)),
+        outlines=["#ffcf4f", "#333a42"], widths=[3.0, 0.65],
+    )
+    np.testing.assert_array_equal(preview._point_order, [0, 1])
+    # A selected atom behind another atom must not get a separate
+    # high-zorder highlight collection drawn over the foreground atom.
+    assert len(preview.axes.collections) == 1
+    assert preview.axes.collections[0] is preview._scatter
+    np.testing.assert_allclose(preview._scatter.get_linewidths(), [3.0, 0.65])
+    preview.close()
+
+
+def test_fullscreen_preserves_bulk_opacity_mask_and_independent_slider():
+    preview = EmbeddingPreview(show_bulk_opacity=True)
+    preview.set_points(
+        [[0, 0, 0], [1, 0, 0]],
+        ["#a6aeb6", "#4b92cf"], [55, 70],
+        cell_corners=np.empty((0, 3)), bulk_mask=[True, False],
+    )
+    preview.bulk_opacity_slider.setValue(35)
+
+    fullscreen = preview._fullscreen_copy()
+    assert fullscreen.bulk_opacity_slider is not None
+    assert fullscreen.bulk_opacity_slider.value() == 35
+    assert fullscreen.bulk_opacity_label.text() == "Bulk opacity: 35%"
+    np.testing.assert_array_equal(fullscreen._bulk_mask, [True, False])
+    expected = np.where(fullscreen._bulk_mask[fullscreen._point_order], 0.35, 1.)
+    np.testing.assert_allclose(fullscreen._scatter.get_facecolors()[:, 3], expected)
+    np.testing.assert_allclose(fullscreen._scatter.get_edgecolors()[:, 3], expected)
+    assert not fullscreen.canvas._fullscreen_enabled
+
+    fullscreen.bulk_opacity_slider.setValue(10)
+    assert preview.bulk_opacity_slider.value() == 35
+    fullscreen.close()
+    preview.close()

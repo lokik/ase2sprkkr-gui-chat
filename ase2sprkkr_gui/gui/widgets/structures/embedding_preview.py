@@ -139,13 +139,17 @@ class EmbeddingPreview(QWidget):
         """
         preview = EmbeddingPreview(
             selectable=self._selectable, controls_on_right=True,
+            show_bulk_opacity=self.bulk_opacity_slider is not None,
         )
         preview.set_points(
             self._positions, self._colors, self._sizes,
             cell_corners=self._corners, labels=self._labels,
             label_index=self._label_index,
             outlines=self._outlines, widths=self._widths,
+            bulk_mask=self._bulk_mask,
         )
+        if self.bulk_opacity_slider is not None:
+            preview.bulk_opacity_slider.setValue(self.bulk_opacity_slider.value())
         preview.projection.blockSignals(True)
         preview.projection.setCurrentIndex(self.projection.currentIndex())
         preview.projection.blockSignals(False)
@@ -231,12 +235,9 @@ class EmbeddingPreview(QWidget):
                 *points[order].T, c=faces, s=self._sizes[order],
                 edgecolors=edges, linewidths=self._widths[order], zorder=2,
             )
-            rings = self._widths > 1
-            if np.any(rings):
-                ring_edges = to_rgba_array(self._outlines[rings])
-                ring_edges[:, 3] *= np.where(self._bulk_mask[rings], bulk_opacity, 1.)
-                ax.scatter(*points[rings].T, facecolors="none", edgecolors=ring_edges,
-                           s=self._sizes[rings], linewidths=self._widths[rings], zorder=4)
+            # Draw all marker outlines in this single, depth-sorted collection.
+            # A separate high-zorder selection ring would incorrectly appear
+            # through atoms that are closer to the viewer.
             for point, label in zip(points, self._labels):
                 self._label_artists.append(ax.annotate(
                     label, point, xytext=(6, 0), textcoords="offset points", fontsize=8,

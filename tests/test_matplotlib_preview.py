@@ -90,6 +90,7 @@ def test_fullscreen_corner_button_uses_the_double_click_action(monkeypatch):
     assert button.isVisible()
     assert button.x() < 30 and button.y() < 30
     assert button.toolTip() == "Open fullscreen preview"
+    assert "border: none" in button.styleSheet()
     QTest.mouseClick(button, Qt.MouseButton.LeftButton)
     QTest.mouseDClick(canvas, Qt.MouseButton.LeftButton)
     assert calls == [canvas, canvas]
