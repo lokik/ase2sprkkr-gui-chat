@@ -62,7 +62,7 @@ jobs:
         with:
           repository: lokik/ase2sprkkr-chat
           ref: >-
-            ${{ (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
+            ${{ (github.head_ref == 'test_editor' || github.ref_name == 'test_editor') && 'editor' || (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
                 || github.head_ref == 'cluster' || github.head_ref == 'embedding-host-scf'
                 || github.head_ref == 'guided-structure-type' || github.head_ref == 'editor'
                 || github.head_ref == 'editor-native-identifiers'
@@ -79,6 +79,9 @@ jobs:
           # Package identity tests inspect setuptools' package discovery.
           # Build isolation does not expose build requirements to pytest.
           python -m pip install -e . pytest 'setuptools>=61'
+
+      - name: Structure editor regression tests
+        run: python -m pytest -x -vv tests/test_structure_editor.py tests/test_element_assignment_dialog.py tests/test_element_assignment_state.py
 
       - name: Run tests
         run: python -m pytest -q
