@@ -331,8 +331,8 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
     )
     monkeypatch.setattr(window, "_visualize_structure", lambda: events.append("view"))
     monkeypatch.setattr(
-        workflow_module.structure_flows, "edit_site_elements",
-        lambda *_args: events.append("edit"),
+        workflow_module.structure_flows, "edit_structure",
+        lambda *_args, **_kwargs: events.append("edit"),
     )
     monkeypatch.setattr(window, "_save_structure", lambda: events.append("save"))
     monkeypatch.setattr(

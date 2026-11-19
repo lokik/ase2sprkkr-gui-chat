@@ -31,8 +31,9 @@ from ase2sprkkr_gui.gui.widgets.structures.element_assignment import QLetterRow
 
 
 class ElementAssignmentDialog(QDialog):
-    def __init__(self, parent: Optional[QWidget] = None, back: bool = False):
+    def __init__(self, parent: Optional[QWidget] = None, back: bool = False, *, editor_mode: bool = False):
         super().__init__(parent)
+        self._editor_mode = editor_mode
         self.setWindowTitle("Assign Elements to Wyckoff Sites")
         self.setWindowFlags(
             self.windowFlags()
@@ -51,11 +52,13 @@ class ElementAssignmentDialog(QDialog):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        root.addWidget(splitter, 1)
+        if not self._editor_mode:
+            splitter = QSplitter(Qt.Orientation.Horizontal, self)
+            self.splitter = splitter
+            root.addWidget(splitter, 1)
 
         # Left: Scroll area for letters
-        left = QWidget()
+        left = QWidget(self)
         left_v = QVBoxLayout(left)
         self.scroll = QScrollArea(left)
         self.scroll.setWidgetResizable(True)
@@ -67,13 +70,12 @@ class ElementAssignmentDialog(QDialog):
         left_v.addWidget(self.scroll, 1)
         # Keep left column wide enough and stable so headers and inputs fit
         # Widen left panel for better readability of element rows
-        left.setMinimumWidth(750)
-        # Initial splitter sizing (favor left)
-        splitter.setSizes([850, 550])
-        splitter.addWidget(left)
+        left.setMinimumWidth(450 if self._editor_mode else 750)
+        if not self._editor_mode:
+            splitter.addWidget(left)
 
         # Right: 3D preview
-        right = QWidget()
+        right = QWidget(self)
         right_v = QVBoxLayout(right)
 
         # Lattice vectors table (editable)
@@ -103,7 +105,8 @@ class ElementAssignmentDialog(QDialog):
             self.lattice_spinboxes.append(row_spinboxes)
 
         lattice_vectors_layout.addWidget(self.lattice_vectors_table)
-        right_v.addWidget(lattice_vectors_group, 0)
+        if not self._editor_mode:
+            right_v.addWidget(lattice_vectors_group, 0)
 
         self.fig = Figure(figsize=(4, 4))
         self.ax = self.fig.add_subplot(111, projection='3d')
@@ -116,7 +119,11 @@ class ElementAssignmentDialog(QDialog):
             "QLabel { color: #cc3333; font-size: 14px; font-weight: 600; padding: 4px 0; }"
         )
         right_v.addWidget(self.error_label)
-        splitter.addWidget(right)
+        if self._editor_mode:
+            self._build_structure_editor_layout(root, left, right, lattice_vectors_group)
+        else:
+            splitter.addWidget(right)
+            splitter.setSizes([850, 550])
 
         # Buttons
         btns = QHBoxLayout()

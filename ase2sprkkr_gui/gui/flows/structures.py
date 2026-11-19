@@ -72,6 +72,40 @@ def edit_current_structure(
     return document_change_applied(parent, change)
 
 
+def edit_structure(
+    controller: WorkspaceController,
+    parent: QWidget,
+    *,
+    recent_files: RecentFiles | None = None,
+) -> bool:
+    """Open the integrated structure editor and commit one accepted result."""
+    from ase2sprkkr_gui.gui.dialogs.structures.structure_editor import (
+        select_structure_editor,
+    )
+
+    generation = controller.structure_generation
+    atoms = controller.atoms
+    if atoms is None:
+        QMessageBox.information(parent, "No Structure", "Load or create a structure first.")
+        return False
+
+    result = select_structure_editor(
+        atoms,
+        parent=parent,
+        recent_files=recent_files,
+        allow_build_2d=controller.can_build_2d(),
+        allow_build_embedding=controller.can_build_embedding(),
+    )
+    if result is None:
+        return False
+    change = controller.apply_structure_edit(
+        lambda _candidate: result,
+        expected_structure_generation=generation,
+        copy_source=False,
+    )
+    return change is not None and document_change_applied(parent, change)
+
+
 def edit_site_elements(
     controller: WorkspaceController,
     parent: QWidget,

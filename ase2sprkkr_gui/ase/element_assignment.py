@@ -65,6 +65,8 @@ class ElementAssignmentDraft:
         self._original_partition = tuple(
             tuple(site.origins) for site in self.sites
         )
+        self._initial_cell = self._cell.copy()
+        self._initial_sites = self._site_snapshot()
 
     @property
     def cell(self) -> np.ndarray:
@@ -222,6 +224,25 @@ class ElementAssignmentDraft:
     def is_valid(self) -> bool:
         return bool(self.sites) and all(
             self.is_site_valid(site) for site in self.sites
+        )
+
+    def _site_snapshot(self) -> tuple:
+        """Capture editable site data, independent of Qt and the source Atoms."""
+        return tuple(
+            (
+                site.label,
+                tuple(tuple(float(x) for x in row) for row in site.positions),
+                tuple(site.origins),
+                tuple((entry.symbol, entry.value) for entry in site.occupancies),
+            )
+            for site in self.sites
+        )
+
+    def is_unchanged(self) -> bool:
+        """No structure edit was made (including a split or added position)."""
+        return (
+            np.array_equal(self._cell, self._initial_cell)
+            and self._site_snapshot() == self._initial_sites
         )
 
     def apply(self, atoms: Atoms | None = None) -> Atoms:

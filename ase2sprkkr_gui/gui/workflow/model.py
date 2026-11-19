@@ -121,7 +121,7 @@ class VisualizeStructure:
 
 @dataclass(frozen=True)
 class EditStructure:
-    """Edit site elements and occupations in the current structure."""
+    """Open the integrated structure editor for the current structure."""
 
 
 @dataclass(frozen=True)

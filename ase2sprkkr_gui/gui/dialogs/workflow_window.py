@@ -396,7 +396,9 @@ class WorkflowWindow(QMainWindow):
             self._visualize_structure()
             return
         if isinstance(command, EditStructure):
-            structure_flows.edit_site_elements(self.controller, self)
+            structure_flows.edit_structure(
+                self.controller, self, recent_files=self.recent_history
+            )
             return
         if isinstance(command, SaveStructure):
             self._save_structure()

@@ -379,7 +379,7 @@ class WorkflowPlanner:
                 _action(
                     EditStructure(),
                     "Edit Structure",
-                    "Edit the current structure's site elements and occupations",
+                    "Edit site occupations, lattice, geometry and embedded structures",
                     "structure",
                     ActionIcon.EDIT,
                 )
