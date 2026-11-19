@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
 from ase2sprkkr.sprkkr.embedding import embedding_data, host_atoms
+from ase2sprkkr_gui.gui.plots.atom_sizes import marker_areas
 from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
 
 
@@ -49,12 +50,12 @@ def cluster_preview_style(atoms, selected=()):
     """Highlighted atoms remain visible with a larger marker and bright ring."""
     count = len(atoms)
     colors = site_type_colors(atoms)
-    sizes = np.full(count, 55.0)
+    sizes = marker_areas(atoms, 55.0)
     outlines = np.full(count, "#333a42", dtype=object)
     widths = np.full(count, 0.65)
     for index in selected:
         if 0 <= int(index) < count:
-            sizes[int(index)] = 145.0
+            sizes[int(index)] *= 145.0 / 55.0
             outlines[int(index)] = "#ffcf4f"
             widths[int(index)] = 3.0
     return colors, sizes, outlines, widths
@@ -122,7 +123,8 @@ class EditorClusterHostPreviews(QWidget):
             colors = site_type_colors(self._host)
             count = len(self._host)
             self.host_preview.set_points(
-                self._host.get_positions(), colors, np.full(count, 55.0),
+                self._host.get_positions(), colors,
+                marker_areas(self._host, 55.0, potential=self._cluster.embedding_host),
                 cell_corners=_cell_corners(self._host),
                 outlines="#333a42", widths=0.65,
             )

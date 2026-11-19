@@ -61,6 +61,9 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self.ase2sprkkr_page, "Ase2sprkkr")
 
         self.viewer = self.general_page.viewer
+        self.atom_size_slider = self.general_page.atom_size_slider
+        self.atom_relative_sizes = self.general_page.atom_relative_sizes
+        self.atom_potential_radii = self.general_page.atom_potential_radii
         self.viewer_warning = self.general_page.viewer_warning
         self.dataset_default_mode = self.general_page.dataset_default_mode
         self.share_python_shell_history = (
@@ -110,10 +113,18 @@ class SettingsDialog(QDialog):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+        previous_appearance = (
+            self._settings.atom_size_percent,
+            self._settings.atom_relative_sizes,
+            self._settings.atom_potential_radii,
+        )
         previous_viewer = self._settings.viewer
         previous_dataset_mode = self._settings.dataset_default_mode
         previous_share_history = self._settings.share_python_shell_history
         self._settings.viewer = self.viewer.currentText()
+        self._settings.atom_size_percent = self.atom_size_slider.value()
+        self._settings.atom_relative_sizes = self.atom_relative_sizes.isChecked()
+        self._settings.atom_potential_radii = self.atom_potential_radii.isChecked()
         self._settings.dataset_default_mode = str(
             self.dataset_default_mode.currentData()
         )
@@ -122,6 +133,11 @@ class SettingsDialog(QDialog):
         )
         if not self._settings.save():
             self._settings.viewer = previous_viewer
+            (
+                self._settings.atom_size_percent,
+                self._settings.atom_relative_sizes,
+                self._settings.atom_potential_radii,
+            ) = previous_appearance
             self._settings.dataset_default_mode = previous_dataset_mode
             self._settings.share_python_shell_history = previous_share_history
             QMessageBox.critical(

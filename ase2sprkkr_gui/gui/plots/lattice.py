@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Optional, Sequence
 import numpy as np
 from matplotlib import colormaps
 from matplotlib.colors import to_hex
+from ase2sprkkr_gui.gui.plots.atom_sizes import marker_areas
 
 _SITE_ROLE_STYLES = {
     'inactive': {
@@ -143,6 +144,7 @@ def plot_atoms_preview(
     if base_style:
         style.update(base_style)
 
+    sizes = marker_areas(atoms, float(style.get('s', 40)))
     grouped_indices: Dict[str, list[int]] = {}
     for idx, kind in enumerate(kinds):
         if idx in hovered_set:
@@ -156,17 +158,21 @@ def plot_atoms_preview(
             continue
         kind_style = dict(style)
         kind_style['color'] = color
+        kind_style['s'] = sizes[selected_indices]
         plot_sites_in_lattice(ax, lattice, scaled[selected_indices], **kind_style)
 
     focus_style = dict(style)
     focus_style.setdefault('color', 'black')
     focus_style['color'] = 'black'
-    focus_style['s'] = int(float(focus_style.get('s', 40)) * 1.5)
+    focus_style['s'] = float(focus_style.get('s', 40)) * 1.5
     if hovered_style:
         focus_style.update(hovered_style)
 
     for idx in sorted(hovered_set):
-        plot_sites_in_lattice(ax, lattice, scaled[idx], **focus_style)
+        atom_focus_style = dict(focus_style)
+        if not hovered_style or 's' not in hovered_style:
+            atom_focus_style['s'] = sizes[idx] * 1.5
+        plot_sites_in_lattice(ax, lattice, scaled[idx], **atom_focus_style)
 
     if extra_draw is not None:
         extra_draw(ax, atoms, lattice)
@@ -221,12 +227,13 @@ def plot_structure_axis_projection(ax, atoms: Any, axis: int, *, canvas=None) ->
         (positions @ horizontal, positions @ vertical)
     )
     symbols = np.asarray(atoms.get_chemical_symbols())
+    sizes = marker_areas(atoms, 40)
     for symbol in dict.fromkeys(symbols.tolist()):
         selected = symbols == symbol
         ax.scatter(
             projected[selected, 0],
             projected[selected, 1],
-            s=40,
+            s=sizes[selected],
             edgecolors="black",
             linewidths=0.9,
             label=symbol,

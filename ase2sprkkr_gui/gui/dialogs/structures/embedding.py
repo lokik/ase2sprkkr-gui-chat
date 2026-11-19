@@ -45,6 +45,7 @@ from ase2sprkkr_gui.ase.embedding import (
 from ase2sprkkr_gui.gui.dialogs.structures.embedding_history import EmbeddingUndoStack
 from ase2sprkkr_gui.gui.plots.lattice import corner_indices
 from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
+from ase2sprkkr_gui.gui.plots.atom_sizes import marker_areas
 from ase2sprkkr_gui.gui.widgets.structures.host_cell_map import (
     HostCellMap, SELECTED_COLOR, SYMMETRY_APPLY_COLOR, SYMMETRY_PREVIEW_COLOR,
 )
@@ -1147,6 +1148,10 @@ class BuildEmbeddingDialog(QDialog):
 
     def _draw_sites(self, preview, sites, *, detail=False):
         points, colors, sizes, outlines, widths = [], [], [], [], []
+        host = self.draft.geometry_host
+        atoms = getattr(host, 'atoms', host)
+        potential = host if hasattr(host, 'SCF_INFO') else None
+        factors = marker_areas(atoms, 1.0, potential=potential)
         for site in sites:
             entry = self.draft.entries.get(site)
             displacement = (
@@ -1156,7 +1161,7 @@ class BuildEmbeddingDialog(QDialog):
             points.append(site.position(self.draft.geometry_host) + displacement)
             color, size, outline, width = self._site_style(site, local=detail)
             colors.append(color)
-            sizes.append(size)
+            sizes.append(size * factors[site.original_site])
             outlines.append(outline)
             widths.append(width)
         preview.set_points(

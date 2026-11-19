@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
 from ase2sprkkr_gui.gui.application.config import config_home
+from ase2sprkkr_gui.gui.plots.atom_sizes import set_atom_appearance
 
 
 DATASET_DEFAULT_MODES = ("empty", "datetime", "uuid")
@@ -25,11 +26,18 @@ class ApplicationSettings:
         self.viewer = "ase"
         self.dataset_default_mode = DEFAULT_DATASET_MODE
         self.share_python_shell_history = True
+        self.atom_size_percent = 100
+        self.atom_relative_sizes = True
+        self.atom_potential_radii = True
 
     def load(self) -> None:
         """Load settings; corrupt or unreadable files keep defaults."""
         self.viewer = "ase"
         self.dataset_default_mode = DEFAULT_DATASET_MODE
+        self.atom_size_percent = 100
+        self.atom_relative_sizes = True
+        self.atom_potential_radii = True
+        self._apply_atom_appearance()
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (
@@ -50,6 +58,22 @@ class ApplicationSettings:
         enabled = data.get("share_python_shell_history")
         if isinstance(enabled, bool):
             self.share_python_shell_history = enabled
+        size = data.get("atom_size_percent")
+        if type(size) is int and 25 <= size <= 200:
+            self.atom_size_percent = size
+        relative = data.get("atom_relative_sizes")
+        if isinstance(relative, bool):
+            self.atom_relative_sizes = relative
+        potential = data.get("atom_potential_radii")
+        if isinstance(potential, bool):
+            self.atom_potential_radii = potential
+        self._apply_atom_appearance()
+
+    def _apply_atom_appearance(self) -> None:
+        set_atom_appearance(
+            self.atom_size_percent, self.atom_relative_sizes,
+            self.atom_potential_radii,
+        )
 
     def save(self) -> bool:
         """Persist settings, returning false when the file is not writable."""
@@ -60,8 +84,12 @@ class ApplicationSettings:
                     "viewer": self.viewer,
                     "dataset_default_mode": self.dataset_default_mode,
                     "share_python_shell_history": self.share_python_shell_history,
+                    "atom_size_percent": self.atom_size_percent,
+                    "atom_relative_sizes": self.atom_relative_sizes,
+                    "atom_potential_radii": self.atom_potential_radii,
                 },
             )
         except OSError:
             return False
+        self._apply_atom_appearance()
         return True

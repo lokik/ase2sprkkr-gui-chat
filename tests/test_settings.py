@@ -15,12 +15,18 @@ def test_settings_round_trip(tmp_path):
 
     settings.viewer = "vmd"
     settings.share_python_shell_history = False
+    settings.atom_size_percent = 125
+    settings.atom_relative_sizes = False
+    settings.atom_potential_radii = False
     assert settings.save()
 
     loaded = ApplicationSettings(path)
     loaded.load()
     assert loaded.viewer == "vmd"
     assert loaded.share_python_shell_history is False
+    assert loaded.atom_size_percent == 125
+    assert loaded.atom_relative_sizes is False
+    assert loaded.atom_potential_radii is False
 
 
 def test_corrupt_settings_keep_defaults(tmp_path):
@@ -31,6 +37,9 @@ def test_corrupt_settings_keep_defaults(tmp_path):
 
     assert settings.viewer == "ase"
     assert settings.share_python_shell_history is True
+    assert settings.atom_size_percent == 100
+    assert settings.atom_relative_sizes is True
+    assert settings.atom_potential_radii is True
 
 
 def test_visualization_uses_configured_viewer(monkeypatch):
@@ -172,6 +181,8 @@ def test_settings_accept_commits_run_profiles_and_application_defaults(tmp_path)
     dataset = dialog.general_page.dataset_default_mode
     dataset.setCurrentIndex(dataset.findData("uuid"))
     dialog.share_python_shell_history.setChecked(False)
+    dialog.atom_size_slider.setValue(150)
+    dialog.atom_potential_radii.setChecked(False)
 
     dialog.accept()
 
@@ -181,6 +192,8 @@ def test_settings_accept_commits_run_profiles_and_application_defaults(tmp_path)
     reloaded.load()
     assert reloaded.dataset_default_mode == "uuid"
     assert reloaded.share_python_shell_history is False
+    assert reloaded.atom_size_percent == 150
+    assert reloaded.atom_potential_radii is False
     dialog.close()
 
 

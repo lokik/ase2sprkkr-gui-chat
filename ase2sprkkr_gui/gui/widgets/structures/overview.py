@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.presentation import structure_kind_label
+from ase2sprkkr_gui.gui.plots.atom_sizes import marker_areas
 from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
 from ase2sprkkr_gui.physics.composition import structure_formula
 from ase2sprkkr_gui.physics.lattice import detect_structure_kind
@@ -248,16 +249,21 @@ class StructureOverviewWidget(QFrame):
 
         positions = np.asarray(atoms.get_positions(), dtype=float)
         atomic_numbers = np.asarray(atoms.get_atomic_numbers(), dtype=int)
+        potential = (
+            self._host if self.host_radio.isChecked()
+            and hasattr(self._host, 'SCF_INFO') else None
+        )
+        sizes = marker_areas(atoms, 48, potential=potential)
         if len(positions) > _MAX_PREVIEW_SITES:
             keep = np.linspace(0, len(positions) - 1, _MAX_PREVIEW_SITES, dtype=int)
             positions = positions[keep]
             atomic_numbers = atomic_numbers[keep]
+            sizes = sizes[keep]
         colors = [
             jmol_colors[int(number)] if 0 <= number < len(jmol_colors)
             else (0.55, 0.55, 0.55)
             for number in atomic_numbers
         ]
-        sizes = np.full(len(positions), 48)
         corners = (
             _CELL_CORNERS @ np.asarray(atoms.cell, dtype=float)
             if any(atoms.get_pbc()) else np.empty((0, 3))

@@ -522,7 +522,8 @@ class WorkflowWindow(QMainWindow):
         file_flows.save_structure(self.controller, self.recent_history, self)
 
     def _open_settings(self) -> None:
-        edit_settings(self.settings, self)
+        if edit_settings(self.settings, self):
+            self._refresh()
 
     def _open_expert_mode(self) -> None:
         self._open_expert()

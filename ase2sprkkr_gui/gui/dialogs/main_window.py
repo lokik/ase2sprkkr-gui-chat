@@ -402,7 +402,8 @@ class MainWindow(QMainWindow):
         visualization_flow.visualize_structure(self.controller, self.settings, self)
 
     def _open_settings(self) -> None:
-        edit_settings(self.settings, self)
+        if edit_settings(self.settings, self):
+            self._workspace_structure_changed(self.controller.atoms)
 
     def create_structure(self) -> None:
         structure_flows.create_structure(self.controller, self)
