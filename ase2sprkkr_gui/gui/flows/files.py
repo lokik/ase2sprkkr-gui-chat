@@ -709,6 +709,33 @@ def load_host_potential(
     recent_files: RecentFiles,
     parent: QWidget,
 ) -> bool:
+    """Load a periodic host as a new structure, replacing the active cluster."""
+    file_path, _ = QFileDialog.getOpenFileName(
+        parent, "Load Host Potential as Structure", controller.directory or "",
+        "SPR-KKR host POTFIL (*.pot *.pot_new);;All Files (*)",
+    )
+    if not file_path:
+        return False
+    path = Path(file_path).expanduser().resolve()
+    try:
+        if Potential.is_cluster_file(path):
+            QMessageBox.warning(
+                parent, "Not a Host Potential",
+                "This file contains an embedded cluster, not a periodic "
+                "host potential. Use Load a Structure to open a CLUPOT.",
+            )
+            return False
+    except Exception as exc:  # noqa: BLE001 - native file identification
+        QMessageBox.critical(parent, "Host Potential Load Error", str(exc))
+        return False
+    return load_structure(controller, recent_files, path, parent)
+
+
+def attach_host_potential(
+    controller: WorkspaceController,
+    recent_files: RecentFiles,
+    parent: QWidget,
+) -> bool:
     """Attach a matching host to either a read-only CLUPOT or ASE-hosted cluster."""
     source = controller.unresolved_cluster_path
     if source is None:

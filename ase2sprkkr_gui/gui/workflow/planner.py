@@ -44,6 +44,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     EditStructure,
     SaveStructure,
     LoadHostPotential,
+    AttachHostPotential,
     CreateHostPotential,
     WorkflowCommand,
     WorkflowPlan,
@@ -148,8 +149,13 @@ class WorkflowPlanner:
                         WorkflowSection.CREATE, "Create / attach host",
                         (
                             _action(
-                                LoadHostPotential(), "Load Host Potential",
-                                "Choose an existing matching host POTFIL",
+                                AttachHostPotential(), "Attach Matching Host Potential",
+                                "Complete this CLUPOT with an existing matching host POTFIL",
+                                "structure", ActionIcon.OPEN,
+                            ),
+                            _action(
+                                LoadHostPotential(), "Load Host as Structure",
+                                "Replace this cluster with the selected periodic host",
                                 "structure", ActionIcon.OPEN,
                             ),
                             _action(
@@ -435,8 +441,13 @@ class WorkflowPlanner:
         if missing_native_host:
             derived[:0] = [
                 _action(
-                    LoadHostPotential(), "Load Host Potential",
+                    AttachHostPotential(), "Attach Matching Host Potential",
                     "Attach a matching host POTFIL to the embedded cluster",
+                    "structure", ActionIcon.OPEN,
+                ),
+                _action(
+                    LoadHostPotential(), "Load Host as Structure",
+                    "Replace the embedded cluster with this periodic host",
                     "structure", ActionIcon.OPEN,
                 ),
                 _action(
