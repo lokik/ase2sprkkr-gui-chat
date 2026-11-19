@@ -58,6 +58,29 @@ def test_overview_first_and_advanced_removed_with_shared_preview():
     dialog.close()
 
 
+def test_structure_editor_tab_icons_are_bundled_and_render_at_22px():
+    """Scientific tab artwork uses the existing structure-icon palette."""
+    from xml.etree import ElementTree
+
+    from ase2sprkkr_gui.gui.misc.resources import icon_path
+
+    dialog = _dialog()
+    for index, name in enumerate(
+        ("structure-sites.svg", "structure-lattice.svg", "structure-transform.svg"),
+        start=1,
+    ):
+        path = icon_path(name)
+        svg = path.read_text(encoding="utf-8")
+        root = ElementTree.fromstring(svg)
+        assert root.attrib["viewBox"] == "0 0 48 48"
+        assert "#26384e" in svg
+        assert "#03a8a1" in svg
+        icon = dialog.tabs.tabIcon(index)
+        assert not icon.isNull()
+        assert not icon.pixmap(22, 22).isNull()
+    dialog.close()
+
+
 def test_build_derived_in_transform_not_advanced():
     dialog = _dialog()
     dialog.tabs.setCurrentIndex(3)

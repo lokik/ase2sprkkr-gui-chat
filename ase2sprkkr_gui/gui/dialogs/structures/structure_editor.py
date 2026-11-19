@@ -30,6 +30,7 @@ from ase2sprkkr_gui.gui.dialogs.structures.transforms import (
 )
 from ase2sprkkr_gui.gui.widgets.structures.editor_overview import EditorOverviewWidget
 from ase2sprkkr_gui.physics.lattice import detect_structure_kind
+from ase2sprkkr_gui.gui.misc.resources import icon_path
 
 
 def _is_cluster(atoms) -> bool:
@@ -147,16 +148,20 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.editor_splitter.setSizes([850, 550])
         root.insertWidget(0, self.editor_splitter, 1)
 
+        # Overview retains its existing system information icon. The remaining
+        # tabs use bundled crystal-style artwork for consistent appearance on
+        # platforms with different or missing desktop icon themes.
         icons = [
-            ("document-properties", QStyle.StandardPixmap.SP_FileDialogInfoView),
-            ("applications-science", QStyle.StandardPixmap.SP_FileIcon),
-            ("transform-scale", QStyle.StandardPixmap.SP_ArrowUp),
-            ("transform-move", QStyle.StandardPixmap.SP_BrowserReload),
+            QIcon.fromTheme(
+                "document-properties",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogInfoView),
+            ),
+            QIcon(str(icon_path("structure-sites.svg"))),
+            QIcon(str(icon_path("structure-lattice.svg"))),
+            QIcon(str(icon_path("structure-transform.svg"))),
         ]
-        for index, (name, fallback) in enumerate(icons):
-            self.tabs.setTabIcon(index, QIcon.fromTheme(
-                name, self.style().standardIcon(fallback)
-            ))
+        for index, icon in enumerate(icons):
+            self.tabs.setTabIcon(index, icon)
         self.tabs.currentChanged.connect(self._tab_changed)
 
     def _create_embedded_page(self, cluster) -> None:
