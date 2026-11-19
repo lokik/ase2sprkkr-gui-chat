@@ -37,6 +37,42 @@ def test_undo_redo_are_in_top_right_header_not_footer():
     dialog.close()
 
 
+def test_page_navigation_is_below_pages_and_run_controls_share_file_action_row():
+    _app, dialog = _dialog()
+    root = dialog.layout()
+    body = next(
+        root.itemAt(i).layout() for i in range(root.count())
+        if root.itemAt(i).layout() is not None
+        and any(
+            root.itemAt(i).layout().itemAt(j).widget() is dialog.pages
+            for j in range(root.itemAt(i).layout().count())
+        )
+    )
+    nav_column = body.itemAt(0).layout()
+    assert nav_column.itemAt(0).widget() is dialog.navigation
+    page_buttons = nav_column.itemAt(nav_column.count() - 1).layout()
+    assert page_buttons.indexOf(dialog.previous_button) >= 0
+    assert page_buttons.indexOf(dialog.next_button) >= 0
+
+    actions = root.itemAt(root.count() - 1).layout()
+    labels = ["Load input…", "Save Input…", "Presets…",
+              "Edit input file…", "Expert settings…", "Cancel", "Calculate"]
+    buttons = [actions.itemAt(i).widget() for i in range(actions.count())
+               if actions.itemAt(i).widget() is not None]
+    assert [button.text() for button in buttons] == labels
+    assert all(not button.icon().isNull() for button in buttons)
+    assert not dialog.previous_button.icon().isNull()
+    assert not dialog.next_button.icon().isNull()
+
+    assert not dialog.previous_button.isEnabled()
+    dialog.next_button.click()
+    assert dialog.navigation.currentRow() == 1
+    assert dialog.previous_button.isEnabled()
+    dialog.previous_button.click()
+    assert dialog.navigation.currentRow() == 0
+    dialog.close()
+
+
 def test_save_commits_current_draft_without_accepting_or_mutating_source(monkeypatch):
     _app, dialog = _dialog()
     source = dialog.session.working_parameters
