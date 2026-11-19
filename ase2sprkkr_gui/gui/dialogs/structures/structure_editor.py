@@ -172,7 +172,10 @@ class StructureEditorDialog(ElementAssignmentDialog):
         configure_action_card(
             self.build_surface_button, "Create 2D surface",
             "Build a surface from the periodic structure",
-            QIcon.fromTheme("applications-science"),
+            QIcon.fromTheme(
+                "applications-science",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
+            ),
             category="structure",
         )
         self.build_surface_button.clicked.connect(
@@ -183,7 +186,10 @@ class StructureEditorDialog(ElementAssignmentDialog):
         configure_action_card(
             self.build_2d_button, "Create 2D structure",
             "Construct a two-dimensional layered structure",
-            QIcon.fromTheme("applications-science"),
+            QIcon.fromTheme(
+                "applications-science",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
+            ),
             category="structure",
         )
         self.build_2d_button.clicked.connect(
@@ -194,7 +200,10 @@ class StructureEditorDialog(ElementAssignmentDialog):
         configure_action_card(
             self.embedding_button, "Build embedded cluster",
             "Create an embedded cluster from the current host",
-            QIcon.fromTheme("network-wired"),
+            QIcon.fromTheme(
+                "network-wired",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon),
+            ),
             category="structure",
         )
         self.embedding_button.clicked.connect(self._build_embedding)
