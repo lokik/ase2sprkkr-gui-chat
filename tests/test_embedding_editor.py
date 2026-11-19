@@ -1702,6 +1702,76 @@ def test_cell_map_stays_at_the_origin_after_selecting_another_cell():
     assert (0, 0, 0) in before
 
 
+def test_cell_map_keeps_zoom_when_site_table_selection_is_cleared():
+    dialog = BuildEmbeddingDialog(host())
+    view = dialog.cells
+    view.canvas.draw()
+    polygons = view._polygons.copy()
+    view.axes.set_xlim(-0.8, 1.4)
+    view.axes.set_ylim(-1.5, 1.0)
+    view.canvas.draw()
+    expected = view.axes.get_xlim(), view.axes.get_ylim()
+
+    # Empty-space clicks in the site table clear the site highlight, not
+    # the cell navigation geometry or the user's pan/zoom.
+    assert dialog._selected_site is not None
+    dialog.sites.clearSelection()
+    assert dialog._selected_site is None
+    view.canvas.draw()
+    assert (view.axes.get_xlim(), view.axes.get_ylim()) == expected
+    np.testing.assert_array_equal(view._polygons, polygons)
+
+    dialog.sites.selectRow(0)
+    view.canvas.draw()
+    assert (view.axes.get_xlim(), view.axes.get_ylim()) == expected
+    dialog.symmetric.setChecked(not dialog.symmetric.isChecked())
+    view.canvas.draw()
+    assert (view.axes.get_xlim(), view.axes.get_ylim()) == expected
+
+    # Changing the actual cell grid is allowed to fit the new geometry.
+    dialog.cell_rings.stepUp()
+    view.canvas.draw()
+    assert (view.axes.get_xlim(), view.axes.get_ylim()) != expected
+
+
+def test_cell_map_draws_symmetric_outlines_above_adjacent_cells():
+    from matplotlib.colors import to_rgba
+    from ase2sprkkr_gui.gui.widgets.structures.host_cell_map import (
+        HostCellMap, SELECTED_COLOR, SYMMETRY_PREVIEW_COLOR,
+    )
+
+    view = HostCellMap()
+    cells = [(-1, 0), (0, 0), (1, 0)]
+    view.set_cells(
+        cells, cell=np.diag([2.0, 2.0, 2.0]), origin=np.zeros(3),
+        axes=(0, 1), projection=np.eye(3)[:, :2],
+        axis_labels=("x", "y"), selected=(0, 0), counts={},
+        modified=set(), equivalents={(-1, 0), (1, 0)},
+    )
+    view.canvas.draw()
+
+    # The base collection contains all fills and ordinary borders. Each
+    # highlight is drawn after it; the selected outline must be last.
+    base = view.axes.collections[0]
+    highlights = list(view.axes.patches)
+    assert len(highlights) == 3
+    assert all(patch.get_zorder() > base.get_zorder() for patch in highlights)
+    for cell_index, outline in zip(((-1, 0), (1, 0)), highlights[:-1]):
+        np.testing.assert_allclose(
+            outline.get_xy()[:4], view._polygons[view._cells.index(cell_index)]
+        )
+        assert outline.get_edgecolor() == to_rgba(SYMMETRY_PREVIEW_COLOR)
+        assert outline.get_linestyle() != "-"
+    selected_outline = highlights[-1]
+    np.testing.assert_allclose(
+        selected_outline.get_xy()[:4], view._polygons[view._cells.index((0, 0))]
+    )
+    assert selected_outline.get_edgecolor() == to_rgba(SELECTED_COLOR)
+    assert selected_outline.get_zorder() > max(
+        patch.get_zorder() for patch in highlights[:-1]
+    )
+
+
 def test_whole_global_preview_includes_host_even_before_any_cluster_site():
     dialog = BuildEmbeddingDialog(host())
     assert not dialog.draft.entries
