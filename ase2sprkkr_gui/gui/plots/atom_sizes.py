@@ -20,6 +20,9 @@ class AtomAppearance:
     potential_radii: bool = True
 
 
+MIN_ATOM_SIZE_PERCENT = 5
+MAX_ATOM_SIZE_PERCENT = 2000
+
 _appearance = AtomAppearance()
 
 
@@ -36,7 +39,7 @@ def set_atom_appearance(
     """Update shared GUI presentation preferences."""
     global _appearance
     _appearance = AtomAppearance(
-        max(10, min(1000, int(size_percent))),
+        max(MIN_ATOM_SIZE_PERCENT, min(MAX_ATOM_SIZE_PERCENT, int(size_percent))),
         bool(relative_sizes),
         bool(potential_radii),
     )
