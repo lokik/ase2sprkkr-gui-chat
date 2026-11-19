@@ -336,7 +336,7 @@ class WorkflowWindow(QMainWindow):
             "Structure" if atoms is not None else "Start with..."
         )
         self._subtitle.setText(plan.subtitle)
-        self._subtitle.setVisible(atoms is None or invalid_cluster)
+        self._subtitle.setVisible(bool(plan.subtitle) and (atoms is None or invalid_cluster))
         self._structure_actions.set_plan(plan)
         self._actions.set_plan(plan)
         if atoms is None:

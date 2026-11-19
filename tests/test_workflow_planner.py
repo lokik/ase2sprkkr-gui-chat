@@ -116,6 +116,7 @@ def test_initial_plan_uses_typed_commands_and_planned_recent_menu():
     )
     plan = WorkflowPlanner().initial_plan(history)
 
+    assert plan.subtitle == ""
     assert tuple(group.section for group in plan.groups) == (
         WorkflowSection.CREATE,
         WorkflowSection.LOAD,

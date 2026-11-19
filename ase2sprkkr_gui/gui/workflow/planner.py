@@ -271,7 +271,7 @@ class WorkflowPlanner:
                 )
             )
         return WorkflowPlan(
-            "Start by creating a new atomic structure or loading an existing one.",
+            "",
             (
                 create,
                 AvailableActionGroup(

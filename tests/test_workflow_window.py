@@ -144,6 +144,7 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
         }
 
     assert window._structure_title.text() == "Start with..."
+    assert window._subtitle.isHidden()
     assert window.findChild(QLabel, "workflowCalculateTitle").text() == "Calculate"
     assert "Create a 3D Structure" in names(window._structure_actions)
     assert "Load a Structure" in names(window._structure_actions)
