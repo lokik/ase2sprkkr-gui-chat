@@ -31,7 +31,7 @@ def test_angle_changes_keep_reference_orientation_and_handedness():
 
 @pytest.mark.parametrize("angles", [
     (0, 90, 90), (180, 90, 90), (90, 90, 0),
-    (170, 170, 10), (90, 90, 180),
+    (10, 10, 170), (90, 90, 180),
 ])
 def test_reject_invalid_angles(angles):
     reference = np.diag([2, 3, 4])

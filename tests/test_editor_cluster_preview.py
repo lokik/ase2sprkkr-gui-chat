@@ -47,14 +47,19 @@ def test_grouping_uses_site_type_identity_and_not_element():
 
 
 def test_host_site_selects_all_cluster_periodic_images():
-    cluster = SimpleNamespace(arrays={
-        "sprkkr_embedding": np.asarray([
-            [0, 0, 0, 0, 0, 0],
-            [0, 1, 0, 0, 0, 0],
-            [1, 0, 0, 0, 0, 0],
-        ], dtype=int),
-    })
-    cluster.__len__ = lambda: 3
+    class Cluster:
+        arrays = {
+            "sprkkr_embedding": np.asarray([
+                [0, 0, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0, 0],
+            ], dtype=int),
+        }
+
+        def __len__(self):
+            return len(self.arrays["sprkkr_embedding"])
+
+    cluster = Cluster()
     assert host_site_cluster_indices(cluster, 0) == (0, 1)
     assert host_site_cluster_indices(cluster, 1) == (2,)
     assert host_site_cluster_indices(cluster, -1) == ()
