@@ -385,7 +385,8 @@ def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
             page, QPoint()
         ).x()
         assert example.canvas.height() == 215
-        assert page.atom_example_caption.text() == "Example (C / Au)"
+        assert page.atom_example_caption.text() == "Example (C / Au) · distance 2.49 Å"
+        assert example.distance_angstrom == 2.49
         assert page.atom_example_caption.mapTo(page, QPoint()).y() >= example.mapTo(
             page, QPoint(0, example.height())
         ).y()
@@ -393,8 +394,13 @@ def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
             "Preview uses" in label.text()
             for label in page.atom_appearance_group.findChildren(QLabel)
         )
-        positions = example.markers.get_offsets()
-        assert 0 < positions[1, 0] - positions[0, 0] < 0.5
+        positions = example.markers.get_offsets().copy()
+        assert positions[1, 0] - positions[0, 0] == example.distance_angstrom
+        xlim = example.axes.get_xlim()
+        assert xlim[1] - xlim[0] == 3 * example.distance_angstrom
+        # Changing the marker radius must not move the atoms.
+        page.atom_size_percent.setValue(500)
+        assert (example.markers.get_offsets() == positions).all()
         assert len(example.axes.texts) == 0
     finally:
         dialog.close()
