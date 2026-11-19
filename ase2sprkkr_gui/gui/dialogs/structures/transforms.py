@@ -5,7 +5,6 @@ from typing import Any, Optional, Tuple
 import numpy as np
 from ase2sprkkr.ase.build import aperiodic_times
 from ase2sprkkr.ase.build import rotate as rotate_by_hkl
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt6.QtWidgets import (
     QDialog,
@@ -20,6 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ase2sprkkr_gui.gui.widgets.matplotlib_preview import PreviewFigureCanvas as FigureCanvas
 from ase2sprkkr_gui.ase.copy import copy_for_edit
 from ase2sprkkr_gui.gui.plots.lattice import plot_atoms_preview
 from ase2sprkkr_gui.physics.lattice import scale_lattice_to_lengths
