@@ -114,6 +114,7 @@ class ResultActionsWidget(QWidget):
     newCalculationRequested = pyqtSignal(int)
     historyRequested = pyqtSignal()
     assignToProjectRequested = pyqtSignal(object)
+    loadResultRequested = pyqtSignal()
 
     def __init__(
         self,
@@ -151,7 +152,6 @@ class ResultActionsWidget(QWidget):
         self._selector.structureDoubleClicked.connect(self.newCalculationRequested)
         self._selector.itemSelectionChanged.connect(self._update_assignment_controls)
         self._selector.hide()
-        layout.addWidget(self._selector)
         assignment_row = QHBoxLayout()
         self.select_all_button = QPushButton("Select all", self)
         self.select_all_button.setIcon(
@@ -161,8 +161,8 @@ class ResultActionsWidget(QWidget):
             )
         )
         self.select_all_button.clicked.connect(self._select_all_results)
-        assignment_row.addWidget(self.select_all_button)
-        self.assign_project_button = QPushButton("Assign to project…", self)
+        self.assign_project_button = QPushButton("Assign", self)
+        self.assign_project_button.setToolTip("Assign selected results to a project")
         self.assign_project_button.setIcon(
             QIcon.fromTheme(
                 "folder-move",
@@ -170,9 +170,31 @@ class ResultActionsWidget(QWidget):
             )
         )
         self.assign_project_button.clicked.connect(self._request_project_assignment)
-        assignment_row.addWidget(self.assign_project_button)
-        assignment_row.addStretch(1)
+        self.load_result_button = QPushButton("Load Result", self)
+        self.load_result_button.setObjectName("resultsLoadButton")
+        self.load_result_button.setToolTip("Load a SPR-KKR output file into Results")
+        self.load_result_button.setIcon(
+            QIcon.fromTheme(
+                "document-open",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
+            )
+        )
+        self.load_result_button.clicked.connect(
+            lambda _checked=False: self.loadResultRequested.emit()
+        )
+        # An equally divided toolbar remains usable in the narrow Guided
+        # sidebar. Ignored horizontal size hints allow all three buttons to
+        # shrink together instead of the longest label dominating the row.
+        for button in (
+            self.select_all_button, self.assign_project_button,
+            self.load_result_button,
+        ):
+            button.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
+            assignment_row.addWidget(button, 1)
         layout.addLayout(assignment_row)
+        layout.addWidget(self._selector)
         self._assignment_controls = (self.select_all_button, self.assign_project_button)
         if not show_assignment_controls:
             for control in self._assignment_controls:

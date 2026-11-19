@@ -197,6 +197,11 @@ class GuiApplication(QObject):
                 result_ids, target
             )
         )
+        widget.loadResultRequested.connect(
+            lambda target=window: file_flows.choose_and_load_output(
+                self.controller, self.recent_files, target
+            )
+        )
         presenter.newCalculationUnavailable.connect(
             lambda target=window: calculation_flow.show_new_calculation_source_required(
                 target
