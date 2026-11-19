@@ -7,7 +7,6 @@ from ase import Atoms
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QGroupBox, QLabel, QMessageBox, QSplitter, QToolButton, QWidget
 
-from ase2sprkkr_gui.gui.widgets.browser_panel import BrowserPanel
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.dialogs import workflow_window as workflow_module
@@ -519,7 +518,7 @@ def test_workflow_navigation_is_one_bottom_panel_with_four_icon_buttons(
         navigation
     )
     assert sidebar_layout.itemAt(sidebar_layout.count() - 1).widget() is navigation
-    assert window.findChild(BrowserPanel) is None
+    assert not hasattr(window, 'browser_panel')
 
     buttons = navigation.findChildren(QToolButton)
     assert buttons == [
