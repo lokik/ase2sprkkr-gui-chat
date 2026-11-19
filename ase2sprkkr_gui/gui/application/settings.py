@@ -59,7 +59,7 @@ class ApplicationSettings:
         if isinstance(enabled, bool):
             self.share_python_shell_history = enabled
         size = data.get("atom_size_percent")
-        if type(size) is int and 25 <= size <= 200:
+        if type(size) is int and 10 <= size <= 1000:
             self.atom_size_percent = size
         relative = data.get("atom_relative_sizes")
         if isinstance(relative, bool):

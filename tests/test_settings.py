@@ -189,7 +189,7 @@ def test_settings_accept_commits_run_profiles_and_application_defaults(tmp_path)
     dataset = dialog.general_page.dataset_default_mode
     dataset.setCurrentIndex(dataset.findData("uuid"))
     dialog.share_python_shell_history.setChecked(False)
-    dialog.atom_size_slider.setValue(150)
+    dialog.atom_size_percent.setValue(150)
     dialog.atom_potential_radii.setChecked(False)
 
     dialog.accept()
@@ -321,3 +321,55 @@ def test_yaml_parse_error_on_profile_save_does_not_close_settings(tmp_path, monk
         "Cannot Save Run Configurations", "invalid YAML document"
     )]
     dialog.close()
+
+
+def test_logarithmic_atom_size_range_and_preview_uses_real_marker_areas(tmp_path):
+    import numpy as np
+    from ase import Atoms
+    from ase2sprkkr_gui.gui.plots.atom_sizes import AtomAppearance, marker_areas
+    from ase2sprkkr_gui.gui.dialogs.settings import SettingsDialog
+    from ase2sprkkr_gui.gui.widgets.settings.general import (
+        atom_size_from_slider, slider_from_atom_size,
+    )
+
+    settings = ApplicationSettings(tmp_path / "settings.json")
+    dialog = SettingsDialog(settings, profile_store=_FakeProfileStore())
+    try:
+        page = dialog.general_page
+        assert (page.atom_size_slider.minimum(), page.atom_size_slider.maximum()) == (-100, 100)
+        assert [atom_size_from_slider(position) for position in (-100, 0, 100)] == [10, 100, 1000]
+        assert slider_from_atom_size(100) == 0
+        for position, expected in ((-100, 10), (0, 100), (100, 1000)):
+            page.atom_size_slider.setValue(position)
+            assert page.atom_size_percent.value() == expected
+        page.atom_size_percent.setValue(250)
+        assert page.atom_size_percent.value() == 250  # Exact entry survives rounding.
+        assert page.atom_size_slider.value() == slider_from_atom_size(250)
+        expected_areas = marker_areas(
+            Atoms("CAu"), 48,
+            appearance=AtomAppearance(size_percent=250, relative_sizes=True),
+        )
+        np.testing.assert_allclose(
+            page.atom_size_example.markers.get_sizes(), expected_areas
+        )
+        page.atom_relative_sizes.setChecked(False)
+        np.testing.assert_allclose(
+            page.atom_size_example.markers.get_sizes(), [300, 300]
+        )
+        dialog.accept()
+        reloaded = ApplicationSettings(settings.path)
+        reloaded.load()
+        assert reloaded.atom_size_percent == 250
+    finally:
+        dialog.close()
+
+
+def test_legacy_and_large_atom_sizes_are_loaded(tmp_path):
+    path = tmp_path / "settings.json"
+    for percent in (25, 200, 750, 1000):
+        settings = ApplicationSettings(path)
+        settings.atom_size_percent = percent
+        assert settings.save()
+        loaded = ApplicationSettings(path)
+        loaded.load()
+        assert loaded.atom_size_percent == percent

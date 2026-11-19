@@ -1,8 +1,14 @@
 """General application settings: visualization and SPR-KKR defaults."""
 from __future__ import annotations
 
+from math import log10
+
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QPainter
+
+from ase import Atoms
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -12,13 +18,14 @@ from PyQt6.QtWidgets import (
     QLabel,
     QHBoxLayout,
     QSlider,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
 from ase2sprkkr_gui.gui.application.viewers import viewer_unavailability
-from ase2sprkkr.physics.winger_seitz_radii import winger_seitz_radii
+from ase2sprkkr_gui.gui.plots.atom_sizes import AtomAppearance, marker_areas
 
 
 _DATASET_MODE_LABELS = (
@@ -36,44 +43,66 @@ def available_viewers() -> tuple[str, ...]:
 
 
 
+# One decade of radius either side of the default; slider midpoint is 100%.
+# Numeric editing preserves exact saved percentages between logarithmic ticks.
+_MIN_ATOM_SIZE_PERCENT = 10
+_MAX_ATOM_SIZE_PERCENT = 1000
+
+
+def atom_size_from_slider(position: int) -> int:
+    """Map [-100, 100] to radius percentages [10, 1000]."""
+    return round(100 * 10 ** (position / 100))
+
+
+def slider_from_atom_size(percent: int) -> int:
+    """Approximate the position of a saved/entered radius percentage."""
+    return round(100 * log10(max(_MIN_ATOM_SIZE_PERCENT, min(
+        _MAX_ATOM_SIZE_PERCENT, percent
+    )) / 100))
+
+
 class _AtomSizeExample(QWidget):
-    """Static WSR illustration; no potential is available in Settings."""
+    """Use the identical Matplotlib marker areas as the Guided structure preview."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._percent = 100
-        self._relative = True
-        self.setMinimumHeight(100)
+        self._atoms = Atoms("CAu")
+        self.figure = Figure(figsize=(3.2, 1.0))
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        # Room for the largest (10x radius) Au marker without clipping.
+        self.canvas.setFixedHeight(180)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.canvas)
+        self.axes = self.figure.add_axes((0, 0, 1, 1))
+        self.axes.set_axis_off()
+        self.markers = None
+        self.set_values(100, True)
 
-    def set_values(self, percent, relative):
-        self._percent, self._relative = percent, relative
-        self.update()
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        mean = (winger_seitz_radii["C"] + winger_seitz_radii["Au"]) / 2
-        y = self.height() / 2 - 12
-        for x_fraction, symbol, color in (
-            (.25, "C", "#55595d"), (.75, "Au", "#d8ab36")
-        ):
-            radius = 17.0 * self._percent / 100
-            if self._relative:
-                radius *= winger_seitz_radii[symbol] / mean
-            x = self.width() * x_fraction
-            painter.setPen(QColor("#444444"))
-            painter.setBrush(QColor(color))
-            painter.drawEllipse(
-                int(x - radius), int(y - radius),
-                int(2 * radius), int(2 * radius),
+    def set_values(self, percent: int, relative: bool) -> None:
+        # 48 points squared matches the Guided/EmbeddingPreview base area.
+        areas = marker_areas(
+            self._atoms, 48.0,
+            appearance=AtomAppearance(
+                size_percent=percent, relative_sizes=relative,
+                potential_radii=False,
+            ),
+        )
+        self.axes.clear()
+        self.axes.set_xlim(0, 3)
+        self.axes.set_ylim(0, 1)
+        self.axes.set_axis_off()
+        self.markers = self.axes.scatter(
+            [0.75, 2.25], [0.62, 0.62], s=areas,
+            c=["#55595d", "#d8ab36"], edgecolors="#333a42",
+            linewidths=0.65,
+        )
+        for x, symbol in ((0.75, "C"), (2.25, "Au")):
+            self.axes.text(
+                x, 0.20, symbol, ha="center", va="center",
+                color=self.palette().windowText().color().name(),
             )
-            painter.setPen(self.palette().windowText().color())
-            painter.drawText(
-                int(x - 25), self.height() - 26, 50, 22,
-                Qt.AlignmentFlag.AlignCenter, symbol,
-            )
-        painter.end()
+        self.canvas.draw_idle()
 
 
 class GeneralSettingsPage(QFrame):
@@ -119,13 +148,26 @@ class GeneralSettingsPage(QFrame):
         size_layout = QHBoxLayout(size_row)
         size_layout.setContentsMargins(0, 0, 0, 0)
         self.atom_size_slider = QSlider(Qt.Orientation.Horizontal, size_row)
-        self.atom_size_slider.setRange(25, 200)
-        self.atom_size_slider.setSingleStep(5)
-        self.atom_size_slider.setValue(settings.atom_size_percent)
-        self.atom_size_label = QLabel(size_row)
-        self.atom_size_label.setMinimumWidth(48)
+        self.atom_size_slider.setRange(-100, 100)
+        self.atom_size_slider.setSingleStep(1)
+        self.atom_size_slider.setPageStep(10)
+        self.atom_size_slider.setToolTip(
+            "Logarithmic atom-radius scale: 10% to 1000%, 100% at the center."
+        )
+        self.atom_size_slider.setValue(
+            slider_from_atom_size(settings.atom_size_percent)
+        )
+        self.atom_size_percent = QSpinBox(size_row)
+        self.atom_size_percent.setRange(
+            _MIN_ATOM_SIZE_PERCENT, _MAX_ATOM_SIZE_PERCENT
+        )
+        self.atom_size_percent.setSuffix("%")
+        self.atom_size_percent.setValue(settings.atom_size_percent)
+        self.atom_size_percent.setToolTip(
+            "Exact atom-radius scale, applied to all internal structure previews."
+        )
         size_layout.addWidget(self.atom_size_slider, 1)
-        size_layout.addWidget(self.atom_size_label)
+        size_layout.addWidget(self.atom_size_percent)
         atom_form.addRow("Atom size:", size_row)
         self.atom_relative_sizes = QCheckBox(
             "Use element-dependent Wigner–Seitz radii", self.atom_appearance_group
@@ -148,13 +190,15 @@ class GeneralSettingsPage(QFrame):
         self.atom_size_example = _AtomSizeExample(self.atom_appearance_group)
         atom_form.addRow("Example (C / Au):", self.atom_size_example)
         note = QLabel(
-            "Preview uses static WSR. Potential radii are site-dependent "
-            "and used only for eligible loaded potentials.",
+            "Preview uses the same Matplotlib marker area as Guided "
+            "(48 pt² at 100%), with static WSR. Potential radii are "
+            "site-dependent and used only for eligible loaded potentials.",
             self.atom_appearance_group,
         )
         note.setWordWrap(True)
         atom_form.addRow("", note)
-        self.atom_size_slider.valueChanged.connect(self._update_atom_preview)
+        self.atom_size_slider.valueChanged.connect(self._size_slider_changed)
+        self.atom_size_percent.valueChanged.connect(self._size_percent_changed)
         self.atom_relative_sizes.toggled.connect(self._update_atom_preview)
         self._update_atom_preview()
         layout.addWidget(self.atom_appearance_group)
@@ -191,11 +235,21 @@ class GeneralSettingsPage(QFrame):
         layout.addWidget(self.python_shell_group)
         layout.addStretch(1)
 
+    def _size_slider_changed(self, position: int) -> None:
+        self.atom_size_percent.blockSignals(True)
+        self.atom_size_percent.setValue(atom_size_from_slider(position))
+        self.atom_size_percent.blockSignals(False)
+        self._update_atom_preview()
+
+    def _size_percent_changed(self, percent: int) -> None:
+        self.atom_size_slider.blockSignals(True)
+        self.atom_size_slider.setValue(slider_from_atom_size(percent))
+        self.atom_size_slider.blockSignals(False)
+        self._update_atom_preview()
+
     def _update_atom_preview(self, *_args) -> None:
-        percent = self.atom_size_slider.value()
-        self.atom_size_label.setText(f"{percent}%")
         self.atom_size_example.set_values(
-            percent, self.atom_relative_sizes.isChecked()
+            self.atom_size_percent.value(), self.atom_relative_sizes.isChecked()
         )
 
     def selected_viewer_unavailability(self) -> str | None:

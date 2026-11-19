@@ -36,7 +36,7 @@ def set_atom_appearance(
     """Update shared GUI presentation preferences."""
     global _appearance
     _appearance = AtomAppearance(
-        max(25, min(200, int(size_percent))),
+        max(10, min(1000, int(size_percent))),
         bool(relative_sizes),
         bool(potential_radii),
     )

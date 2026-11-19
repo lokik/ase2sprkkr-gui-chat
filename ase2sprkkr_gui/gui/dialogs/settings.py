@@ -62,6 +62,7 @@ class SettingsDialog(QDialog):
 
         self.viewer = self.general_page.viewer
         self.atom_size_slider = self.general_page.atom_size_slider
+        self.atom_size_percent = self.general_page.atom_size_percent
         self.atom_relative_sizes = self.general_page.atom_relative_sizes
         self.atom_potential_radii = self.general_page.atom_potential_radii
         self.viewer_warning = self.general_page.viewer_warning
@@ -122,7 +123,7 @@ class SettingsDialog(QDialog):
         previous_dataset_mode = self._settings.dataset_default_mode
         previous_share_history = self._settings.share_python_shell_history
         self._settings.viewer = self.viewer.currentText()
-        self._settings.atom_size_percent = self.atom_size_slider.value()
+        self._settings.atom_size_percent = self.atom_size_percent.value()
         self._settings.atom_relative_sizes = self.atom_relative_sizes.isChecked()
         self._settings.atom_potential_radii = self.atom_potential_radii.isChecked()
         self._settings.dataset_default_mode = str(
