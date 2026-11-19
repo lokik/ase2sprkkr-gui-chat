@@ -117,13 +117,20 @@ def order_choices(
         if key == "applicable":
             return {"Yes": 0, "No": 1, "Unknown": 2}.get(row.applicable, 3)
         if key == "experimental":
-            return 1 if row.experimental else 0
+            # Descending text order is No before Yes.
+            return "Yes" if row.experimental else "No"
         return getattr(row, key).casefold()
 
     ordered = list(rows)
     for key in reversed(keys[1:]):
-        ordered.sort(key=lambda row, k=key: value(row, k))
-    ordered.sort(key=lambda row: value(row, keys[0]), reverse=descending)
+        ordered.sort(
+            key=lambda row, k=key: value(row, k),
+            reverse=(key == "experimental"),
+        )
+    # Default: Applicable Yes/No, Experimental No/Yes, then Name.
+    # Without a structure Experimental is the first, descending key.
+    reverse_first = descending if primary in keys else keys[0] == "experimental"
+    ordered.sort(key=lambda row: value(row, keys[0]), reverse=reverse_first)
     return ordered
 
 
@@ -159,10 +166,8 @@ class TaskChooserDialog(QDialog):
             toolbar.addWidget(self.applicability_filter)
         root.addLayout(toolbar)
 
-        self._fields = ["name", "experimental"]
-        if self._has_structure:
-            self._fields.append("applicable")
-        self._fields.append("info")
+        self._fields = (["applicable"] if self._has_structure else [])
+        self._fields.extend(("experimental", "name", "info"))
         self.table = QTableWidget(0, len(self._fields), self)
         self.table.setObjectName("customTaskTable")
         self.table.setHorizontalHeaderLabels([
@@ -178,6 +183,7 @@ class TaskChooserDialog(QDialog):
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(self._fields.index("info"), QHeaderView.ResizeMode.Stretch)
+        header.setSortIndicatorShown(False)
         header.sectionClicked.connect(self._sort_by_column)
         self.table.cellDoubleClicked.connect(lambda *_args: self._accept_selection())
         root.addWidget(self.table, 1)
@@ -197,12 +203,18 @@ class TaskChooserDialog(QDialog):
 
     def _sort_by_column(self, index: int) -> None:
         field = self._fields[index]
-        self._descending = not self._descending if self._primary == field else False
+        if self._primary == field:
+            self._descending = not self._descending
+        else:
+            # First click on Experimental: No, then Yes (descending labels).
+            self._descending = field == "experimental"
         self._primary = field
-        self.table.horizontalHeader().setSortIndicator(
+        header = self.table.horizontalHeader()
+        header.setSortIndicator(
             index, (Qt.SortOrder.DescendingOrder if self._descending
                     else Qt.SortOrder.AscendingOrder)
         )
+        header.setSortIndicatorShown(True)
         self._refresh()
 
     def _refresh(self, *_args) -> None:
@@ -242,7 +254,7 @@ class TaskChooserDialog(QDialog):
 
     def _selected_name(self) -> str | None:
         row = self.table.currentRow()
-        item = self.table.item(row, 0) if row >= 0 else None
+        item = self.table.item(row, self._fields.index("name")) if row >= 0 else None
         return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
 
     def _accept_selection(self) -> None:

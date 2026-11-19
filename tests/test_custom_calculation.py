@@ -36,8 +36,12 @@ def _rows():
 
 
 def _names(table):
+    name_col = next(
+        i for i in range(table.columnCount())
+        if table.horizontalHeaderItem(i).text() == "Name"
+    )
     return [
-        table.item(row, 0).text() for row in range(table.rowCount())
+        table.item(row, name_col).text() for row in range(table.rowCount())
     ]
 
 
@@ -52,6 +56,26 @@ def test_default_sort_then_column_primary_keeps_other_tie_breakers():
     assert [row.name for row in order_choices(
         _rows(), has_structure=False
     )] == ["A", "C", "B", "Z"]
+
+    # Experimental column: first click No/Yes, second click Yes/No.
+    assert [row.name for row in order_choices(
+        _rows(), primary="experimental", descending=True
+    )] == ["A", "C", "Z", "B"]
+    assert [row.name for row in order_choices(
+        _rows(), primary="experimental", descending=False
+    )] == ["Z", "B", "A", "C"]
+
+    # Applicable, then non-experimental, then alphabetical name.
+    mixed = (
+        TaskChoice("Z", True, "Yes", ""),
+        TaskChoice("C", False, "No", ""),
+        TaskChoice("Y", False, "Yes", ""),
+        TaskChoice("B", True, "No", ""),
+        TaskChoice("A", False, "Yes", ""),
+    )
+    assert [row.name for row in order_choices(mixed)] == [
+        "A", "Y", "Z", "C", "B"
+    ]
 
 
 def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatch):
@@ -138,11 +162,19 @@ def test_task_chooser_filters_sorts_and_keeps_unsupported_selectable(monkeypatch
     chooser = TaskChooserDialog(object())
     assert [chooser.table.horizontalHeaderItem(i).text()
             for i in range(chooser.table.columnCount())] == [
-        "Name", "Experimental", "Applicable to structure", "Info"
+        "Applicable to structure", "Experimental", "Name", "Info"
     ]
     assert _names(chooser.table) == ["A", "Z", "B", "C"]
 
-    chooser._sort_by_column(0)
+    experimental_col = chooser._fields.index("experimental")
+    chooser._sort_by_column(experimental_col)
+    assert chooser._descending is True
+    assert _names(chooser.table) == ["A", "C", "Z", "B"]
+    chooser._sort_by_column(experimental_col)
+    assert chooser._descending is False
+    assert _names(chooser.table) == ["Z", "B", "A", "C"]
+
+    chooser._sort_by_column(chooser._fields.index("name"))
     assert _names(chooser.table) == ["A", "B", "C", "Z"]
     chooser.search.setText("unsupported")
     assert _names(chooser.table) == ["B"]
@@ -166,10 +198,17 @@ def test_task_chooser_without_structure_has_no_applicability_column(monkeypatch)
     chooser = TaskChooserDialog(None)
     assert [chooser.table.horizontalHeaderItem(i).text()
             for i in range(chooser.table.columnCount())] == [
-        "Name", "Experimental", "Info"
+        "Experimental", "Name", "Info"
     ]
     assert chooser.applicability_filter is None
     assert _names(chooser.table) == ["A", "C", "B", "Z"]
+    experimental_col = chooser._fields.index("experimental")
+    chooser._sort_by_column(experimental_col)
+    assert chooser._descending is True
+    assert _names(chooser.table) == ["A", "C", "B", "Z"]
+    chooser._sort_by_column(experimental_col)
+    assert chooser._descending is False
+    assert _names(chooser.table) == ["B", "Z", "A", "C"]
     chooser.reject()
 
 
