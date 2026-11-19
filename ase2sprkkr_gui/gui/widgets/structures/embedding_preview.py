@@ -94,12 +94,13 @@ class EmbeddingPreview(QWidget):
         width_controls = [self.projection, self.fit_button]
         if controls_header is not None:
             width_controls.insert(0, controls_header)
+        if self.bulk_opacity_label is not None:
+            width_controls.append(self.bulk_opacity_label)
         control_width = max(control.sizeHint().width() for control in width_controls)
         for control in width_controls:
             control.setFixedWidth(control_width)
         if self.bulk_opacity_slider is not None:
             self.bulk_opacity_slider.setFixedWidth(control_width)
-            self.bulk_opacity_label.setFixedWidth(control_width)
 
         self.site_numbers = None
         if selectable:
