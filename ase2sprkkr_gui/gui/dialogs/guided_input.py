@@ -413,9 +413,6 @@ class GuidedInputParametersDialog(QDialog):
         return True
 
     def _accept(self) -> None:
-        self._update_calculation_availability()
-        if not self.calculate_button.isEnabled():
-            return
         if not self._commit_pending():
             QMessageBox.warning(self, "Invalid Settings", "Correct the highlighted value before calculating.")
             return
@@ -423,6 +420,12 @@ class GuidedInputParametersDialog(QDialog):
             validate_setup(self.session.working_parameters)
         except InputParametersValidationError as exc:
             self._show_model_error(exc)
+            return
+        self._update_calculation_availability()
+        if not self.calculate_button.isEnabled():
+            QMessageBox.information(
+                self, "Cannot Calculate", self.calculate_button.toolTip()
+            )
             return
         self.accept()
 
@@ -484,6 +487,7 @@ def select_guided_input_parameters(
     atoms: Any = None,
     dataset_default_mode: str,
     dataset_prefix: str | None = None,
+    calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
 ) -> InputParameters | None:
     definition = guided_task_definition(task)
     if not InputParameters.is_task_name(definition.backend_task):
@@ -508,6 +512,7 @@ def select_guided_input_parameters(
         parameters,
         parent=parent,
         atoms=atoms,
+        calculation_unavailable_reason=calculation_unavailable_reason,
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
