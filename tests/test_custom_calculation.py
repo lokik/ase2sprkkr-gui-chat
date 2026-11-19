@@ -176,3 +176,32 @@ def test_expert_input_supports_independent_save_and_calculation_reason(monkeypat
     assert saved[0][0] is not dialog.session.working_parameters
     assert dialog.result() == 0
     dialog.close()
+
+def test_expert_schema_load_accepts_task_switch_but_guided_restricts_it(
+    tmp_path, monkeypatch,
+):
+    from ase2sprkkr_gui.gui.input_parameters.session import create_input_parameters_session
+    from ase2sprkkr_gui.gui.flows import input_parameters as input_flows
+
+    _app()
+    source = InputParameters.for_task("BSFEK")
+    new_task = InputParameters.for_task("BSFKK")
+    path = tmp_path / "task.inp"
+    monkeypatch.setattr(
+        input_flows.InputParameters, "from_file", lambda _path: new_task,
+    )
+    session = create_input_parameters_session(source)
+    assert input_flows.load_input_parameters(session, path, None)
+    assert session.working_parameters.task_name == "BSFKK"
+
+    guided_session = create_input_parameters_session(source)
+    errors = []
+    monkeypatch.setattr(
+        input_flows.QMessageBox, "critical",
+        lambda _parent, _title, message: errors.append(message),
+    )
+    assert not input_flows.load_input_parameters(
+        guided_session, path, None, compatible_tasks=("BSFEK",),
+    )
+    assert guided_session.working_parameters.task_name == "BSFEK"
+    assert "Expected BSFEK" in errors[0]

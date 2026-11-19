@@ -17,7 +17,7 @@ def choose_and_load_input_parameters(
     session: InputParametersSession,
     parent: QWidget | None,
     *,
-    compatible_tasks: Iterable[str] = (),
+    compatible_tasks: Iterable[str] | None = None,
 ) -> bool:
     """Choose an input file and install it as one session transaction."""
     file_path, _ = QFileDialog.getOpenFileName(
@@ -51,9 +51,9 @@ def load_input_parameters(
     file_path: str | Path,
     parent: QWidget | None,
     *,
-    compatible_tasks: Iterable[str] = (),
+    compatible_tasks: Iterable[str] | None = None,
 ) -> bool:
-    """Parse an input file and install it without leaking editor-family policy."""
+    """Parse input within a session schema; Guided may restrict its task family."""
     path = Path(file_path).resolve()
     try:
         parameters = InputParameters.from_file(path)
@@ -61,7 +61,10 @@ def load_input_parameters(
         return _load_error(parent, exc)
 
     expected_task = session.task_name.lower()
-    allowed = {expected_task, *(str(task).lower() for task in compatible_tasks)}
+    allowed = (
+        {expected_task, *(str(task).lower() for task in compatible_tasks)}
+        if compatible_tasks is not None else None
+    )
     actual_task_name = parameters.task_name
     if actual_task_name is None:
         return _load_error(
@@ -69,18 +72,21 @@ def load_input_parameters(
             "The input file does not resolve to a known SPR-KKR task.",
         )
     actual_task = actual_task_name.lower()
-    if actual_task not in allowed:
+    if allowed is not None and actual_task not in allowed:
         expected = "/".join(sorted(task.upper() for task in allowed))
         return _load_error(
             parent,
             f"Expected {expected} input parameters, got {actual_task.upper()}.",
         )
 
-    session.replace_parameters(
-        parameters,
-        text=f"Load {path.name}",
-        source_page="load",
-    )
+    try:
+        session.replace_parameters(
+            parameters,
+            text=f"Load {path.name}",
+            source_page="load",
+        )
+    except ValueError as exc:
+        return _load_error(parent, exc)
     return True
 
 

@@ -147,14 +147,17 @@ class InputParametersDialog(QDialog):
         choose_and_save_input_parameters(self.session.result(), self)
 
     def _replace_preset(self) -> None:
+        self.dataset_editor.commit()
         if self.tree_editor.commit_pending():
             preset_flows.load_preset(self.session, self, clear_first=True)
 
     def _merge_preset(self) -> None:
+        self.dataset_editor.commit()
         if self.tree_editor.commit_pending():
             preset_flows.load_preset(self.session, self, clear_first=False)
 
     def _save_preset(self) -> None:
+        self.dataset_editor.commit()
         if self.tree_editor.commit_pending():
             preset_flows.save_preset(self.session, self)
 
