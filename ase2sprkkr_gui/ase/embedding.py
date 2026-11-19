@@ -355,6 +355,15 @@ class EmbeddingDraft:
             for symbol, atomic_type in types.items():
                 if atomic_type.has_converged_data():
                     by_element.setdefault(symbol, atomic_type)
+        # New substitutions can also start from the converged host density
+        # of the same chemical element. Ordinary ASE hosts have no such data.
+        reference = host_atoms(self.host)
+        if (isinstance(reference, SPRKKRAtoms)
+                and reference.are_sites_inited()):
+            for site in reference.sites:
+                for atomic_type in site.occupation:
+                    if atomic_type.has_converged_data():
+                        by_element.setdefault(atomic_type.symbol, atomic_type)
         return by_site, by_element
 
     @staticmethod
@@ -519,7 +528,7 @@ class EmbeddingDraft:
     def add_shells(self, shells: int) -> int:
         return self.include(self.sites_within_shells(shells))
 
-    def to_atoms(self, *, allow_radial_reset=False) -> SPRKKRAtoms:
+    def to_atoms(self, *, allow_radial_reset=False, shallow=False) -> SPRKKRAtoms:
         """Build independent atoms without silently losing radial results.
 
         Existing radial data can only be reset after explicit caller approval.
@@ -546,9 +555,9 @@ class EmbeddingDraft:
                  for key, entry in ordered],
             )
             by_site, by_element = self._radial_sources()
-            # Each new cluster owns its type/mesh containers. Sharing numerical
-            # arrays is safe here because the editor only replaces values, not
-            # their elements; the source calculation remains unmodified.
+            # Each new cluster owns its type/mesh containers. Preview-only
+            # materialization may share radial arrays; accepted edits own their
+            # arrays so subsequent calculations cannot mutate the source.
             meshes, types = {}, {}
             complete_restart = self.original_cluster is not None
             for (key, entry), site in zip(ordered, atoms.sites):
@@ -569,7 +578,7 @@ class EmbeddingDraft:
                         type_key = (id(source_type), id(target_mesh))
                         if type_key not in types:
                             types[type_key] = source_type.copy(
-                                for_mesh=target_mesh, shallow=True
+                                for_mesh=target_mesh, shallow=shallow
                             )
                         occupation[types[type_key]] = fraction
                     site.occupation = occupation

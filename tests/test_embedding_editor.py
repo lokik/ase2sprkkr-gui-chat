@@ -2437,6 +2437,9 @@ def test_calculated_cluster_edit_keeps_radial_starting_density_and_embedded_tab(
         for atom_type in before.occupation:
             copied = next(a for a in after.occupation if a.symbol == atom_type.symbol)
             assert copied is not atom_type
+            assert not np.shares_memory(
+                copied.potential.raw_value, atom_type.potential.raw_value
+            )
             np.testing.assert_array_equal(copied.potential.raw_value,
                                           atom_type.potential.raw_value)
             np.testing.assert_array_equal(copied.charge.raw_value,

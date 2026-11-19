@@ -560,7 +560,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             raise ValueError("Finish the incomplete Embedded-site edit before applying.")
         if widget.draft.is_unchanged():
             return self._working_atoms
-        return widget.draft.to_atoms(allow_radial_reset=True)
+        return widget.draft.to_atoms(allow_radial_reset=True, shallow=True)
 
     def _candidate(self, *, embedded_atoms=None) -> Any:
         """Compose host and Embedded drafts without committing either one."""
