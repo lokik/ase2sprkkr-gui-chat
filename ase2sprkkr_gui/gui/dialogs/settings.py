@@ -72,9 +72,24 @@ class SettingsDialog(QDialog):
             | QDialogButtonBox.StandardButton.Cancel,
             self,
         )
+        self.about_button = buttons.addButton(
+            "About…", QDialogButtonBox.ButtonRole.HelpRole
+        )
+        self.about_button.setObjectName("settingsAboutButton")
+        self.about_button.clicked.connect(self._show_about)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _show_about(self) -> None:
+        """A small informational action, without adding a global menu bar."""
+        QMessageBox.about(
+            self,
+            "About Ase2sprkkr",
+            "Ase2sprkkr\n\n"
+            "A graphical interface for creating, loading and editing atomic "
+            "structures and preparing SPR-KKR calculations, built on ASE.",
+        )
 
     def accept(self) -> None:  # type: ignore[override]
         try:

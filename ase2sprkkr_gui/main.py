@@ -202,6 +202,11 @@ class GuiApplication(QObject):
                 self.controller, self.recent_files, target
             )
         )
+        widget.importDirectoryRequested.connect(
+            lambda target=window: file_flows.choose_and_load_output_directory(
+                self.controller, self.recent_files, target
+            )
+        )
         presenter.newCalculationUnavailable.connect(
             lambda target=window: calculation_flow.show_new_calculation_source_required(
                 target
