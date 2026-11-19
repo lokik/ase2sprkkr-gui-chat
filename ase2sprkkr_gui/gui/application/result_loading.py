@@ -144,6 +144,45 @@ def load_result(
     )
 
 
+def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
+    """Try to find the SCF output that produced a non-SCF result's potential.
+
+    Same-directory proximity alone is not enough: the SCF output must reference
+    exactly the potential used by the selected result. An absent, unreadable or
+    unrelated output is never an error for the selected result.
+    """
+    if loaded.output_path is None or loaded.potential_path is None:
+        return None
+    if str(getattr(loaded.result, "task_name", "")).casefold() == "scf":
+        return None
+
+    directory = loaded.output_path.parent
+    target_potential = loaded.potential_path.resolve()
+    try:
+        candidates = sorted(
+            (path for path in directory.iterdir()
+             if path != loaded.output_path and path.is_file()
+             and path.suffix.lower() in {".out", ".log", ".txt"}),
+            key=lambda path: ("scf" not in path.stem.casefold(), path.name.casefold()),
+        )
+    except OSError:
+        return None
+
+    for path in candidates:
+        try:
+            result = TaskResult.from_file(path)
+            if str(getattr(result, "task_name", "")).casefold() != "scf":
+                continue
+            candidate = load_result(
+                result, fallback_directory=directory, output_fallback=path
+            )
+            if candidate.potential_path == target_potential:
+                return candidate
+        except Exception:  # noqa: BLE001 - optional, possibly corrupt output
+            continue
+    return None
+
+
 def _load_input_parameters(result: Any) -> tuple[Any | None, Exception | None]:
     try:
         return getattr(result, "input_parameters", None), None

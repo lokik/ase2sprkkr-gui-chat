@@ -21,6 +21,7 @@ from ase2sprkkr_gui.gui.application.result_loading import (
     PotentialVersionChanged,
     load_potential_atoms,
     load_result_file,
+    load_companion_scf_result,
 )
 from ase2sprkkr_gui.gui.application.workspace_controller import ResultAdoption, WorkspaceController
 from ase2sprkkr_gui.gui.flows.structure_candidates import (
@@ -426,6 +427,24 @@ def _finish_output_load(
     _show_input_parameters_warning(adoption, parent)
 
 
+def _try_adopt_companion_scf(
+    controller: WorkspaceController,
+    loaded: LoadedResult,
+) -> None:
+    """Import related SCF history if available; never block the selected output."""
+    try:
+        if any(
+            record.task_name == "scf" and record.potential_path == loaded.potential_path
+            for record in controller.result_store.results
+        ):
+            return
+        companion = load_companion_scf_result(loaded)
+        if companion is not None:
+            controller.adopt_external_result(companion)
+    except Exception:  # noqa: BLE001 - this is strictly an optional import
+        pass
+
+
 def load_output(
     controller: WorkspaceController,
     recent_files: RecentFiles,
@@ -436,6 +455,7 @@ def load_output(
     loaded = _read_output(file_path, parent)
     if loaded is None:
         return False
+    _try_adopt_companion_scf(controller, loaded)
     adoption = controller.adopt_external_result(loaded, select_result=True)
     _finish_output_load(adoption, recent_files, file_path, parent)
     return True
@@ -454,6 +474,7 @@ def continue_output(
     if loaded is None:
         return False
 
+    _try_adopt_companion_scf(controller, loaded)
     adoption = controller.adopt_external_result(loaded, select_result=True)
     record = adoption.record
     if record is None:
