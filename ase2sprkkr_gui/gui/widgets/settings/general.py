@@ -1,7 +1,7 @@
 """General application settings: visualization and SPR-KKR defaults."""
 from __future__ import annotations
 
-from math import log10
+from math import log
 
 from PyQt6.QtCore import Qt
 
@@ -25,7 +25,9 @@ from PyQt6.QtWidgets import (
 
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
 from ase2sprkkr_gui.gui.application.viewers import viewer_unavailability
-from ase2sprkkr_gui.gui.plots.atom_sizes import AtomAppearance, marker_areas
+from ase2sprkkr_gui.gui.plots.atom_sizes import (
+    AtomAppearance, MAX_ATOM_SIZE_PERCENT, MIN_ATOM_SIZE_PERCENT, marker_areas,
+)
 
 
 _DATASET_MODE_LABELS = (
@@ -43,22 +45,21 @@ def available_viewers() -> tuple[str, ...]:
 
 
 
-# One decade of radius either side of the default; slider midpoint is 100%.
-# Numeric editing preserves exact saved percentages between logarithmic ticks.
-_MIN_ATOM_SIZE_PERCENT = 10
-_MAX_ATOM_SIZE_PERCENT = 1000
+# Symmetric logarithmic endpoints (5% and 2000%) around 100%.
+# Numeric editing preserves exact saved percentages between slider ticks.
+_LOG_ATOM_SIZE_RANGE = log(MAX_ATOM_SIZE_PERCENT / 100)
 
 
 def atom_size_from_slider(position: int) -> int:
-    """Map [-100, 100] to radius percentages [10, 1000]."""
-    return round(100 * 10 ** (position / 100))
+    """Map [-100, 100] to radius percentages [5, 2000]."""
+    return round(100 * (MAX_ATOM_SIZE_PERCENT / 100) ** (position / 100))
 
 
 def slider_from_atom_size(percent: int) -> int:
     """Approximate the position of a saved/entered radius percentage."""
-    return round(100 * log10(max(_MIN_ATOM_SIZE_PERCENT, min(
-        _MAX_ATOM_SIZE_PERCENT, percent
-    )) / 100))
+    return round(100 * log(max(MIN_ATOM_SIZE_PERCENT, min(
+        MAX_ATOM_SIZE_PERCENT, percent
+    )) / 100) / _LOG_ATOM_SIZE_RANGE)
 
 
 class _AtomSizeExample(QWidget):
@@ -69,7 +70,7 @@ class _AtomSizeExample(QWidget):
         self._atoms = Atoms("CAu")
         self.figure = Figure(figsize=(3.2, 1.0))
         self.canvas = FigureCanvasQTAgg(self.figure)
-        # Room for the largest (10x radius) Au marker without clipping.
+        # Compact reference: sizes follow the real plot, even at extreme scales.
         self.canvas.setFixedHeight(180)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -152,14 +153,14 @@ class GeneralSettingsPage(QFrame):
         self.atom_size_slider.setSingleStep(1)
         self.atom_size_slider.setPageStep(10)
         self.atom_size_slider.setToolTip(
-            "Logarithmic atom-radius scale: 10% to 1000%, 100% at the center."
+            "Logarithmic atom-radius scale: 5% to 2000%, 100% at the center."
         )
         self.atom_size_slider.setValue(
             slider_from_atom_size(settings.atom_size_percent)
         )
         self.atom_size_percent = QSpinBox(size_row)
         self.atom_size_percent.setRange(
-            _MIN_ATOM_SIZE_PERCENT, _MAX_ATOM_SIZE_PERCENT
+            MIN_ATOM_SIZE_PERCENT, MAX_ATOM_SIZE_PERCENT
         )
         self.atom_size_percent.setSuffix("%")
         self.atom_size_percent.setValue(settings.atom_size_percent)
