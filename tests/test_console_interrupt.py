@@ -200,6 +200,73 @@ def test_second_ctrl_c_force_exits_before_qt_consumes_first(monkeypatch):
         interrupt.close()
 
 
+def test_late_ctrl_c_resets_force_window_during_modal_shutdown(monkeypatch):
+    from ase2sprkkr_gui.gui.application import console_interrupt as bridge
+
+    app = QApplication.instance() or QApplication([])
+    clock = [10.0]
+    events = []
+    monkeypatch.setattr(bridge, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        bridge.os, "_exit",
+        lambda code: (_ for _ in ()).throw(AssertionError(f"forced exit: {code}")),
+    )
+
+    interrupt = None
+
+    def shutdown():
+        events.append("shutdown")
+        clock[0] = 13.1
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        assert interrupt._first_interrupt_at == 13.1
+        clock[0] = 13.3
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        # Even in an in-progress modal shutdown, repeated Ctrl+C must not
+        # recursively invoke the callback or unexpectedly terminate.
+        assert events == ["shutdown"]
+
+    interrupt = ConsoleInterrupt(shutdown, parent=app)
+    try:
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        interrupt._on_readable()
+        assert events == ["shutdown"]
+    finally:
+        interrupt.close()
+
+
+def test_rearmed_force_window_still_allows_deliberate_second_ctrl_c(monkeypatch):
+    import pytest
+    from ase2sprkkr_gui.gui.application import console_interrupt as bridge
+
+    app = QApplication.instance() or QApplication([])
+    clock = [10.0]
+    events = []
+    monkeypatch.setattr(bridge, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        bridge.os, "_exit",
+        lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    )
+
+    interrupt = None
+
+    def shutdown():
+        events.append("shutdown")
+        clock[0] = 13.1
+        interrupt._mark_interrupt(signal.SIGINT, None)  # Late: re-arm.
+        clock[0] = 13.7
+        interrupt._mark_interrupt(signal.SIGINT, None)  # Force within new window.
+
+    interrupt = ConsoleInterrupt(shutdown, parent=app)
+    try:
+        interrupt._mark_interrupt(signal.SIGINT, None)
+        with pytest.raises(SystemExit) as exc:
+            interrupt._on_readable()
+        assert exc.value.code == 130
+        assert events == ["shutdown"]
+    finally:
+        interrupt.close()
+
+
 def test_ctrl_c_after_cancelled_shutdown_starts_fresh_request(monkeypatch):
     from ase2sprkkr_gui.gui.application import console_interrupt as bridge
 
