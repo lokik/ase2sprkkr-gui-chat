@@ -337,9 +337,12 @@ def test_logarithmic_atom_size_range_and_preview_uses_real_marker_areas(tmp_path
     try:
         page = dialog.general_page
         assert (page.atom_size_slider.minimum(), page.atom_size_slider.maximum()) == (-100, 100)
-        assert [atom_size_from_slider(position) for position in (-100, 0, 100)] == [10, 100, 1000]
+        assert [atom_size_from_slider(position) for position in (-100, 0, 100)] == [5, 100, 2000]
         assert slider_from_atom_size(100) == 0
-        for position, expected in ((-100, 10), (0, 100), (100, 1000)):
+        assert (page.atom_size_percent.minimum(), page.atom_size_percent.maximum()) == (5, 2000)
+        assert slider_from_atom_size(5) == -100
+        assert slider_from_atom_size(2000) == 100
+        for position, expected in ((-100, 5), (0, 100), (100, 2000)):
             page.atom_size_slider.setValue(position)
             assert page.atom_size_percent.value() == expected
         page.atom_size_percent.setValue(250)
@@ -366,7 +369,7 @@ def test_logarithmic_atom_size_range_and_preview_uses_real_marker_areas(tmp_path
 
 def test_legacy_and_large_atom_sizes_are_loaded(tmp_path):
     path = tmp_path / "settings.json"
-    for percent in (25, 200, 750, 1000):
+    for percent in (5, 25, 200, 750, 1000, 2000):
         settings = ApplicationSettings(path)
         settings.atom_size_percent = percent
         assert settings.save()
