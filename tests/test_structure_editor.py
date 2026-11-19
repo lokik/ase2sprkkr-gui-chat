@@ -627,7 +627,14 @@ def test_lattice_inputs_have_uniform_compact_width_and_parameter_frame():
     assert header.minimumSectionSize() == 115
     assert table.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     assert table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
-    assert table.height() >= 150
+    expected_height = (
+        table.horizontalHeader().sizeHint().height()
+        + table.verticalHeader().length()
+        + 2 * table.frameWidth()
+    )
+    if table.horizontalScrollBar().maximum() > 0:
+        expected_height += table.horizontalScrollBar().sizeHint().height()
+    assert table.height() == expected_height
     grid = dialog.cell_parameter_grid
     assert grid.columnStretch(4) == 1
     for index in range(6):
@@ -636,6 +643,14 @@ def test_lattice_inputs_have_uniform_compact_width_and_parameter_frame():
     dialog.show()
     QApplication.processEvents()
     assert dialog.lattice_group.width() == dialog.cell_parameter_group.width()
+    expected_height = (
+        table.horizontalHeader().sizeHint().height()
+        + table.verticalHeader().length()
+        + 2 * table.frameWidth()
+    )
+    if table.horizontalScrollBar().maximum() > 0:
+        expected_height += table.horizontalScrollBar().sizeHint().height()
+    assert table.height() == expected_height
     dialog.close()
 
 

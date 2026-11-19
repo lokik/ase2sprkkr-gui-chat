@@ -115,7 +115,21 @@ class StructureEditorDialog(ElementAssignmentDialog):
         table = self.lattice_vectors_table
         table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        table.setFixedHeight(165)  # Header, three site rows and a horizontal bar.
+        # Fit the visible rows exactly, reserving scrollbar space only when
+        # horizontal scrolling is actually needed.
+        def fit_table_height(_minimum=0, _maximum=0):
+            height = (
+                table.horizontalHeader().sizeHint().height()
+                + table.verticalHeader().length()
+                + 2 * table.frameWidth()
+            )
+            if table.horizontalScrollBar().maximum() > 0:
+                height += table.horizontalScrollBar().sizeHint().height()
+            if table.height() != height:
+                table.setFixedHeight(height)
+
+        table.horizontalScrollBar().rangeChanged.connect(fit_table_height)
+        fit_table_height()
         header = table.horizontalHeader()
         header.setMinimumSectionSize(115)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
