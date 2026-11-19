@@ -42,6 +42,7 @@ class _FullscreenFigureDialog(QDialog):
     def __init__(self, figure: Figure, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Matplotlib preview")
+        self.setModal(True)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
 
         layout = QVBoxLayout(self)
