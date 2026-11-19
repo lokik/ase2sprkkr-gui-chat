@@ -4,8 +4,9 @@ from collections.abc import Callable
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QMouseEvent, QResizeEvent
+from PyQt6.QtGui import QIcon, QKeySequence, QMouseEvent, QResizeEvent
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -115,6 +116,7 @@ class ResultActionsWidget(QWidget):
     historyRequested = pyqtSignal()
     assignToProjectRequested = pyqtSignal(object)
     loadResultRequested = pyqtSignal()
+    importDirectoryRequested = pyqtSignal()
 
     def __init__(
         self,
@@ -129,6 +131,7 @@ class ResultActionsWidget(QWidget):
         super().__init__(parent)
         self._action_handler = action_handler
         self._show_values_without_actions = show_values_without_actions
+        self._current_presentation: ResultPresentation | None = None
         self._empty_text = empty_text
         self._row_count = 0
 
@@ -172,7 +175,10 @@ class ResultActionsWidget(QWidget):
         self.assign_project_button.clicked.connect(self._request_project_assignment)
         self.load_result_button = QPushButton("Load Result", self)
         self.load_result_button.setObjectName("resultsLoadButton")
-        self.load_result_button.setToolTip("Load a SPR-KKR output file into Results")
+        self.load_result_button.setToolTip(
+            "Load one SPR-KKR output file into Results (Ctrl+Shift+O)"
+        )
+        self.load_result_button.setShortcut(QKeySequence("Ctrl+Shift+O"))
         self.load_result_button.setIcon(
             QIcon.fromTheme(
                 "document-open",
@@ -194,6 +200,36 @@ class ResultActionsWidget(QWidget):
             )
             assignment_row.addWidget(button, 1)
         layout.addLayout(assignment_row)
+
+        # Keep the original three equal-width result actions. A separate
+        # compact row avoids squeezing four captions into the narrow sidebar.
+        options_row = QHBoxLayout()
+        self.import_directory_button = QPushButton("Import Directory…", self)
+        self.import_directory_button.setObjectName("resultsImportDirectoryButton")
+        self.import_directory_button.setIcon(
+            QIcon.fromTheme(
+                "folder-open",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
+            )
+        )
+        self.import_directory_button.setToolTip(
+            "Import recognized SPR-KKR outputs from a directory (Ctrl+Shift+I)"
+        )
+        self.import_directory_button.setShortcut(QKeySequence("Ctrl+Shift+I"))
+        self.import_directory_button.clicked.connect(
+            lambda _checked=False: self.importDirectoryRequested.emit()
+        )
+        options_row.addWidget(self.import_directory_button)
+        options_row.addStretch(1)
+        self.show_all_values_checkbox = QCheckBox("Show all values", self)
+        self.show_all_values_checkbox.setObjectName("resultsShowAllValues")
+        self.show_all_values_checkbox.setToolTip(
+            "Also display output values with no available action"
+        )
+        self.show_all_values_checkbox.setChecked(show_values_without_actions)
+        self.show_all_values_checkbox.toggled.connect(self._toggle_all_values)
+        options_row.addWidget(self.show_all_values_checkbox)
+        layout.addLayout(options_row)
         layout.addWidget(self._selector)
         self._assignment_controls = (self.select_all_button, self.assign_project_button)
         if not show_assignment_controls:
@@ -318,10 +354,17 @@ class ResultActionsWidget(QWidget):
         self.set_result(None)
         self._show_empty(message)
 
+    def _toggle_all_values(self, checked: bool) -> None:
+        """Re-render the selected result without changing selection or state."""
+        self._show_values_without_actions = checked
+        if self._current_presentation is not None:
+            self.set_result(self._current_presentation)
+
     def set_result(self, presentation: ResultPresentation | Any | None) -> None:
         """Render one presentation; raw live results are delegated to the presenter."""
         if presentation is not None and not isinstance(presentation, ResultPresentation):
             presentation = present_result(presentation)
+        self._current_presentation = presentation
 
         self._clear()
         self._result_file_warning.hide()
