@@ -117,7 +117,7 @@ def test_element_assignment_relative_radii_keep_a_global_reference():
 
 def test_expanded_atom_size_range_is_applied_quadratically():
     atoms = Atoms("Fe")
-    for percent in (10, 100, 1000):
+    for percent in (5, 10, 100, 1000, 2000):
         value = marker_areas(
             atoms, 48, appearance=AtomAppearance(
                 size_percent=percent, relative_sizes=False
@@ -125,9 +125,13 @@ def test_expanded_atom_size_range_is_applied_quadratically():
         )
         assert np.allclose(value, [48 * (percent / 100) ** 2])
     try:
+        set_atom_appearance(1)
+        assert np.isclose(marker_area_scale(), 0.0025)
         set_atom_appearance(5)
-        assert np.isclose(marker_area_scale(), 0.01)
+        assert np.isclose(marker_area_scale(), 0.0025)
         set_atom_appearance(2000)
-        assert np.isclose(marker_area_scale(), 100.0)
+        assert np.isclose(marker_area_scale(), 400.0)
+        set_atom_appearance(3000)
+        assert np.isclose(marker_area_scale(), 400.0)
     finally:
         set_atom_appearance()
