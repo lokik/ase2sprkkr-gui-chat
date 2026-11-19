@@ -1397,7 +1397,10 @@ def test_embedding_symmetry_colors_and_actions_follow_same_checkbox():
         other for other in dialog._highlighted
         if other != site and other.cell_index in dialog.cells._cells
     )
+    assert dialog.symmetric.isChecked()
     assert dialog._site_style(site)[2] == SELECTED_COLOR
+    assert dialog._site_style(related)[2] == SYMMETRY_APPLY_COLOR
+    dialog.symmetric.setChecked(False)
     assert dialog._site_style(related)[2] == SYMMETRY_PREVIEW_COLOR
 
     def map_edge(cell):

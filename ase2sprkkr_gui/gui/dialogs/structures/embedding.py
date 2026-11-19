@@ -183,6 +183,7 @@ class BuildEmbeddingDialog(QDialog):
         self.cells.cellSelected.connect(self._cell_changed)
         left_v.addWidget(self.cells, 1)
         self.symmetric = QCheckBox("Apply actions to symmetry-equivalent sites")
+        self.symmetric.setChecked(True)
         self.symmetric.setToolTip(
             "Include, Exclude, occupation and displacement affect all "
             "symmetry-equivalent host sites when checked. When unchecked, "
