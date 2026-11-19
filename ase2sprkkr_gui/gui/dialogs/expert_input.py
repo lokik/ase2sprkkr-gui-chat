@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometry
+from ase2sprkkr_gui.gui.flows import presets as preset_flows
 from ase2sprkkr_gui.gui.flows.input_parameters import (
     choose_and_load_input_parameters,
     edit_input_parameters_file,
@@ -87,6 +88,9 @@ class InputParametersDialog(QDialog):
             return button
 
         self.load_btn = add_button('Load input…', self._load_input)
+        self.load_preset_btn = add_button('Replace with preset…', self._replace_preset)
+        self.merge_preset_btn = add_button('Merge preset…', self._merge_preset)
+        self.save_preset_btn = add_button('Save as preset…', self._save_preset)
         self.edit_input_btn = add_button('Edit input file…', self._edit_input_file)
         self.cancel_btn = add_button('Cancel', self.reject)
         self.ok_btn = add_button('OK', self._on_ok)
@@ -99,6 +103,18 @@ class InputParametersDialog(QDialog):
         if not self.tree_editor.commit_pending():
             return
         edit_input_parameters_file(self.session, self)
+
+    def _replace_preset(self) -> None:
+        if self.tree_editor.commit_pending():
+            preset_flows.load_preset(self.session, self, clear_first=True)
+
+    def _merge_preset(self) -> None:
+        if self.tree_editor.commit_pending():
+            preset_flows.load_preset(self.session, self, clear_first=False)
+
+    def _save_preset(self) -> None:
+        if self.tree_editor.commit_pending():
+            preset_flows.save_preset(self.session, self)
 
     def _on_ok(self) -> None:
         self._validation_error.hide()
