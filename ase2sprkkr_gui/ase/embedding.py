@@ -253,6 +253,8 @@ class EmbeddingDraft:
         # A detached geometry view may reflect uncommitted host edits.
         self.host = host
         self._geometry_host = host
+        self._to_geometry = np.eye(3)
+        self._to_source = np.eye(3)
         self.dimension = host_dimension(host)
         allowed = embedding_host_indices(host)
         if not allowed:
@@ -301,7 +303,7 @@ class EmbeddingDraft:
         return self._geometry_host
 
     def set_geometry_host(self, host) -> None:
-        """Refresh the view without replacing cluster data or Undo snapshots."""
+        """Refresh the host view and cache its affine displacement mapping."""
         original = host_atoms(self.host)
         updated = host_atoms(host)
         if host_dimension(host) != self.dimension:
@@ -310,31 +312,30 @@ class EmbeddingDraft:
             raise ValueError("The embedded host site mapping or periodicity changed")
         if frozenset(embedding_host_indices(host)) != self.allowed:
             raise ValueError("The set of editable embedded host sites changed")
+        to_geometry = to_source = np.eye(3)
         if not np.array_equal(original.cell, updated.cell):
             try:
-                np.linalg.solve(np.asarray(original.cell), np.asarray(updated.cell))
-                np.linalg.solve(np.asarray(updated.cell), np.asarray(original.cell))
+                to_geometry = np.linalg.solve(
+                    np.asarray(original.cell), np.asarray(updated.cell)
+                )
+                to_source = np.linalg.solve(
+                    np.asarray(updated.cell), np.asarray(original.cell)
+                )
             except np.linalg.LinAlgError as exc:
                 raise ValueError("Embedded host preview requires a nonsingular cell") from exc
+        # Publish a complete validated mapping at once; no partly updated
+        # geometry should ever be observed by the live widget.
+        self._to_geometry = to_geometry
+        self._to_source = to_source
         self._geometry_host = host
 
     def display_displacement(self, value):
         """Convert a source-reference vector into the current host coordinates."""
-        vector = np.asarray(value, dtype=float)
-        if self._geometry_host is self.host:
-            return vector.copy()
-        source = np.asarray(host_atoms(self.host).cell, dtype=float)
-        target = np.asarray(host_atoms(self._geometry_host).cell, dtype=float)
-        return vector @ np.linalg.solve(source, target)
+        return np.asarray(value, dtype=float) @ self._to_geometry
 
     def source_displacement(self, value):
         """Convert a displayed vector back before recording an Undoable edit."""
-        vector = np.asarray(value, dtype=float)
-        if self._geometry_host is self.host:
-            return vector.copy()
-        source = np.asarray(host_atoms(self.host).cell, dtype=float)
-        target = np.asarray(host_atoms(self._geometry_host).cell, dtype=float)
-        return vector @ np.linalg.solve(target, source)
+        return np.asarray(value, dtype=float) @ self._to_source
 
     def would_discard_radial_data(self) -> bool:
         """A centre-only GUI edit cannot invalidate native radial results."""
