@@ -115,7 +115,8 @@ class PreviewFigureCanvas(FigureCanvasQTAgg):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self.fullscreen_button.move(6, 6)
+        if hasattr(self, "fullscreen_button"):
+            self.fullscreen_button.move(6, 6)
 
     def set_fullscreen_enabled(self, enabled: bool) -> None:
         """Hide fullscreen affordances in an already-expanded preview."""
