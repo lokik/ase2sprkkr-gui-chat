@@ -192,6 +192,32 @@ def test_column_headings_align_and_results_resize_both_action_columns(tmp_path):
     assert len({heading.font().pointSizeF() for heading in headings}) == 1
     assert len({heading.mapTo(window, QPoint(0, 0)).y() for heading in headings}) == 1
 
+    # The sections and their first action cards must share a top baseline,
+    # not just the three top-level column titles.
+    create_heading = next(
+        label
+        for label in window._structure_actions.findChildren(QLabel, "workflowActionGroupLabel")
+        if label.text() == "Create structure"
+    )
+    custom_heading = next(
+        label
+        for label in window._actions.findChildren(QLabel, "workflowActionGroupLabel")
+        if label.text() == "Custom"
+    )
+    assert create_heading.mapTo(window, QPoint(0, 0)).y() == custom_heading.mapTo(window, QPoint(0, 0)).y()
+
+    create_card = next(
+        card
+        for card in window._structure_actions.findChildren(QAbstractButton)
+        if card.accessibleName() == "Create a 3D Structure"
+    )
+    custom_card = next(
+        card
+        for card in window._actions.findChildren(QAbstractButton)
+        if card.accessibleName() == "Custom input file"
+    )
+    assert create_card.mapTo(window, QPoint(0, 0)).y() == custom_card.mapTo(window, QPoint(0, 0)).y()
+
     splitter = window._layout_splitter
     assert isinstance(splitter, QSplitter)
     assert splitter.count() == 2

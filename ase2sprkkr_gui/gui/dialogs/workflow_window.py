@@ -164,7 +164,7 @@ class WorkflowWindow(QMainWindow):
         structure_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
         structure_body = QWidget(structure_scroll)
         structure_body_layout = QVBoxLayout(structure_body)
-        structure_body_layout.setContentsMargins(0, SPACE_SM, SPACE_SM, 0)
+        structure_body_layout.setContentsMargins(0, 0, SPACE_SM, 0)
         structure_body_layout.setSpacing(SPACE_XL)
         structure_body_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self._structure_overview = StructureOverviewWidget(structure_body)
