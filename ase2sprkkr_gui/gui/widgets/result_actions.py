@@ -179,7 +179,9 @@ class ResultActionsWidget(QWidget):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
             )
         )
-        self.load_result_button.clicked.connect(self.loadResultRequested.emit)
+        self.load_result_button.clicked.connect(
+            lambda _checked=False: self.loadResultRequested.emit()
+        )
         # An equally divided toolbar remains usable in the narrow Guided
         # sidebar. Ignored horizontal size hints allow all three buttons to
         # shrink together instead of the longest label dominating the row.
