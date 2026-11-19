@@ -274,8 +274,23 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self._switching_tabs = True
         try:
             super().setup(target, back=back)
+            self._invalid_cell_parameters = None
             self._refresh_cell_summary()
+            self._sync_cell_parameter_spins()
             self.site_notice.setVisible(cluster)
+            self.lattice_group.setTitle(
+                "Host potential lattice vectors (Å)" if cluster
+                else "Lattice vectors (Å)"
+            )
+            self.lattice_note.setText(
+                "These controls edit the HOST POTENTIAL lattice. The embedded "
+                "cluster will be remapped to the updated host (including atom "
+                "positions and displacements)."
+                if cluster else
+                "Editing cell lengths or angles preserves fractional atomic "
+                "coordinates; Cartesian positions change with the lattice."
+            )
+            self._overview_previews.set_structure(atoms if cluster else None)
             self.overview.set_structure(atoms)
             if cluster:
                 self._create_embedded_page(atoms)
@@ -285,7 +300,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         finally:
             self._switching_tabs = previous_guard
         self._last_tab = self.tabs.currentIndex()
-        self._shared_preview.setVisible(self._last_tab != self._embedded_index())
+        self._update_preview_panel()
 
     def _embedded_index(self):
         if self._embedded_page is None:
@@ -311,6 +326,9 @@ class StructureEditorDialog(ElementAssignmentDialog):
             for row in self.lattice_spinboxes:
                 for spin in row:
                     spin.setEnabled(supported)
+            self.cell_parameter_group.setEnabled(
+                supported and self._cell_parameters_valid
+            )
             for row in self._letter_widgets:
                 row.break_btn.setEnabled(False)
                 row.break_btn.setToolTip(
@@ -329,6 +347,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             for row in self.lattice_spinboxes:
                 for spin in row:
                     spin.setEnabled(True)
+            self.cell_parameter_group.setEnabled(self._cell_parameters_valid)
         build_2d = kind == "3d" and not cluster
         build_embedded = kind in ("3d", "2d") and not cluster
         self.build_surface_button.setVisible(build_2d)
@@ -347,8 +366,62 @@ class StructureEditorDialog(ElementAssignmentDialog):
 
     def _on_lattice_vector_changed(self, value: float) -> None:
         super()._on_lattice_vector_changed(value)
-        if hasattr(self, "cell_summary"):
+        if hasattr(self, "cell_parameter_spins"):
+            self._invalid_cell_parameters = None
+            self.cell_parameter_error.clear()
+            self._sync_cell_parameter_spins()
             self._refresh_cell_summary()
+            self._update_ok_state()
+
+    def _sync_cell_parameter_spins(self) -> None:
+        """Keep the six parameter spinboxes in sync with direct vector edits."""
+        try:
+            values = lengths_and_angles(self._require_draft().cell)
+            self._cell_parameters_valid = True
+        except ValueError:
+            self._cell_parameters_valid = False
+            self.cell_parameter_group.setEnabled(False)
+            self.cell_parameter_error.setText(
+                "Cell lengths/angles require nonzero lattice vectors. "
+                "Edit Cartesian cell vectors to restore a valid cell."
+            )
+            return
+        if self._invalid_cell_parameters is None:
+            self.cell_parameter_error.clear()
+        for spin, value in zip(self.cell_parameter_spins.values(), values):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.cell_parameter_group.setEnabled(True)
+
+    def _cell_parameters_edited(self, _value: float) -> None:
+        """Update the draft as one lattice operation (fractional sites unchanged)."""
+        if self._draft is None:
+            return
+        values = tuple(spin.value() for spin in self.cell_parameter_spins.values())
+        try:
+            cell = cell_from_lengths_angles(self._require_draft().cell, values)
+        except ValueError as error:
+            self._invalid_cell_parameters = str(error)
+            self.cell_parameter_error.setText(str(error))
+            self._update_ok_state()
+            return
+        self._invalid_cell_parameters = None
+        self.cell_parameter_error.clear()
+        self._require_draft().set_cell(cell)
+        for i, row in enumerate(self.lattice_spinboxes):
+            for j, spin in enumerate(row):
+                spin.blockSignals(True)
+                spin.setValue(float(cell[i, j]))
+                spin.blockSignals(False)
+        self._draw_preview()
+        self._refresh_cell_summary()
+        self._update_ok_state()
+
+    def _update_ok_state(self) -> None:
+        super()._update_ok_state()
+        if self._invalid_cell_parameters is not None:
+            self.ok_btn.setEnabled(False)
 
     def _refresh_cell_summary(self) -> None:
         cell = self._require_draft().cell
@@ -358,8 +431,27 @@ class StructureEditorDialog(ElementAssignmentDialog):
             "   ".join(f"{axis} = {length:.5g}" for axis, length in zip("abc", lengths))
         )
 
+    def _overview_site_selected(self, scope: str, row: int) -> None:
+        self._overview_previews.update_selection(scope, row)
+
+    def _update_preview_panel(self) -> None:
+        cluster = _is_cluster(self._working_atoms)
+        embedded = (
+            self._embedded_page is not None
+            and self.tabs.currentWidget() is self._embedded_page
+        )
+        self.preview_stack.setVisible(not embedded)
+        if not embedded:
+            self.preview_stack.setCurrentWidget(
+                self._overview_previews
+                if cluster and self.tabs.currentWidget() is self.overview
+                else self._shared_preview
+            )
+
     def _candidate(self) -> Any:
         draft = self._require_draft()
+        if self._invalid_cell_parameters is not None:
+            raise ValueError(self._invalid_cell_parameters)
         if draft.is_unchanged():
             return self._working_atoms
         if not draft.is_valid():
@@ -381,7 +473,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             finally:
                 self._switching_tabs = False
             self._last_tab = self.tabs.currentIndex()
-            self._shared_preview.hide()
+            self._update_preview_panel()
         return True
 
     def _flush_embedded(self) -> bool:
@@ -420,10 +512,14 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 index = old
             elif index == 0:
                 try:
-                    self.overview.set_structure(self._candidate())
+                    overview_atoms = self._candidate()
                 except (ValueError, TypeError):
-                    self.overview.set_structure(self._working_atoms)
-            self._shared_preview.setVisible(index != self._embedded_index())
+                    overview_atoms = self._working_atoms
+                self._overview_previews.set_structure(
+                    overview_atoms if _is_cluster(overview_atoms) else None
+                )
+                self.overview.set_structure(overview_atoms)
+            self._update_preview_panel()
         finally:
             self._switching_tabs = False
         self._last_tab = index
