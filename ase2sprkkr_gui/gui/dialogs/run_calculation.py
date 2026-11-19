@@ -27,6 +27,7 @@ class _SprkkrRunWorker(RunMonitorWorker):
     """Qt signal adapter around the backend-only :class:`SprkkrExecution`."""
 
     persistentJobChanged = pyqtSignal(str)
+    submitted = pyqtSignal()
     conflict = pyqtSignal(object)
     submissionRejected = pyqtSignal(str)
 
@@ -50,6 +51,7 @@ class _SprkkrRunWorker(RunMonitorWorker):
             status=self.status.emit,
             warning=self.warning.emit,
             persistent_job_changed=self.persistentJobChanged.emit,
+            submitted=self.submitted.emit,
         )
 
     def _emit_cancelled(self) -> None:
@@ -90,6 +92,7 @@ class SprkkrRunWindow(RunMonitorWindow):
         profile_description: str | None = None,
         project_id: str | None = None,
         on_finished=None,
+        on_submitted: Callable[[], None] | None = None,
         on_back_to_setup: Callable[[], None] | None = None,
     ) -> None:
         header = f"Directory: {request.directory}"
@@ -101,6 +104,7 @@ class SprkkrRunWindow(RunMonitorWindow):
         self.launch_project_id = project_id
         self._project_id: str | None = project_id
         self._back_to_setup = on_back_to_setup
+        self._submitted_callback = on_submitted
         self._submission_error: str | None = None
 
         def worker_factory(cancellation: RunCancellation) -> _SprkkrRunWorker:
@@ -112,6 +116,7 @@ class SprkkrRunWindow(RunMonitorWindow):
                 project_id=self._project_id,
             )
             worker.persistentJobChanged.connect(self._persistent_job_changed_received)
+            worker.submitted.connect(self._on_submitted)
             worker.conflict.connect(self._on_conflict)
             worker.submissionRejected.connect(self._on_submission_rejected)
             return worker
@@ -148,6 +153,12 @@ class SprkkrRunWindow(RunMonitorWindow):
             raise RuntimeError("execution context cannot change after the run has started")
         self._execution_manager = manager
         self._project_id = project_id
+
+    @pyqtSlot()
+    def _on_submitted(self) -> None:
+        """Deliver submission acknowledgement on the GUI thread."""
+        if self._submitted_callback is not None:
+            self._submitted_callback()
 
     @pyqtSlot(str)
     def _persistent_job_changed_received(self, job_id: str) -> None:

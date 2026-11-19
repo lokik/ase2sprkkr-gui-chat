@@ -36,6 +36,7 @@ class SprkkrExecution:
         status: Callable[[str], None] | None = None,
         warning: Callable[[str], None] | None = None,
         persistent_job_changed: Callable[[str], None] | None = None,
+        submitted: Callable[[], None] | None = None,
     ) -> None:
         self.request = request
         self.cancellation = cancellation
@@ -46,6 +47,7 @@ class SprkkrExecution:
         self._status = status or (lambda _text: None)
         self._warning = warning or (lambda _text: None)
         self._persistent_job_changed = persistent_job_changed
+        self._submitted = submitted
 
     def file_names(self) -> tuple[str, str, str]:
         """Return input, potential and output filename templates for the request."""
@@ -162,6 +164,14 @@ class SprkkrExecution:
             # the persistent RunRecord. The observer receives only its stable id
             # and must reload authoritative metadata from the store.
             self._notify_persistent_job_changed(runner)
+        # submit() returned successfully: ASE2SPRKKR has prepared its input
+        # files and handed the calculation to the backend. Result completion
+        # and parsing are unrelated to whether those inputs were saved.
+        if self._submitted is not None:
+            try:
+                self._submitted()
+            except Exception:  # noqa: BLE001 - observers must not fail a launched job
+                logger.exception("Submission observer failed")
         if self.cancellation.requested:
             raise ExecutionCancelled
         return runner

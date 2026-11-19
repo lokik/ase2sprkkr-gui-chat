@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from ase import Atoms
 from types import SimpleNamespace
 import pytest
@@ -433,3 +437,64 @@ def test_unassigned_clear_cache_uses_shared_project_run_store(tmp_path):
 
     normal = SprkkrExecution(_request(tmp_path), _Cancellation(), execution_manager=manager)
     assert normal._project_context() is None
+
+
+@pytest.mark.parametrize("failure_point", ["none", "submit", "wait"])
+def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_launches(
+    monkeypatch, tmp_path, failure_point,
+):
+    """A confirmed backend submission saves inputs regardless of later outcome."""
+    events = []
+
+    class Runner:
+        def submit(self):
+            events.append("submit")
+            if failure_point == "submit":
+                raise RuntimeError("submission rejected")
+
+        def wait(self):
+            events.append("wait")
+            if failure_point == "wait":
+                raise RuntimeError("calculation failed")
+            return object()
+
+    class Calculator:
+        def create_run(self, **_kwargs):
+            return Runner()
+
+    execution = SprkkrExecution(
+        _request(tmp_path), _Cancellation(),
+        submitted=lambda: events.append("acknowledged"),
+    )
+    monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
+    monkeypatch.setattr(
+        execution_module, "load_result",
+        lambda *_args, **_kwargs: events.append("loaded") or object(),
+    )
+    if failure_point == "none":
+        execution.run()
+        assert events == ["submit", "acknowledged", "wait", "loaded"]
+    else:
+        with pytest.raises(RuntimeError):
+            execution.run()
+        assert events == (
+            ["submit"] if failure_point == "submit"
+            else ["submit", "acknowledged", "wait"]
+        )
+
+
+def test_run_monitor_forwards_worker_submit_signal_on_gui_thread(tmp_path):
+    from PyQt6.QtWidgets import QApplication
+    from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
+
+    app = QApplication.instance() or QApplication([])
+    observed = []
+    window = SprkkrRunWindow(
+        _request(tmp_path),
+        on_submitted=lambda: observed.append("submitted"),
+    )
+    worker = window._worker_factory(window._cancellation)
+    worker.submitted.emit()
+    app.processEvents()
+    assert observed == ["submitted"]
+    window.close()
