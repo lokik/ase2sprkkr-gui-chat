@@ -33,6 +33,7 @@ class WorkflowSection(Enum):
     CREATE = auto()
     LOAD = auto()
     OTHER = auto()
+    CUSTOM = auto()
 
 
 class ActionIcon(Enum):
@@ -68,6 +69,11 @@ class RunTask:
     def __post_init__(self) -> None:
         if not isinstance(self.backend_task, str) or not self.backend_task.strip():
             raise ValueError("Workflow task key must be a non-empty string.")
+
+
+@dataclass(frozen=True)
+class CustomTask:
+    """Open the native task picker for standalone input or calculation."""
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,7 @@ class StartOver:
 
 WorkflowCommand = Union[
     RunTask,
+    CustomTask,
     ConvergeHostScf,
     UpdateEmptySpheres,
     CreateStructure,

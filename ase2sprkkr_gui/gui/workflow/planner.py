@@ -37,6 +37,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     RunTask,
+    CustomTask,
     StartOver,
     UpdateEmptySpheres,
     UseForNewCalculation,
@@ -131,6 +132,18 @@ def _cluster_task_supported(definition):
         return False
 
 
+def _custom_group(has_structure: bool) -> AvailableActionGroup:
+    return AvailableActionGroup(
+        WorkflowSection.CUSTOM, "Custom",
+        (_action(
+            CustomTask(),
+            "Custom calculation" if has_structure else "Custom input file",
+            "Choose any registered SPR-KKR task; edit or save input without requiring Guided support.",
+            "calculation", ActionIcon.FILE,
+        ),),
+    )
+
+
 class WorkflowPlanner:
     """Build the complete ordered Guided workflow presentation plan."""
 
@@ -175,6 +188,7 @@ class WorkflowPlanner:
                             ),
                         ),
                     ),
+                    _custom_group(False),
                 ),
             )
         create_actions = (
@@ -265,6 +279,7 @@ class WorkflowPlanner:
                     "Load structure",
                     tuple(load_actions),
                 ),
+                _custom_group(False),
             ),
         )
 
@@ -370,6 +385,8 @@ class WorkflowPlanner:
                     tuple(calculate),
                 )
             )
+
+        groups.append(_custom_group(True))
 
         structure_actions = [
             _action(

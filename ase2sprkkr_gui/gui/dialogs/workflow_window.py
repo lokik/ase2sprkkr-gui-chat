@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette
@@ -29,6 +29,7 @@ from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
 from ase2sprkkr_gui.gui.dialogs.settings import edit_settings
 from ase2sprkkr_gui.gui.misc.icons import settings_icon
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
+from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
 from ase2sprkkr_gui.gui.flows import files as file_flows
 from ase2sprkkr_gui.gui.flows import structures as structure_flows
 from ase2sprkkr_gui.gui.flows import visualization as visualization_flow
@@ -57,6 +58,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     RunTask,
+    CustomTask,
     StartOver,
     UpdateEmptySpheres,
     UseForNewCalculation,
@@ -73,7 +75,7 @@ from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
 
 
 class WorkflowWindow(QMainWindow):
-    """Task-oriented entry point that keeps the full UI available as expert mode."""
+    """Primary task-oriented Ase2sprkkr application window."""
 
     projectBrowserRequested = pyqtSignal()
 
@@ -82,7 +84,6 @@ class WorkflowWindow(QMainWindow):
         controller: WorkspaceController,
         recent_files: RecentFiles,
         *,
-        open_expert: Callable[[], None],
         settings: ApplicationSettings,
         track_launch_monitor: calculation_flow.LaunchMonitorTracker,
         project_repository=None,
@@ -93,7 +94,6 @@ class WorkflowWindow(QMainWindow):
         self.controller = controller
         self.recent_history = recent_files
         self.settings = settings
-        self._open_expert = open_expert
         self._track_launch_monitor = track_launch_monitor
         self.project_repository = project_repository
         self._workflow_planner = WorkflowPlanner()
@@ -282,14 +282,14 @@ class WorkflowWindow(QMainWindow):
             "Browse projects and past calculations",
             lambda _checked=False: self.projectBrowserRequested.emit(),
         )
-        self._expert_button = add_navigation_button(
-            "Expert Mode",
+        self._load_input_button = add_navigation_button(
+            "Load Input File",
             QIcon.fromTheme(
-                "emblem-important",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning),
+                "document-open",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
             ),
-            "Open the full expert interface",
-            self._open_expert_mode,
+            "Load, edit, save or calculate from an SPR-KKR input file",
+            self._load_input_file,
         )
         self._settings_button = add_navigation_button(
             "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)", self._open_settings
@@ -353,6 +353,9 @@ class WorkflowWindow(QMainWindow):
         """Mechanically route one already-approved workflow command."""
         if isinstance(command, RunTask):
             self._prepare_task(command.backend_task)
+            return
+        if isinstance(command, CustomTask):
+            self._custom_task()
             return
         if isinstance(command, ConvergeHostScf):
             calculation_flow.configure_and_run_host_scf(
@@ -525,5 +528,17 @@ class WorkflowWindow(QMainWindow):
         if edit_settings(self.settings, self):
             self._refresh()
 
-    def _open_expert_mode(self) -> None:
-        self._open_expert()
+    def _custom_task(self) -> None:
+        custom_flow.choose_custom_task(
+            self.controller, self.recent_history, self,
+            dataset_default_mode=self.settings.dataset_default_mode,
+            track_launch_monitor=self._track_launch_monitor,
+            project_repository=self.project_repository,
+        )
+
+    def _load_input_file(self) -> None:
+        custom_flow.choose_custom_input(
+            self.controller, self.recent_history, self,
+            track_launch_monitor=self._track_launch_monitor,
+            project_repository=self.project_repository,
+        )

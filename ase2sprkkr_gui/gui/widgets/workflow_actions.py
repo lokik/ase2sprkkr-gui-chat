@@ -29,6 +29,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     RunTask,
+    CustomTask,
     SaveStructure,
     UpdateEmptySpheres,
     UseForNewCalculation,
@@ -39,6 +40,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
 
 _CALCULATION_COMMANDS = (
     RunTask,
+    CustomTask,
     ConvergeHostScf,
     UpdateEmptySpheres,
     UseForNewCalculation,
