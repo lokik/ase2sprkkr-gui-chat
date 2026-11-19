@@ -61,6 +61,30 @@ def test_embedded_dos_resolves_cluster_potential_not_registered_host(tmp_path):
     assert loaded.potential_error is None
 
 
+def test_native_dos_result_selects_control_potfil_clu(tmp_path, monkeypatch):
+    """The real DOS result resolves its CLUPOT despite a host FILES entry."""
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+
+    parameters = InputParameters.create("DOS")
+    parameters.CONTROL.CLUTYPE = "embedded"
+    parameters.CONTROL.POTFIL = "host.pot"
+    parameters.CONTROL.POTFIL_CLU = "cluster.clu"
+    result = DosResult(parameters, None, tmp_path, task_name="dos")
+    result.files.add_file("potential", "host.pot")
+    parsed_atoms = Atoms("Fe")
+    monkeypatch.setattr(
+        result, "_read_potential",
+        lambda path: SimpleNamespace(atoms=parsed_atoms),
+    )
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert result.is_embedded
+    assert loaded.potential_path == (tmp_path / "cluster.clu").resolve()
+    assert loaded.atoms is parsed_atoms
+
+
 def test_embedded_dos_does_not_use_host_when_cluster_reference_is_missing(tmp_path):
     """A host file must never masquerade as the embedded result's geometry."""
     host = tmp_path / "host.pot"
