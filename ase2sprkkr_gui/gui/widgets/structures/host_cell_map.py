@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.collections import PatchCollection
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon
@@ -10,6 +9,7 @@ from matplotlib.path import Path
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
+from ase2sprkkr_gui.gui.widgets.matplotlib_preview import PreviewFigureCanvas as FigureCanvas
 
 # Shared across the cell map and atom previews: selected and actively linked
 # symmetry counterparts belong to one orange visual family.
