@@ -1456,6 +1456,7 @@ def test_host_cell_controls_are_beside_preview_and_sections_are_bold(dimension):
     for control in controls:
         assert control.mapTo(dialog, QPoint()).x() < dialog.cells.mapTo(dialog, QPoint()).x()
     assert not hasattr(dialog, "map_indices")
+    assert dialog.cells.figure.get_figwidth() == dialog.cells.figure.get_figheight()
     assert "QGroupBox::title { font-weight: bold; }" in dialog.styleSheet()
     dialog.close()
 

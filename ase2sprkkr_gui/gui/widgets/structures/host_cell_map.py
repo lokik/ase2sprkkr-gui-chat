@@ -23,7 +23,7 @@ class HostCellMap(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.figure = Figure(figsize=(5, 2.5), layout="constrained")
+        self.figure = Figure(figsize=(3.2, 3.2), layout="constrained")
         self.canvas = FigureCanvas(self.figure)
         self.axes = self.figure.add_subplot(111)
         self._cells = []
