@@ -88,6 +88,51 @@ def _set_store(
     )
 
 
+def test_results_toolbar_has_equal_width_buttons_and_load_action():
+    application = QApplication.instance() or QApplication([])
+    widget = _widget()
+    loaded = []
+    widget.loadResultRequested.connect(lambda: loaded.append("load"))
+    widget.resize(375, 360)
+    widget.show()
+    application.processEvents()
+
+    buttons = (
+        widget.select_all_button,
+        widget.assign_project_button,
+        widget.load_result_button,
+    )
+    assert [button.text() for button in buttons] == [
+        "Select all", "Assign", "Load Result",
+    ]
+    assert all(not button.icon().isNull() for button in buttons)
+    assert all(button.isVisible() for button in buttons)
+    assert max(button.width() for button in buttons) - min(
+        button.width() for button in buttons
+    ) <= 1
+
+    # Loading does not depend on any existing result or selection.
+    assert not widget.select_all_button.isEnabled()
+    assert not widget.assign_project_button.isEnabled()
+    assert widget.load_result_button.isEnabled()
+    widget.load_result_button.click()
+    assert loaded == ["load"]
+    widget.close()
+
+
+def test_load_result_control_is_independent_of_assignment_controls():
+    application = QApplication.instance() or QApplication([])
+    widget = ResultActionsWidget(
+        lambda _value, _action: None,
+        show_values_without_actions=False,
+        show_assignment_controls=False,
+    )
+    assert widget.select_all_button.isHidden()
+    assert widget.assign_project_button.isHidden()
+    assert not widget.load_result_button.isHidden()
+    widget.close()
+
+
 def test_result_actions_render_task_result():
     _application = QApplication.instance() or QApplication([])
     widget = _widget()
