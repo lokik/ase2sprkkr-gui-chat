@@ -194,20 +194,16 @@ class StructureEditorDialog(ElementAssignmentDialog):
         geometry_layout = geometry.content_layout
         for label, description, icon, action in (
             ("Scale lattice", "Change lattice lengths in the current structure",
-             "transform-scale", "scale"),
+             "scale_lattice.svg", "scale"),
             ("Repeat structure", "Create a repeated supercell",
-             "view-grid", "repeat"),
+             "repeat_structure.svg", "repeat"),
             ("Rotate structure (Miller indices)",
-             "Change the surface orientation", "object-rotate-right", "rotate"),
+             "Change the surface orientation", "rotate_structure.svg", "rotate"),
         ):
             button = QPushButton(geometry)
             configure_action_card(
                 button, label, description,
-                QIcon.fromTheme(
-                    icon, self.style().standardIcon(
-                        QStyle.StandardPixmap.SP_ArrowUp,
-                    ),
-                ),
+                QIcon(str(icon_path(icon))),
                 category="structure",
             )
             button.clicked.connect(
@@ -265,10 +261,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             self.discard_cluster_button,
             "Discard cluster",
             "Return to the host; retain its potential if the geometry is unchanged",
-            QIcon.fromTheme(
-                "edit-delete",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon),
-            ),
+            QIcon(str(icon_path("discard_cluster.svg"))),
             category="structure",
         )
         self.discard_cluster_button.clicked.connect(self._discard_cluster)

@@ -858,3 +858,34 @@ def test_loaded_zero_vector_can_be_repaired_without_crashing():
     assert dialog.cell_parameter_group.isEnabled()
     assert not np.isclose(np.linalg.norm(dialog._require_draft().cell[2]), 0)
     editor_module.QDialog.reject(dialog)
+
+
+def test_transform_action_cards_use_bundled_crystal_icons():
+    """All four Transform actions render their bundled icons, including on clusters."""
+    from PyQt6.QtGui import QIcon
+    from PyQt6.QtWidgets import QLabel
+    from ase2sprkkr_gui.gui.misc.resources import icon_path
+
+    for atoms, icons in (
+        (None, (
+            ("scale_button", "scale_lattice.svg"),
+            ("repeat_button", "repeat_structure.svg"),
+            ("rotate_button", "rotate_structure.svg"),
+        )),
+        (_cluster(), (("discard_cluster_button", "discard_cluster.svg"),)),
+    ):
+        dialog = _dialog(atoms)
+        try:
+            for name, filename in icons:
+                path = icon_path(filename)
+                assert path.is_file(), filename
+                expected = QIcon(str(path)).pixmap(26, 26)
+                assert not expected.isNull(), filename
+                icon_images = [
+                    label.pixmap().toImage()
+                    for label in getattr(dialog, name).findChildren(QLabel)
+                    if label.pixmap() is not None and not label.pixmap().isNull()
+                ]
+                assert expected.toImage() in icon_images, name
+        finally:
+            dialog.close()
