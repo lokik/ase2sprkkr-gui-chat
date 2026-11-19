@@ -1,8 +1,7 @@
-"""Qt behavior of the integrated structure editor in Guided mode."""
+"""Transactional Structure Editor and its conditional pages."""
 from __future__ import annotations
 
 import os
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
@@ -10,23 +9,30 @@ import numpy as np
 from ase import Atoms
 from PyQt6.QtWidgets import QApplication
 
-from ase2sprkkr_gui.gui.application.workspace_controller import (
-    WorkspaceController,
-)
+from ase2sprkkr.sprkkr.sprkkr_atoms import SPRKKRAtoms
+from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.dialogs.structures import structure_editor as editor_module
 from ase2sprkkr_gui.gui.flows import structures as structure_flows
 
 
 def _atoms():
     atoms = Atoms(
-        "Fe2",
-        scaled_positions=((0.0, 0.0, 0.0), (0.5, 0.5, 0.5)),
-        cell=np.eye(3),
-        pbc=True,
+        "Fe2", scaled_positions=((0, 0, 0), (0.5, 0.5, 0.5)),
+        cell=np.eye(3), pbc=True,
     )
     atoms.set_array("spacegroup_kinds", np.array([0, 0]))
     atoms.set_array("labels", np.array(["a.1", "a.2"], dtype=object))
     atoms.info["occupancy"] = {"0": {"Fe": 1.0}}
+    return atoms
+
+
+def _cluster():
+    host = Atoms("Fe2", positions=[[0, 0, 0], [1, 1, 1]],
+                 cell=[2, 2, 4], pbc=True)
+    atoms = SPRKKRAtoms.from_embedding(
+        host, [(0, (0, 0, 0), "Co"), (1, (1, 0, 0), "Ni")]
+    )
+    atoms.sites[0].embedding.displacement = (0.04, -0.01, 0.02)
     return atoms
 
 
@@ -37,75 +43,82 @@ def _dialog(atoms=None, **kwargs):
     )
 
 
-def test_editor_defaults_to_integrated_occupations_with_shared_preview():
+def test_overview_first_and_advanced_removed_with_shared_preview():
     dialog = _dialog()
     assert dialog.windowTitle() == "Structure Editor"
     assert [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())] == [
-        "Sites & occupations", "Lattice", "Transform", "Advanced"
+        "Overview", "Sites", "Lattice", "Transform"
     ]
     assert dialog.tabs.currentIndex() == 0
-    assert dialog._letter_widgets
-    assert dialog.canvas.parentWidget() is not None
+    assert dialog.overview.site_table.rowCount() == 2
+    assert not dialog.tabs.tabIcon(0).isNull()
+    assert dialog.tabs.iconSize().width() >= 20
     assert dialog.editor_splitter.widget(1).isAncestorOf(dialog.canvas)
-    assert not hasattr(dialog, "splitter")  # no temporary splitter to reparent
+    assert not hasattr(dialog, "splitter")
     dialog.close()
 
 
-def test_noop_apply_has_no_result_and_cancel_preserves_original():
-    atoms = _atoms()
-    dialog = _dialog(atoms)
+def test_build_derived_in_transform_not_advanced():
+    dialog = _dialog()
+    dialog.tabs.setCurrentIndex(3)
+    assert not dialog.derived_group.isHidden()
+    assert dialog.build_surface_button.isEnabled() is False  # no recent files
+    assert dialog.build_2d_button.isEnabled() is False
+    assert dialog.embedding_button.isEnabled() is False  # capability not passed
+    dialog.close()
+
+
+def test_noop_and_cancel_do_not_modify_source():
+    source = _atoms()
+    dialog = _dialog(source)
     dialog._on_ok()
     assert dialog._result is None
     dialog.close()
-
-    dialog = _dialog(atoms)
+    dialog = _dialog(source)
     dialog._draft.split_site(dialog._draft.sites[0])
     dialog.reject()
-    assert atoms.info["occupancy"] == {"0": {"Fe": 1.0}}
-    np.testing.assert_array_equal(atoms.get_array("spacegroup_kinds"), [0, 0])
+    assert source.info["occupancy"] == {"0": {"Fe": 1.0}}
+    np.testing.assert_array_equal(source.get_array("spacegroup_kinds"), [0, 0])
     dialog.close()
 
 
-def test_sites_and_lattice_are_applied_as_one_detached_structure():
-    atoms = _atoms()
-    dialog = _dialog(atoms)
+def test_site_and_lattice_edits_commit_together():
+    source = _atoms()
+    dialog = _dialog(source)
     dialog._letter_widgets[0].break_btn.click()
-    dialog.tabs.setCurrentIndex(1)
+    dialog.tabs.setCurrentIndex(2)
     dialog.lattice_spinboxes[0][0].setValue(2.0)
     dialog._on_ok()
     result = dialog._result
-    assert result is not None and result is not atoms
+    assert result is not None and result is not source
     np.testing.assert_allclose(result.cell[0, 0], 2.0)
     np.testing.assert_array_equal(result.get_array("spacegroup_kinds"), [0, 1])
-    np.testing.assert_allclose(atoms.cell[0, 0], 1.0)
+    np.testing.assert_allclose(source.cell[0, 0], 1.0)
     dialog.close()
 
 
-def test_transform_uses_staged_edits_and_does_not_publish_early(monkeypatch):
-    atoms = _atoms()
-    observed = []
-
-    def operation(candidate, *, parent=None):
-        observed.append(candidate)
-        assert candidate is not atoms
+def test_transform_uses_staged_edit_and_no_early_publication(monkeypatch):
+    source = _atoms()
+    seen = []
+    def scale(candidate, *, parent=None):
+        seen.append(candidate)
         np.testing.assert_allclose(candidate.cell[0, 0], 2.0)
-        transformed = candidate.copy()
-        transformed.set_cell([3.0, 1.0, 1.0], scale_atoms=True)
-        return transformed
-
-    monkeypatch.setattr(editor_module, "scale_atoms", operation)
-    dialog = _dialog(atoms)
+        out = candidate.copy()
+        out.set_cell([3, 1, 1], scale_atoms=True)
+        return out
+    monkeypatch.setattr(editor_module, "scale_atoms", scale)
+    dialog = _dialog(source)
     dialog.lattice_spinboxes[0][0].setValue(2.0)
     dialog.scale_button.click()
-    assert len(observed) == 1
+    assert len(seen) == 1
     np.testing.assert_allclose(dialog._draft.cell[0, 0], 3.0)
-    np.testing.assert_allclose(atoms.cell[0, 0], 1.0)
+    np.testing.assert_allclose(source.cell[0, 0], 1.0)
     dialog._on_ok()
     np.testing.assert_allclose(dialog._result.cell[0, 0], 3.0)
     dialog.close()
 
 
-def test_cancelled_transform_keeps_uncommitted_lattice_edit(monkeypatch):
+def test_cancel_transform_keeps_staged_lattice_edit(monkeypatch):
     monkeypatch.setattr(editor_module, "scale_atoms", lambda atoms, parent=None: None)
     dialog = _dialog()
     dialog.lattice_spinboxes[0][0].setValue(2.0)
@@ -114,13 +127,58 @@ def test_cancelled_transform_keeps_uncommitted_lattice_edit(monkeypatch):
     dialog.close()
 
 
-def test_cluster_disables_generic_transforms():
-    atoms = _atoms()
-    atoms.set_array("sprkkr_embedding", np.zeros((len(atoms), 6), dtype=int))
-    dialog = _dialog(atoms)
-    assert not dialog.scale_button.isEnabled()
-    assert not dialog.repeat_button.isEnabled()
+def test_embedded_page_edits_host_and_hides_shared_preview():
+    atoms = _cluster()
+    dialog = _dialog(atoms, allow_build_embedding=True)
+    assert [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())] == [
+        "Overview", "Sites", "Lattice", "Transform", "Embedded"
+    ]
+    assert dialog.tabs.currentIndex() == 0
+    assert dialog.scroll.isEnabled()
+    assert dialog.lattice_spinboxes[0][0].isEnabled()
+    assert dialog.scale_button.isEnabled()
+    assert dialog.repeat_button.isEnabled()
     assert not dialog.rotate_button.isEnabled()
+    assert all(not row.break_btn.isEnabled() for row in dialog._letter_widgets)
+    assert dialog._embedded_editor is not None
+    dialog.tabs.setCurrentIndex(4)
+    assert dialog._shared_preview.isHidden()
+    dialog.tabs.setCurrentIndex(0)
+    assert not dialog._shared_preview.isHidden()
+    dialog.close()
+
+
+def test_editing_host_lattice_rebases_cluster_displacement_without_touching_original():
+    atoms = _cluster()
+    original = atoms.positions.copy()
+    dialog = _dialog(atoms)
+    dialog.tabs.setCurrentIndex(2)
+    dialog.lattice_spinboxes[0][0].setValue(4.0)
+    candidate = dialog._candidate()
+    assert candidate is not atoms
+    assert candidate.embedding_host is not atoms.embedding_host
+    np.testing.assert_allclose(candidate.sites[0].embedding.displacement,
+                               [0.08, -0.01, 0.02])
+    np.testing.assert_allclose(atoms.positions, original)
+    dialog._on_ok()
+    assert dialog._result is not None
+    dialog.close()
+
+
+def test_newly_built_embedded_structure_adds_and_selects_page():
+    dialog = _dialog()
+    cluster = _cluster()
+    assert dialog._accept_operation_result(cluster, dialog._working_atoms)
+    assert dialog.tabs.currentIndex() == 4
+    assert dialog.tabs.tabText(4) == "Embedded"
+    assert dialog._embedded_editor is not None
+    dialog.close()
+
+
+def test_0d_transform_rejects_unknown_site_mapping():
+    dialog = _dialog(_cluster())
+    assert not dialog.rotate_button.isEnabled()
+    assert "mapping" in dialog.rotate_button.toolTip()
     dialog.close()
 
 
@@ -142,43 +200,36 @@ def test_guided_edit_commits_accepted_result_once(monkeypatch):
     assert controller.atoms is not source
 
 
-def test_guided_edit_cancel_leaves_workspace_revision_untouched(monkeypatch):
+def test_guided_cancel_keeps_workspace_revision(monkeypatch):
     _app = QApplication.instance() or QApplication([])
     controller = WorkspaceController()
     source = _atoms()
     controller.replace_structure(source)
     generation = controller.structure_generation
-    monkeypatch.setattr(
-        editor_module, "select_structure_editor", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(editor_module, "select_structure_editor", lambda *_a, **_k: None)
     assert not structure_flows.edit_structure(controller, None)
     assert controller.atoms is source
     assert controller.structure_generation == generation
 
 
-def test_cluster_generic_occupation_edit_is_disabled():
-    atoms = _atoms()
-    atoms.set_array("sprkkr_embedding", np.zeros((len(atoms), 6), dtype=int))
-    dialog = _dialog(atoms)
-    assert not dialog.scroll.isEnabled()
-    assert dialog.tabs.currentIndex() == 3
-    assert not dialog.site_notice.isHidden()
-    assert not dialog.lattice_spinboxes[0][0].isEnabled()
-    assert dialog.embedding_button.isEnabled() is False  # capability not passed
+
+def test_overview_reports_hall_number_for_3d_and_left_right_bulk_for_2d():
+    from ase.build import bulk
+    from ase2sprkkr.sprkkr.build import semiinfinite_system
+    dialog = _dialog()
+    assert "Space group:" in dialog.overview.symmetry.text()
+    assert "Hall symbol:" in dialog.overview.symmetry.text()
+    assert "No." in dialog.overview.symmetry.text()
     dialog.close()
 
-
-def test_cluster_with_incomplete_generic_occupation_still_supports_embedding():
-    # The native embedding editor owns cluster occupation semantics. The
-    # generic read-only draft must not prevent launching it or accepting no-op.
-    atoms = _atoms()
-    atoms.set_array("sprkkr_embedding", np.zeros((len(atoms), 6), dtype=int))
-    atoms.info["occupancy"] = {"0": {"Fe": 0.0}}
-    dialog = _dialog(atoms, allow_build_embedding=True)
-    assert not dialog._draft.is_valid()
-    assert dialog.ok_btn.isEnabled()
-    assert dialog.embedding_button.isEnabled()
-    assert dialog._candidate() is atoms
-    dialog._on_ok()
-    assert dialog._result is None
+    slab = semiinfinite_system(bulk("Cu", "sc", a=2.0), (0, 0))
+    dialog = _dialog(slab)
+    assert not dialog.overview.bulk_boxes["left"][0].isHidden()
+    assert not dialog.overview.bulk_boxes["right"][0].isHidden()
+    left_text = dialog.overview.bulk_boxes["left"][1].text()
+    right_text = dialog.overview.bulk_boxes["right"][1].text()
+    assert "Space group:" in left_text
+    assert "Space group:" in right_text
+    assert "Hall symbol:" in left_text
+    assert "Hall symbol:" in right_text
     dialog.close()

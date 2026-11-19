@@ -62,8 +62,12 @@ class _PendingDisplacement:
 class BuildEmbeddingDialog(QDialog):
     """Build/edit a cluster without mutating its periodic host."""
 
-    def __init__(self, atoms, parent: QWidget | None = None):
+    def __init__(self, atoms, parent: QWidget | None = None, *, embedded=False):
         super().__init__(parent)
+        self._embedded = embedded
+        self._applied = False
+        if embedded:
+            self.setWindowFlags(Qt.WindowType.Widget)
         host, cluster = embedding_source(atoms)
         self.draft = EmbeddingDraft(host, cluster)
         self.undo_stack = EmbeddingUndoStack(self.draft, self)
@@ -407,6 +411,10 @@ class BuildEmbeddingDialog(QDialog):
             button.setFixedWidth(width)
         footer.addStretch(1)
         footer.addWidget(self.buttons)
+        if self._embedded:
+            # The parent Structure Editor owns Apply / Cancel. Undo and redo
+            # remain local to the embedded-site editing draft.
+            self.buttons.hide()
         root.addLayout(footer)
 
     def _show_plot_hint(self):
@@ -1216,6 +1224,7 @@ class BuildEmbeddingDialog(QDialog):
         self._refresh_sites()
 
     def _accept(self):
+        self._applied = False
         self._apply_pending_displacement()
         def action():
             if self._selected_site is not None and not self.occupation.is_valid():
@@ -1241,8 +1250,30 @@ class BuildEmbeddingDialog(QDialog):
                 if self.draft.is_unchanged()
                 else self.draft.to_atoms(allow_radial_reset=radial_reset)
             )
-            self.accept()
+            self._applied = True
+            if not self._embedded:
+                self.accept()
         self._guard(action)
+
+    def finalize_embedded(self) -> bool:
+        """Validate and export one staged embedded draft without closing a tab."""
+        if not self._embedded:
+            raise RuntimeError("finalize_embedded is for inline editors")
+        self._accept()
+        return self._applied
+
+    def closeEvent(self, event):
+        # This editor installs application-wide listeners; an inline tab can
+        # be replaced several times in a single structure editing session.
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+            for slot in (self._expansion_focus_changed, self._editing_focus_changed):
+                try:
+                    app.focusChanged.disconnect(slot)
+                except (TypeError, RuntimeError):
+                    pass
+        super().closeEvent(event)
 
 
 def select_build_embedding_structure(atoms, parent: QWidget | None = None):
