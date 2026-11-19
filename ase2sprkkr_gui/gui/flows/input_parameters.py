@@ -84,6 +84,27 @@ def load_input_parameters(
     return True
 
 
+def choose_and_save_input_parameters(
+    parameters: InputParameters,
+    parent: QWidget | None,
+) -> bool:
+    """Save a detached input snapshot, independently of the workspace and run."""
+    file_path, _ = QFileDialog.getSaveFileName(
+        parent,
+        "Save SPRKKR Input File",
+        "",
+        _INPUT_FILE_FILTER,
+    )
+    if not file_path:
+        return False
+    try:
+        parameters.to_file(Path(file_path).expanduser())
+    except Exception as exc:  # noqa: BLE001 - native serializers have diverse failures
+        QMessageBox.critical(parent, "Save Input Failed", str(exc))
+        return False
+    return True
+
+
 def edit_input_parameters_file(
     session: InputParametersSession,
     parent: QWidget | None,

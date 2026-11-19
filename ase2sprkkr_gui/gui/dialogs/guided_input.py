@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 
 from ase2sprkkr import InputParameters
@@ -26,6 +27,7 @@ from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometr
 from ase2sprkkr_gui.gui.dialogs.expert_input import edit_input_parameters_session
 from ase2sprkkr_gui.gui.flows.input_parameters import (
     choose_and_load_input_parameters,
+    choose_and_save_input_parameters,
     edit_input_parameters_file,
 )
 from ase2sprkkr_gui.gui.input_parameters.bindings import InputParameterPath
@@ -79,8 +81,10 @@ class GuidedInputParametersDialog(QDialog):
         parent: QWidget | None = None,
         *,
         atoms: Any = None,
+        calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
     ) -> None:
         super().__init__(parent)
+        self._calculation_unavailable_reason = calculation_unavailable_reason
         self.task = task.lower()
         self.atoms = atoms
         definition = guided_task_definition(self.task)
@@ -129,7 +133,31 @@ class GuidedInputParametersDialog(QDialog):
         title = QLabel(self.spec.title, self)
         title.setObjectName("guidedDialogTitle")
         title.setFont(heading_font(title.font(), "dialog"))
-        root.addWidget(title)
+        title_row = QHBoxLayout()
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+
+        # Editing history is a global dialog action, not a page-navigation
+        # action. Keep it at the top right, away from file/run controls.
+        self.undo_button = QToolButton(self)
+        self.undo_button.setText("Undo")
+        self.undo_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.undo_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack))
+        self.undo_button.setStyleSheet(
+            button_stylesheet(self.palette(), "QToolButton")
+        )
+        self.undo_button.clicked.connect(self.session.undo_stack.undo)
+        title_row.addWidget(self.undo_button)
+        self.redo_button = QToolButton(self)
+        self.redo_button.setText("Redo")
+        self.redo_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.redo_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward))
+        self.redo_button.setStyleSheet(
+            button_stylesheet(self.palette(), "QToolButton")
+        )
+        self.redo_button.clicked.connect(self.session.undo_stack.redo)
+        title_row.addWidget(self.redo_button)
+        root.addLayout(title_row)
         kind_label = structure_kind_label(detect_structure_kind(self.atoms))
         if kind_label is not None:
             self.structure_type_label = QLabel(f"Structure type: {kind_label}", self)
@@ -177,29 +205,16 @@ class GuidedInputParametersDialog(QDialog):
         self.navigation.currentRowChanged.connect(self._select_page_index)
 
         footer = QHBoxLayout()
-        self.undo_button = QToolButton(self)
-        self.undo_button.setText("Undo")
-        self.undo_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.undo_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack))
-        self.undo_button.setStyleSheet(
-            button_stylesheet(self.palette(), "QToolButton")
-        )
-        self.undo_button.clicked.connect(self.session.undo_stack.undo)
-        footer.addWidget(self.undo_button)
-        self.redo_button = QToolButton(self)
-        self.redo_button.setText("Redo")
-        self.redo_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.redo_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward))
-        self.redo_button.setStyleSheet(
-            button_stylesheet(self.palette(), "QToolButton")
-        )
-        self.redo_button.clicked.connect(self.session.undo_stack.redo)
-        footer.addWidget(self.redo_button)
-
         load = QPushButton("Load input…", self)
         load.setStyleSheet(button_stylesheet(self.palette()))
         load.clicked.connect(self._load_input)
         footer.addWidget(load)
+        self.save_input_button = QPushButton("Save Input…", self)
+        self.save_input_button.setObjectName("guidedSaveInput")
+        self.save_input_button.setStyleSheet(button_stylesheet(self.palette()))
+        self.save_input_button.setToolTip("Save the edited SPR-KKR input file without starting a calculation")
+        self.save_input_button.clicked.connect(self._save_input)
+        footer.addWidget(self.save_input_button)
         self.edit_input_button = QPushButton("Edit input file…", self)
         self.edit_input_button.setStyleSheet(button_stylesheet(self.palette()))
         self.edit_input_button.clicked.connect(self._edit_input_file)
@@ -222,12 +237,13 @@ class GuidedInputParametersDialog(QDialog):
         cancel.setStyleSheet(button_stylesheet(self.palette()))
         cancel.clicked.connect(self.reject)
         footer.addWidget(cancel)
-        calculate = QPushButton("Calculate", self)
-        calculate.setStyleSheet(button_stylesheet(self.palette(), primary=True))
-        calculate.setDefault(True)
-        calculate.setIcon(QIcon(str(icon_path("system-run.svg"))))
-        calculate.clicked.connect(self._accept)
-        footer.addWidget(calculate)
+        self.calculate_button = QPushButton("Calculate", self)
+        self.calculate_button.setObjectName("guidedCalculate")
+        self.calculate_button.setStyleSheet(button_stylesheet(self.palette(), primary=True))
+        self.calculate_button.setDefault(True)
+        self.calculate_button.setIcon(QIcon(str(icon_path("system-run.svg"))))
+        self.calculate_button.clicked.connect(self._accept)
+        footer.addWidget(self.calculate_button)
         root.addLayout(footer)
 
         self.navigation.setCurrentRow(0)
@@ -256,6 +272,8 @@ class GuidedInputParametersDialog(QDialog):
         stack.redoTextChanged.connect(self._update_history_buttons)
         stack.indexChanged.connect(self._update_history_buttons)
         self.session.historyApplied.connect(self._history_applied)
+        self.session.valueChanged.connect(self._update_calculation_availability)
+        self.session.parametersReplaced.connect(self._update_calculation_availability)
 
     def _history_applied(self, paths, source_page, field_indices) -> None:
         """Defer history navigation until restoring the undo command has finished."""
@@ -317,6 +335,41 @@ class GuidedInputParametersDialog(QDialog):
             navigation.item.setText(text)
             navigation.label.setText(text)
         self._update_history_buttons()
+        self._update_calculation_availability()
+
+    def _update_calculation_availability(self, *_args: Any) -> None:
+        """Explain why the edited input cannot currently be submitted.
+
+        A standalone input-file entry point can supply additional constraints
+        (e.g. executable/task compatibility or missing required calculation state)
+        without teaching this editor about the workspace or run controller.
+        """
+        parameters = self.session.working_parameters
+        actual_task = InputParameters.is_task_name(parameters.task_name)
+        definition = guided_task_definition(self.task)
+        if not actual_task or not definition.accepts_backend_task(actual_task):
+            expected = "/".join(name.upper() for name in self._compatible_backend_tasks)
+            reason = (
+                f"This editor accepts {expected} input, not "
+                f"{parameters.task_name or 'an unknown task'}."
+            )
+        elif self.form.errors:
+            reason = "Correct the highlighted input values before calculating."
+        else:
+            try:
+                validate_setup(parameters)
+            except InputParametersValidationError as error:
+                reason = f"Invalid calculation input: {error}"
+            else:
+                reason = (
+                    self._calculation_unavailable_reason(parameters)
+                    if self._calculation_unavailable_reason is not None
+                    else None
+                )
+        self.calculate_button.setEnabled(not reason)
+        self.calculate_button.setToolTip(
+            reason or "Run a calculation with the edited SPR-KKR input"
+        )
 
     def group_note(self, group_id: str) -> QLabel:
         """Return a group's note widget for UI tests and accessibility checks."""
@@ -360,6 +413,9 @@ class GuidedInputParametersDialog(QDialog):
         return True
 
     def _accept(self) -> None:
+        self._update_calculation_availability()
+        if not self.calculate_button.isEnabled():
+            return
         if not self._commit_pending():
             QMessageBox.warning(self, "Invalid Settings", "Correct the highlighted value before calculating.")
             return
@@ -406,6 +462,15 @@ class GuidedInputParametersDialog(QDialog):
         if not self._commit_pending():
             return
         edit_input_parameters_file(self.session, self)
+
+    def _save_input(self) -> None:
+        """Save the current isolated draft without accepting the calculation."""
+        if not self._commit_pending():
+            QMessageBox.warning(
+                self, "Cannot Save Input", "Correct the highlighted input value before saving."
+            )
+            return
+        choose_and_save_input_parameters(self.session.result(), self)
 
     def parameters(self) -> InputParameters:
         """Return a detached copy of the currently edited parameters."""
