@@ -131,7 +131,7 @@ def test_embedded_page_edits_host_and_hides_shared_preview():
     atoms = _cluster()
     dialog = _dialog(atoms, allow_build_embedding=True)
     assert [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())] == [
-        "Overview", "Sites", "Lattice", "Transform", "Embedded"
+        "Overview", "Embedded", "Sites", "Lattice", "Transform"
     ]
     assert dialog.tabs.currentIndex() == 0
     assert dialog.scroll.isEnabled()
@@ -141,10 +141,12 @@ def test_embedded_page_edits_host_and_hides_shared_preview():
     assert not dialog.rotate_button.isEnabled()
     assert all(not row.break_btn.isEnabled() for row in dialog._letter_widgets)
     assert dialog._embedded_editor is not None
-    dialog.tabs.setCurrentIndex(4)
-    assert dialog._shared_preview.isHidden()
+    dialog.tabs.setCurrentIndex(1)
+    assert dialog.preview_stack.isHidden()
     dialog.tabs.setCurrentIndex(0)
-    assert not dialog._shared_preview.isHidden()
+    assert not dialog.preview_stack.isHidden()
+    assert dialog.preview_stack.currentWidget() is dialog._overview_previews
+    assert dialog._shared_preview.isHidden()
     dialog.close()
 
 
@@ -152,7 +154,7 @@ def test_editing_host_lattice_rebases_cluster_displacement_without_touching_orig
     atoms = _cluster()
     original = atoms.positions.copy()
     dialog = _dialog(atoms)
-    dialog.tabs.setCurrentIndex(2)
+    dialog.tabs.setCurrentIndex(3)
     dialog.lattice_spinboxes[0][0].setValue(4.0)
     candidate = dialog._candidate()
     assert candidate is not atoms
@@ -169,8 +171,8 @@ def test_newly_built_embedded_structure_adds_and_selects_page():
     dialog = _dialog()
     cluster = _cluster()
     assert dialog._accept_operation_result(cluster, dialog._working_atoms)
-    assert dialog.tabs.currentIndex() == 4
-    assert dialog.tabs.tabText(4) == "Embedded"
+    assert dialog.tabs.currentIndex() == 1
+    assert dialog.tabs.tabText(1) == "Embedded"
     assert dialog._embedded_editor is not None
     dialog.close()
 
@@ -232,4 +234,114 @@ def test_overview_reports_hall_number_for_3d_and_left_right_bulk_for_2d():
     assert "Space group:" in right_text
     assert "Hall symbol:" in left_text
     assert "Hall symbol:" in right_text
+    dialog.close()
+
+
+
+def test_info_headings_and_unframed_sites():
+    from PyQt6.QtWidgets import QFrame
+
+    dialog = _dialog()
+    assert dialog.overview.info_box.title() == "Structure information"
+    assert dialog.overview.table_box.title() == "Atomic sites"
+    assert "font-weight: 700" in dialog.overview.info_box.styleSheet()
+    assert "font-weight: 700" in dialog.overview.table_box.styleSheet()
+    assert dialog.scroll.frameShape() == QFrame.Shape.NoFrame
+    dialog.close()
+
+
+def test_guided_style_transform_actions():
+    dialog = _dialog()
+    assert dialog.scale_button.property("workflowActionTitle") == "Scale lattice"
+    assert dialog.repeat_button.property("workflowActionTitle") == "Repeat structure"
+    assert dialog.rotate_button.property("workflowActionTitle") == (
+        "Rotate structure (Miller indices)"
+    )
+    assert dialog.build_surface_button.property("workflowActionTitle") == "Create 2D surface"
+    assert dialog.embedding_button.property("workflowActionTitle") == "Build embedded cluster"
+    dialog.close()
+
+
+def test_edit_lengths_angles_preserves_fractional_coordinates():
+    from ase2sprkkr_gui.physics.cell_parameters import lengths_and_angles
+
+    atoms = _atoms()
+    original = atoms.get_scaled_positions(wrap=False).copy()
+    dialog = _dialog(atoms)
+    dialog.tabs.setCurrentIndex(2)
+    dialog.cell_parameter_spins["a"].setValue(2.5)
+    dialog.cell_parameter_spins["gamma"].setValue(106)
+    result = dialog._candidate()
+    np.testing.assert_allclose(
+        result.get_scaled_positions(wrap=False), original, atol=1e-8,
+    )
+    np.testing.assert_allclose(
+        lengths_and_angles(result.cell)[0], 2.5, atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        lengths_and_angles(result.cell)[5], 106, atol=1e-5,
+    )
+    assert not np.allclose(result.positions, atoms.positions)
+    np.testing.assert_allclose(np.asarray(atoms.cell), np.eye(3))
+    dialog.close()
+
+
+def test_lattice_host_potential_label_and_cell_parameters_rebase_cluster():
+    from ase2sprkkr.sprkkr.embedding import host_atoms
+    from ase2sprkkr_gui.physics.cell_parameters import lengths_and_angles
+
+    cluster = _cluster()
+    old_host = host_atoms(cluster.embedding_host)
+    fractions = old_host.get_scaled_positions(wrap=False).copy()
+    dialog = _dialog(cluster)
+    dialog.tabs.setCurrentIndex(3)
+    assert "HOST POTENTIAL" in dialog.lattice_note.text()
+    assert "Host potential" in dialog.lattice_group.title()
+    dialog.cell_parameter_spins["a"].setValue(3.25)
+    candidate = dialog._candidate()
+    new_host = host_atoms(candidate.embedding_host)
+    np.testing.assert_allclose(
+        new_host.get_scaled_positions(wrap=False), fractions, atol=1e-8,
+    )
+    np.testing.assert_allclose(
+        lengths_and_angles(new_host.cell)[0], 3.25, atol=1e-5,
+    )
+    assert not np.allclose(new_host.positions, old_host.positions)
+    assert not np.array_equal(candidate.positions, cluster.positions)
+    np.testing.assert_allclose(
+        np.asarray(old_host.cell), np.diag([2, 2, 4]),
+    )
+    dialog.close()
+
+
+def test_host_table_highlights_all_matching_cluster_atoms():
+    host = Atoms(
+        "Fe2", positions=[[0, 0, 0], [1, 1, 1]],
+        cell=[2, 2, 4], pbc=True,
+    )
+    cluster = SPRKKRAtoms.from_embedding(
+        host, [
+            (0, (0, 0, 0), "Co"),
+            (0, (1, 0, 0), "Co"),
+            (1, (0, 0, 0), "Ni"),
+        ],
+    )
+    dialog = _dialog(cluster)
+    previews = dialog._overview_previews
+    assert previews.splitter.count() == 2
+    assert dialog.overview.site_table.rowCount() == 3
+
+    # Cluster mode only highlights the selected atom.
+    assert tuple(np.flatnonzero(previews.cluster_preview._widths > 1)) == (0,)
+    dialog.overview.host_radio.setChecked(True)
+    assert dialog.overview.site_table.rowCount() == 2
+    assert tuple(np.flatnonzero(previews.cluster_preview._widths > 1)) == (0, 1)
+    assert not np.any(previews.host_preview._widths > 1)
+
+    dialog.overview.site_table.setCurrentCell(1, 0)
+    assert tuple(np.flatnonzero(previews.cluster_preview._widths > 1)) == (2,)
+    dialog.overview.cluster_radio.setChecked(True)
+    dialog.overview.site_table.setCurrentCell(1, 0)
+    assert tuple(np.flatnonzero(previews.cluster_preview._widths > 1)) == (1,)
+    assert not np.any(previews.host_preview._widths > 1)
     dialog.close()
