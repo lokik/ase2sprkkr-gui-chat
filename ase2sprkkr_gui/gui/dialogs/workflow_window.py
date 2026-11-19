@@ -470,13 +470,16 @@ class WorkflowWindow(QMainWindow):
         )
 
     def _continue_recent(self, kind: RecentLaunchKind, file_path: str) -> None:
-        file_flows.continue_recent(
-            self.controller,
-            self.recent_history,
-            kind,
-            file_path,
-            self,
-        )
+        if kind == "input":
+            custom_flow.load_custom_input(
+                self.controller, self.recent_history, self, file_path,
+                track_launch_monitor=self._track_launch_monitor,
+                project_repository=self.project_repository,
+            )
+        else:
+            file_flows.continue_recent(
+                self.controller, self.recent_history, kind, file_path, self,
+            )
         if self.controller.atoms is None:
             self._refresh()
 

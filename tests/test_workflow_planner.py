@@ -74,6 +74,7 @@ class Workspace:
 class RecentSnapshot:
     structures: tuple[str, ...] = ()
     outputs: tuple[str, ...] = ()
+    inputs: tuple[str, ...] = ()
     last_kind: str | None = None
 
     def paths(self, kind):
@@ -81,6 +82,8 @@ class RecentSnapshot:
             return self.structures
         if kind == "output":
             return self.outputs
+        if kind == "input":
+            return self.inputs
         return ()
 
 
@@ -144,12 +147,14 @@ def test_initial_plan_uses_typed_commands_and_planned_recent_menu():
     assert continue_action.tooltip == "/tmp/scf.out"
     assert tuple(group.title for group in continue_action.menu) == (
         "Structures",
+        "Inputs",
         "Outputs",
     )
     assert tuple(item.command.path for item in continue_action.menu[0].items) == (
         "/tmp/Fe.cif",
     )
-    assert tuple(item.command.path for item in continue_action.menu[1].items) == (
+    assert continue_action.menu[1].items == ()
+    assert tuple(item.command.path for item in continue_action.menu[2].items) == (
         "/tmp/scf.out",
         "/tmp/older.out",
     )
@@ -171,6 +176,7 @@ def test_initial_recent_menu_keeps_empty_kind_visible():
     assert recent_action.menu[0].items
     assert recent_action.menu[1].items == ()
     assert recent_action.menu[1].empty_text == "(No recent files)"
+    assert recent_action.menu[2].empty_text == "(No recent files)"
 
 
 def test_current_structure_plan_has_canonical_group_order_without_output_loader():
@@ -253,8 +259,9 @@ def test_continue_recent_is_semantic_and_validates_kind():
     command = ContinueRecent("structure", "/tmp/Fe.cif")
     assert command.kind == "structure"
     assert command.path == "/tmp/Fe.cif"
+    assert ContinueRecent("input", "/tmp/input.inp").kind == "input"
     with pytest.raises(ValueError, match="continuation kind"):
-        ContinueRecent("input", "/tmp/input.inp")  # type: ignore[arg-type]
+        ContinueRecent("invalid", "/tmp/bad")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

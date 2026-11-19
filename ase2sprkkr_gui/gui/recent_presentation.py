@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable, Literal, Protocol
 
 RecentFileKind = Literal["structure", "input", "output"]
-RecentLaunchKind = Literal["structure", "output"]
+RecentLaunchKind = Literal["structure", "input", "output"]
 RECENT_MENU_EMPTY_TEXT = "(No recent files)"
 
 
@@ -21,14 +21,14 @@ class RecentHistorySnapshot(Protocol):
 
 @dataclass(frozen=True)
 class RecentLaunch:
-    """One recent structure/output that may be continued."""
+    """One recent structure, input or output that may be continued."""
 
     kind: RecentLaunchKind
     path: str
 
     def __post_init__(self) -> None:
-        if self.kind not in {"structure", "output"}:
-            raise ValueError("Recent launch kind must be 'structure' or 'output'.")
+        if self.kind not in {"structure", "input", "output"}:
+            raise ValueError("Recent launch kind must be 'structure', 'input' or 'output'.")
 
     @property
     def title(self) -> str:
@@ -94,7 +94,8 @@ def recent_menu_items(
 def _preferred_recent_launch(snapshot: RecentHistorySnapshot) -> RecentLaunch | None:
     structures = snapshot.paths("structure")
     outputs = snapshot.paths("output")
-    if not structures and not outputs:
+    inputs = snapshot.paths("input")
+    if not structures and not outputs and not inputs:
         return None
 
     last_kind = snapshot.last_kind
@@ -102,9 +103,13 @@ def _preferred_recent_launch(snapshot: RecentHistorySnapshot) -> RecentLaunch | 
         return RecentLaunch("structure", structures[0])
     if last_kind == "output" and outputs:
         return RecentLaunch("output", outputs[0])
+    if last_kind == "input" and inputs:
+        return RecentLaunch("input", inputs[0])
     if outputs:
         return RecentLaunch("output", outputs[0])
-    return RecentLaunch("structure", structures[0])
+    if structures:
+        return RecentLaunch("structure", structures[0])
+    return RecentLaunch("input", inputs[0])
 
 
 def recent_launch_presentation(
@@ -118,6 +123,11 @@ def recent_launch_presentation(
             "Structures",
             "structure",
             recent_menu_items(snapshot.paths("structure"), base=base),
+        ),
+        RecentLaunchGroup(
+            "Inputs",
+            "input",
+            recent_menu_items(snapshot.paths("input"), base=base),
         ),
         RecentLaunchGroup(
             "Outputs",
