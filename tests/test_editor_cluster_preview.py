@@ -9,6 +9,8 @@ from ase2sprkkr_gui.gui.widgets.structures.editor_preview import (
     cluster_preview_style,
     host_site_cluster_indices,
     site_type_colors,
+    species_colors,
+    atom_colors,
     site_type_group_keys,
 )
 
@@ -31,6 +33,9 @@ class _Atoms:
     def get_chemical_symbols(self):
         return self._symbols
 
+    def get_atomic_numbers(self):
+        return np.asarray([26, 26, 26])
+
 
 def test_grouping_uses_site_type_identity_and_not_element():
     atoms = _Atoms()
@@ -40,10 +45,18 @@ def test_grouping_uses_site_type_identity_and_not_element():
     colors = site_type_colors(atoms)
     assert colors[0] == colors[1]
     assert colors[0] != colors[2]
+    species = species_colors(atoms)
+    assert species[0] == species[1] == species[2]
+    np.testing.assert_array_equal(atom_colors(atoms, "species"), species)
+    np.testing.assert_array_equal(atom_colors(atoms, "site_type"), colors)
     _, sizes, outlines, widths = cluster_preview_style(atoms, (1,))
     assert widths[1] > widths[0]
     assert sizes[1] > sizes[2]
     assert outlines[1] != outlines[0]
+    selected_species_colors, _, _, _ = cluster_preview_style(
+        atoms, (1,), color_mode="species",
+    )
+    np.testing.assert_array_equal(selected_species_colors, species)
 
 
 def test_host_site_selects_all_cluster_periodic_images():

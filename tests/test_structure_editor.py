@@ -720,7 +720,8 @@ def test_info_headings_and_unframed_sites():
         for section in sections
     )
     assert dialog.scroll.frameShape() == QFrame.Shape.NoFrame
-    assert dialog.overview.site_table.horizontalHeader().count() == 8
+    assert dialog.overview.site_table.horizontalHeader().count() == 9
+    assert dialog.overview.site_table.horizontalHeaderItem(2).text() == "Color"
     assert not hasattr(dialog, "cell_summary")
     dialog.close()
 
@@ -819,6 +820,65 @@ def test_host_table_highlights_all_matching_cluster_atoms():
     dialog.overview.site_table.setCurrentCell(1, 0)
     assert tuple(np.flatnonzero(previews.cluster_preview._widths > 1)) == (1,)
     assert not np.any(previews.host_preview._widths > 1)
+    dialog.close()
+
+
+def test_info_color_by_species_switch_updates_table_and_preview():
+    from ase.data.colors import jmol_colors
+    from matplotlib.colors import to_hex
+
+    atoms = _atoms()
+    atoms.set_array("spacegroup_kinds", np.array([0, 1]))
+    atoms.info["occupancy"] = {"0": {"Fe": 1.0}, "1": {"Fe": 1.0}}
+    dialog = _dialog(atoms)
+    overview = dialog.overview
+    previews = dialog._overview_previews
+    table = overview.site_table
+
+    def swatch(row):
+        return table.item(row, 2).background().color().name()
+
+    assert overview.color_mode == "site_type"
+    assert dialog.preview_stack.currentWidget() is previews
+    assert previews.cluster_label.text() == "Structure"
+    assert previews.host_page.isHidden()
+    assert swatch(0) != swatch(1)
+    assert list(previews.cluster_preview._colors) == [swatch(0), swatch(1)]
+
+    table.setCurrentCell(1, 0)
+    overview.color_by.setCurrentIndex(1)
+    assert overview.color_mode == "species"
+    assert table.currentRow() == 1
+    expected = to_hex(jmol_colors[26])
+    assert swatch(0) == swatch(1) == expected
+    assert list(previews.cluster_preview._colors) == [expected, expected]
+
+    dialog.tabs.setCurrentWidget(dialog._sites_page)
+    dialog.tabs.setCurrentWidget(overview)
+    assert overview.color_mode == "species"
+    assert list(previews.cluster_preview._colors) == [expected, expected]
+    dialog.close()
+
+
+def test_cluster_host_color_legend_matches_both_previews():
+    dialog = _dialog(_cluster())
+    overview = dialog.overview
+    previews = dialog._overview_previews
+    table = overview.site_table
+
+    def swatches():
+        return [table.item(i, 2).background().color().name()
+                for i in range(table.rowCount())]
+
+    assert previews.cluster_label.text() == "Embedded cluster"
+    assert not previews.host_page.isHidden()
+    assert swatches() == list(previews.cluster_preview._colors)
+    overview.host_radio.setChecked(True)
+    assert swatches() == list(previews.host_preview._colors)
+    overview.color_by.setCurrentIndex(1)
+    assert swatches() == list(previews.host_preview._colors)
+    overview.cluster_radio.setChecked(True)
+    assert swatches() == list(previews.cluster_preview._colors)
     dialog.close()
 
 

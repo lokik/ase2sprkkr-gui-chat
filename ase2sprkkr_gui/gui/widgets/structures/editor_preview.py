@@ -9,6 +9,7 @@ from __future__ import annotations
 from itertools import product
 
 import numpy as np
+from ase.data.colors import jmol_colors
 from matplotlib import colormaps
 from matplotlib.colors import to_hex
 from PyQt6.QtCore import Qt
@@ -46,10 +47,29 @@ def site_type_colors(atoms):
     return np.asarray([colors[key] for key in keys])
 
 
-def cluster_preview_style(atoms, selected=()):
+def species_colors(atoms):
+    """Use the same Jmol element palette as the Guided structure preview."""
+    numbers = atoms.get_atomic_numbers()
+    return np.asarray([
+        to_hex(jmol_colors[int(number)])
+        if 0 <= int(number) < len(jmol_colors) else "#8c8c8c"
+        for number in numbers
+    ], dtype=object)
+
+
+def atom_colors(atoms, mode="site_type"):
+    """One source of colors for the site table and both editor previews."""
+    if mode == "site_type":
+        return site_type_colors(atoms)
+    if mode == "species":
+        return species_colors(atoms)
+    raise ValueError(f"Unknown atom color mode: {mode}")
+
+
+def cluster_preview_style(atoms, selected=(), *, color_mode="site_type"):
     """Highlighted atoms remain visible with a larger marker and bright ring."""
     count = len(atoms)
-    colors = site_type_colors(atoms)
+    colors = atom_colors(atoms, color_mode)
     sizes = marker_areas(atoms, 55.0)
     outlines = np.full(count, "#333a42", dtype=object)
     widths = np.full(count, 0.65)
@@ -85,6 +105,7 @@ class EditorClusterHostPreviews(QWidget):
         self._host = None
         self._scope = "cluster"
         self._row = -1
+        self._color_mode = "site_type"
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         self.splitter = QSplitter(Qt.Orientation.Vertical, self)
@@ -92,6 +113,7 @@ class EditorClusterHostPreviews(QWidget):
         root.addWidget(self.splitter, 1)
 
         cluster_page = QWidget(self.splitter)
+        self.cluster_page = cluster_page
         cluster_layout = QVBoxLayout(cluster_page)
         self.cluster_label = QLabel("Embedded cluster", cluster_page)
         label_font = self.cluster_label.font()
@@ -105,6 +127,7 @@ class EditorClusterHostPreviews(QWidget):
         self.splitter.addWidget(cluster_page)
 
         host_page = QWidget(self.splitter)
+        self.host_page = host_page
         host_layout = QVBoxLayout(host_page)
         self.host_label = QLabel("Host structure", host_page)
         self.host_label.setFont(label_font)
@@ -116,35 +139,61 @@ class EditorClusterHostPreviews(QWidget):
         self.splitter.addWidget(host_page)
         self.splitter.setSizes([300, 300])
 
+    def set_color_mode(self, mode):
+        """Restyle both previews without changing their camera or selection."""
+        if mode not in ("site_type", "species"):
+            raise ValueError(f"Unknown atom color mode: {mode}")
+        if mode == self._color_mode:
+            return
+        self._color_mode = mode
+        self._render_host()
+        self.update_selection(self._scope, self._row)
+
+    def _render_host(self):
+        if self._host is None:
+            return
+        self.host_preview.set_points(
+            self._host.get_positions(),
+            atom_colors(self._host, self._color_mode),
+            marker_areas(self._host, 55.0, potential=self._cluster.embedding_host),
+            cell_corners=_cell_corners(self._host),
+            outlines="#333a42", widths=0.65,
+        )
+
     def set_structure(self, cluster):
+        """Show one structure, or a cluster paired with its periodic host."""
         self._cluster = cluster
-        self._host = host_atoms(cluster.embedding_host) if cluster is not None else None
-        if self._host is not None:
-            colors = site_type_colors(self._host)
-            count = len(self._host)
-            self.host_preview.set_points(
-                self._host.get_positions(), colors,
-                marker_areas(self._host, 55.0, potential=self._cluster.embedding_host),
-                cell_corners=_cell_corners(self._host),
-                outlines="#333a42", widths=0.65,
-            )
+        embedded = (
+            cluster is not None
+            and "sprkkr_embedding" in getattr(cluster, "arrays", {})
+        )
+        self._host = host_atoms(cluster.embedding_host) if embedded else None
+        self.cluster_label.setText("Embedded cluster" if embedded else "Structure")
+        self.host_page.setVisible(self._host is not None)
+        self._render_host()
         self.update_selection(self._scope, self._row)
 
     def update_selection(self, scope, row):
         self._scope, self._row = scope, int(row)
         if self._cluster is None:
+            self.cluster_preview.set_points(
+                [], [], [], cell_corners=np.empty((0, 3)),
+            )
             return
-        if scope == "host":
+        if scope == "host" and self._host is not None:
             selected = host_site_cluster_indices(self._cluster, self._row)
-        elif 0 <= self._row < len(self._cluster):
+        elif scope != "host" and 0 <= self._row < len(self._cluster):
             selected = (self._row,)
         else:
             selected = ()
         colors, sizes, outlines, widths = cluster_preview_style(
-            self._cluster, selected,
+            self._cluster, selected, color_mode=self._color_mode,
         )
         self.cluster_preview.set_points(
             self._cluster.get_positions(), colors, sizes,
-            cell_corners=np.empty((0, 3)),
+            cell_corners=(
+                _cell_corners(self._cluster)
+                if any(self._cluster.pbc) else np.empty((0, 3))
+            ),
             outlines=outlines, widths=widths,
         )

@@ -90,6 +90,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.overview = EditorOverviewWidget(self.tabs)
         self.tabs.addTab(self.overview, "Overview")
         self.overview.siteSelectionChanged.connect(self._overview_site_selected)
+        self.overview.colorModeChanged.connect(self._overview_color_mode_changed)
 
         # Preserve the per-site dividers; only the surrounding scroll frame
         # made the Sites page look like a framed inset.
@@ -361,7 +362,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 "Editing cell lengths or angles preserves fractional atomic "
                 "coordinates; Cartesian positions change with the lattice."
             )
-            self._overview_previews.set_structure(atoms if cluster else None)
+            self._overview_previews.set_structure(atoms)
             self.overview.set_structure(atoms)
             if cluster:
                 self._create_embedded_page(atoms)
@@ -526,6 +527,9 @@ class StructureEditorDialog(ElementAssignmentDialog):
     def _overview_site_selected(self, scope: str, row: int) -> None:
         self._overview_previews.update_selection(scope, row)
 
+    def _overview_color_mode_changed(self, mode: str) -> None:
+        self._overview_previews.set_color_mode(mode)
+
     def _update_preview_panel(self) -> None:
         cluster = _is_cluster(self._working_atoms)
         embedded = (
@@ -536,7 +540,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         if not embedded:
             self.preview_stack.setCurrentWidget(
                 self._overview_previews
-                if cluster and self.tabs.currentWidget() is self.overview
+                if self.tabs.currentWidget() is self.overview
                 else self._shared_preview
             )
 
@@ -714,9 +718,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             except (ValueError, TypeError, IndexError):
                 # An incomplete field stays editable. Avoid losing its draft.
                 overview_atoms = self._working_atoms
-            self._overview_previews.set_structure(
-                overview_atoms if _is_cluster(overview_atoms) else None
-            )
+            self._overview_previews.set_structure(overview_atoms)
             self.overview.set_structure(overview_atoms)
         self._update_preview_panel()
         self._update_footer_hint()

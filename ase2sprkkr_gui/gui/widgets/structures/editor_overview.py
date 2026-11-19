@@ -4,11 +4,13 @@ from __future__ import annotations
 from html import escape
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QBoxLayout, QFormLayout, QHeaderView, QHBoxLayout, QLabel, QRadioButton,
+    QBoxLayout, QComboBox, QFormLayout, QHeaderView, QHBoxLayout, QLabel, QRadioButton,
     QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ase2sprkkr_gui.gui.widgets.structures.editor_preview import atom_colors
 from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
 from ase2sprkkr_gui.gui.widgets.structures.overview import structure_facts
 from ase2sprkkr_gui.physics.composition import site_composition
@@ -79,6 +81,7 @@ class EditorOverviewWidget(QWidget):
     """
 
     siteSelectionChanged = pyqtSignal(str, int)
+    colorModeChanged = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -142,9 +145,9 @@ class EditorOverviewWidget(QWidget):
         table_layout = self.table_box.content_layout
         table_layout.setContentsMargins(14, 0, 0, 0)
 
-        self.site_table = QTableWidget(0, 8, self.table_box)
+        self.site_table = QTableWidget(0, 9, self.table_box)
         self.site_table.setHorizontalHeaderLabels([
-            "Site", "Occupation", "x (Å)", "y (Å)", "z (Å)",
+            "Site", "Occupation", "Color", "x (Å)", "y (Å)", "z (Å)",
             "x (fractional)", "y (fractional)", "z (fractional)",
         ])
         self.site_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -169,6 +172,16 @@ class EditorOverviewWidget(QWidget):
         self.host_radio.toggled.connect(self._scope_changed)
         scope_layout.addWidget(self.cluster_radio)
         scope_layout.addWidget(self.host_radio)
+        self.color_label = QLabel("Color by:", self.site_scope)
+        scope_layout.addWidget(self.color_label)
+        self.color_by = QComboBox(self.site_scope)
+        self.color_by.addItem("Site type", "site_type")
+        self.color_by.addItem("Species", "species")
+        self.color_by.setToolTip(
+            "Choose colors by crystallographic site type or chemical species"
+        )
+        self.color_by.currentIndexChanged.connect(self._color_mode_changed)
+        scope_layout.addWidget(self.color_by)
 
         self.table_row = QHBoxLayout()
         self.table_row.addWidget(self.site_table, 1)
@@ -184,6 +197,14 @@ class EditorOverviewWidget(QWidget):
         if self._host_atoms is not None and self.host_radio.isChecked():
             return "host"
         return "cluster"
+
+    @property
+    def color_mode(self):
+        return self.color_by.currentData()
+
+    def _color_mode_changed(self, _index):
+        self._populate_sites()
+        self.colorModeChanged.emit(self.color_mode)
 
     def _scope_changed(self, checked):
         if checked:
@@ -211,6 +232,7 @@ class EditorOverviewWidget(QWidget):
             positions = atoms.get_positions()
             scaled = atoms.get_scaled_positions(wrap=False)
             labels = atoms.arrays.get("labels")
+            colors = atom_colors(atoms, self.color_mode)
             self.site_table.setRowCount(len(atoms))
             for i in range(len(atoms)):
                 name = str(labels[i]) if labels is not None else str(i + 1)
@@ -218,12 +240,17 @@ class EditorOverviewWidget(QWidget):
                     occupation = site_composition(atoms, i)
                 except (ValueError, TypeError, KeyError, AttributeError):
                     occupation = atoms[i].symbol
-                cells = [name, str(occupation)]
+                cells = [name, str(occupation), ""]
                 cells += [f"{value:.5f}" for value in positions[i]]
                 cells += [f"{value:.5f}" for value in scaled[i]]
                 for column, value in enumerate(cells):
                     item = QTableWidgetItem(value)
-                    if column >= 2:
+                    if column == 2:
+                        # A colored cell doubles as a compact legend for the
+                        # active preview; keep the exact color in its tooltip.
+                        item.setBackground(QColor(str(colors[i])))
+                        item.setToolTip(str(colors[i]))
+                    elif column >= 3:
                         item.setTextAlignment(
                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                         )
@@ -253,7 +280,9 @@ class EditorOverviewWidget(QWidget):
         info = atoms.info
         host = info.get("sprkkr_embedding_host") if is_cluster else None
         self._host_atoms = getattr(host, "atoms", host)
-        self.site_scope.setVisible(self._host_atoms is not None)
+        self.site_scope.show()
+        self.cluster_radio.setVisible(self._host_atoms is not None)
+        self.host_radio.setVisible(self._host_atoms is not None)
         if self._host_atoms is None and self.host_radio.isChecked():
             self.cluster_radio.setChecked(True)
         symmetry = (
