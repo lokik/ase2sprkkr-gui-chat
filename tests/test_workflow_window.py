@@ -22,6 +22,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     LoadHostPotential,
+    AttachHostPotential,
     CreateHostPotential,
     RunTask,
     SaveStructure,
@@ -126,6 +127,7 @@ def test_action_columns_classify_embedded_and_restart_workflows():
     assert column(Load(LoadKind.STRUCTURE)) == "structure"
     assert column(CreateStructure(CreateStructureKind.THREE_D)) == "structure"
     assert column(LoadHostPotential()) == "structure"
+    assert column(AttachHostPotential()) == "structure"
     assert column(CreateHostPotential()) == "structure"
     assert column(BuildEmbedding()) == "structure"
     assert column(StartOver()) == "structure"
@@ -340,6 +342,10 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         lambda *_args: events.append("load-host"),
     )
     monkeypatch.setattr(
+        workflow_module.file_flows, "attach_host_potential",
+        lambda *_args: events.append("attach-host"),
+    )
+    monkeypatch.setattr(
         workflow_module.file_flows, "create_host_potential",
         lambda *_args: events.append("create-host"),
     )
@@ -367,6 +373,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         EditStructure(),
         SaveStructure(),
         LoadHostPotential(),
+        AttachHostPotential(),
         CreateHostPotential(),
         UseForNewCalculation(),
         StartOver(),
@@ -393,6 +400,7 @@ def test_typed_commands_are_dispatched_without_title_interpretation(
         "edit",
         "save",
         "load-host",
+        "attach-host",
         "create-host",
         "new-calculation",
         "reset",

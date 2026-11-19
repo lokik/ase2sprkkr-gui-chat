@@ -152,3 +152,70 @@ def test_loaded_structure_is_clean_until_edited(tmp_path, monkeypatch):
         expected_structure_generation=controller.structure_generation,
     )
     assert controller.has_unsaved_structure
+
+
+def test_loading_host_as_structure_replaces_an_existing_cluster(tmp_path, monkeypatch):
+    """Opening a periodic host must never silently attach it to the old cluster."""
+    from types import SimpleNamespace
+
+    cluster = Atoms("Fe", positions=[[0, 0, 0]], pbc=False)
+    cluster.embedding_host = object()
+    host_atoms = Atoms("Cu", cell=(3.6, 3.6, 3.6), pbc=True)
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    old_structure_id = controller.structure_id
+    host_file = tmp_path / "Cu.pot"
+    host_file.write_text("host")
+    history = RecentFiles(tmp_path / "recent.json")
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getOpenFileName",
+        lambda *_args: (str(host_file), ""),
+    )
+    monkeypatch.setattr(
+        file_flows.Potential, "is_cluster_file", staticmethod(lambda _path: False)
+    )
+    monkeypatch.setattr(
+        file_flows, "load_structure_candidate",
+        lambda *_args, **_kwargs: SimpleNamespace(atoms=host_atoms),
+    )
+
+    assert file_flows.load_host_potential(controller, history, object())
+    assert controller.atoms is host_atoms
+    assert controller.structure_kind() == "3d"
+    assert getattr(controller.atoms, "embedding_host", None) is None
+    assert controller.structure_id != old_structure_id
+    assert controller.potential_path == str(host_file.resolve())
+    assert not controller.has_unsaved_structure
+    assert history.paths("structure") == (str(host_file.resolve()),)
+
+
+def test_host_load_cancel_or_cluster_file_preserves_current_cluster(
+    tmp_path, monkeypatch,
+):
+    cluster = Atoms("Fe", pbc=False)
+    cluster.embedding_host = object()
+    controller = WorkspaceController(WorkspaceState(atoms=cluster))
+    history = RecentFiles(tmp_path / "recent.json")
+    generation = controller.structure_generation
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getOpenFileName",
+        lambda *_args: ("", ""),
+    )
+    assert not file_flows.load_host_potential(controller, history, object())
+    cluster_file = tmp_path / "wrong.clu.pot"
+    cluster_file.write_text("cluster")
+    monkeypatch.setattr(
+        file_flows.QFileDialog, "getOpenFileName",
+        lambda *_args: (str(cluster_file), ""),
+    )
+    monkeypatch.setattr(
+        file_flows.Potential, "is_cluster_file", staticmethod(lambda _path: True)
+    )
+    warning = []
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "warning",
+        lambda _parent, title, message: warning.append((title, message)),
+    )
+    assert not file_flows.load_host_potential(controller, history, object())
+    assert warning and warning[0][0] == "Not a Host Potential"
+    assert controller.atoms is cluster
+    assert controller.structure_generation == generation

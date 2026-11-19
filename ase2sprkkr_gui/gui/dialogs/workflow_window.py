@@ -64,6 +64,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     EditStructure,
     SaveStructure,
     LoadHostPotential,
+    AttachHostPotential,
     CreateHostPotential,
     WorkflowCommand,
     WorkflowPlan,
@@ -405,6 +406,11 @@ class WorkflowWindow(QMainWindow):
             return
         if isinstance(command, LoadHostPotential):
             file_flows.load_host_potential(
+                self.controller, self.recent_history, self
+            )
+            return
+        if isinstance(command, AttachHostPotential):
+            file_flows.attach_host_potential(
                 self.controller, self.recent_history, self
             )
             return
