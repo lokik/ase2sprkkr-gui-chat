@@ -12,7 +12,8 @@ import numpy as np
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
-    QDialog, QGroupBox, QLabel, QMessageBox, QPushButton, QSplitter,
+    QDialog, QDoubleSpinBox, QFrame, QGridLayout, QGroupBox, QLabel,
+    QMessageBox, QPushButton, QSplitter, QStackedWidget,
     QStyle, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -28,7 +29,12 @@ from ase2sprkkr_gui.gui.dialogs.structures.element_assignment import (
 from ase2sprkkr_gui.gui.dialogs.structures.transforms import (
     repeat_atoms, rotate_atoms, scale_atoms, select_repeat_factors,
 )
+from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
 from ase2sprkkr_gui.gui.widgets.structures.editor_overview import EditorOverviewWidget
+from ase2sprkkr_gui.gui.widgets.structures.editor_preview import EditorClusterHostPreviews
+from ase2sprkkr_gui.physics.cell_parameters import (
+    cell_from_lengths_angles, lengths_and_angles,
+)
 from ase2sprkkr_gui.physics.lattice import detect_structure_kind
 
 
@@ -54,6 +60,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self._switching_tabs = False
         self._last_tab = 0
         self._editor_ready = False
+        self._invalid_cell_parameters = None
+        self._cell_parameters_valid = True
         super().__init__(parent, editor_mode=True)
         self.setWindowTitle("Structure Editor")
         self.resize(1450, 900)
@@ -73,6 +81,11 @@ class StructureEditorDialog(ElementAssignmentDialog):
         )
         self.overview = EditorOverviewWidget(self.tabs)
         self.tabs.addTab(self.overview, "Overview")
+        self.overview.siteSelectionChanged.connect(self._overview_site_selected)
+
+        # Preserve the per-site dividers; only the surrounding scroll frame
+        # made the Sites page look like a framed inset.
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.tabs.addTab(sites_panel, "Sites")
 
         self.site_notice = QLabel(
@@ -85,17 +98,42 @@ class StructureEditorDialog(ElementAssignmentDialog):
 
         lattice_page = QWidget(self.tabs)
         lattice_layout = QVBoxLayout(lattice_page)
+        self.lattice_note = QLabel(lattice_page)
+        self.lattice_note.setWordWrap(True)
+        lattice_layout.addWidget(self.lattice_note)
         lattice_layout.addWidget(lattice_group)
+        self.lattice_group = lattice_group
+
+        parameter_box = QGroupBox("Cell lengths and angles", lattice_page)
+        parameter_grid = QGridLayout(parameter_box)
+        self.cell_parameter_spins = {}
+        for index, (key, symbol) in enumerate((
+            ("a", "a"), ("b", "b"), ("c", "c"),
+            ("alpha", "α"), ("beta", "β"), ("gamma", "γ"),
+        )):
+            spin = QDoubleSpinBox(parameter_box)
+            spin.setDecimals(6)
+            spin.setSingleStep(0.1)
+            spin.setRange(
+                0.000001 if index < 3 else 0.1,
+                100000.0 if index < 3 else 179.9,
+            )
+            spin.setSuffix(" Å" if index < 3 else "°")
+            spin.setObjectName(f"cellParameter{key.title()}")
+            spin.valueChanged.connect(self._cell_parameters_edited)
+            self.cell_parameter_spins[key] = spin
+            row, column = index % 3, 0 if index < 3 else 2
+            parameter_grid.addWidget(QLabel(symbol, parameter_box), row, column)
+            parameter_grid.addWidget(spin, row, column + 1)
+        lattice_layout.addWidget(parameter_box)
+        self.cell_parameter_group = parameter_box
+        self.cell_parameter_error = QLabel(lattice_page)
+        self.cell_parameter_error.setWordWrap(True)
+        self.cell_parameter_error.setStyleSheet("color: #bb4545;")
+        lattice_layout.addWidget(self.cell_parameter_error)
         self.cell_summary = QLabel(lattice_page)
         self.cell_summary.setWordWrap(True)
         lattice_layout.addWidget(self.cell_summary)
-        self.lattice_note = QLabel(
-            "Lattice vectors of the current structure. For an embedded cluster "
-            "these vectors belong to the host.",
-            lattice_page,
-        )
-        self.lattice_note.setWordWrap(True)
-        lattice_layout.addWidget(self.lattice_note)
         lattice_layout.addStretch(1)
         self.tabs.addTab(lattice_page, "Lattice")
 
@@ -103,12 +141,24 @@ class StructureEditorDialog(ElementAssignmentDialog):
         transform_layout = QVBoxLayout(transformations)
         geometry = QGroupBox("Geometric transformations", transformations)
         geometry_layout = QVBoxLayout(geometry)
-        for label, action in (
-            ("Scale lattice...", "scale"),
-            ("Repeat structure...", "repeat"),
-            ("Rotate structure (Miller indices)...", "rotate"),
+        for label, description, icon, action in (
+            ("Scale lattice", "Change lattice lengths in the current structure",
+             "transform-scale", "scale"),
+            ("Repeat structure", "Create a repeated supercell",
+             "view-grid", "repeat"),
+            ("Rotate structure (Miller indices)",
+             "Change the surface orientation", "object-rotate-right", "rotate"),
         ):
-            button = QPushButton(label, geometry)
+            button = QPushButton(geometry)
+            configure_action_card(
+                button, label, description,
+                QIcon.fromTheme(
+                    icon, self.style().standardIcon(
+                        QStyle.StandardPixmap.SP_ArrowUp,
+                    ),
+                ),
+                category="structure",
+            )
             button.clicked.connect(
                 lambda _checked=False, operation=action: self._transform(operation)
             )
@@ -118,30 +168,53 @@ class StructureEditorDialog(ElementAssignmentDialog):
 
         self.derived_group = QGroupBox("Build derived structure", transformations)
         derived_layout = QVBoxLayout(self.derived_group)
-        self.build_surface_button = QPushButton("Create 2D surface...", self.derived_group)
+        self.build_surface_button = QPushButton(self.derived_group)
+        configure_action_card(
+            self.build_surface_button, "Create 2D surface",
+            "Build a surface from the periodic structure",
+            QIcon.fromTheme("applications-science"),
+            category="structure",
+        )
         self.build_surface_button.clicked.connect(
             lambda _checked=False: self._build_two_d(surface=True)
         )
         derived_layout.addWidget(self.build_surface_button)
-        self.build_2d_button = QPushButton("Create 2D structure...", self.derived_group)
+        self.build_2d_button = QPushButton(self.derived_group)
+        configure_action_card(
+            self.build_2d_button, "Create 2D structure",
+            "Construct a two-dimensional layered structure",
+            QIcon.fromTheme("applications-science"),
+            category="structure",
+        )
         self.build_2d_button.clicked.connect(
             lambda _checked=False: self._build_two_d(surface=False)
         )
         derived_layout.addWidget(self.build_2d_button)
-        self.embedding_button = QPushButton("Build embedded cluster...", self.derived_group)
+        self.embedding_button = QPushButton(self.derived_group)
+        configure_action_card(
+            self.embedding_button, "Build embedded cluster",
+            "Create an embedded cluster from the current host",
+            QIcon.fromTheme("network-wired"),
+            category="structure",
+        )
         self.embedding_button.clicked.connect(self._build_embedding)
         derived_layout.addWidget(self.embedding_button)
         transform_layout.addWidget(self.derived_group)
         transform_layout.addStretch(1)
         self.tabs.addTab(transformations, "Transform")
 
-        # One preview is shared between ordinary pages. Embedded needs its own
-        # cell map and two selectable previews, so the shared one is hidden there.
+        # Ordinary pages retain the existing 3D host preview. The Overview
+        # of a cluster instead shows a vertical cluster/host comparison.
+        # Embedded has its own controls and uses the whole editor width.
         self._shared_preview = preview_panel
+        self.preview_stack = QStackedWidget(self)
+        self.preview_stack.addWidget(preview_panel)
+        self._overview_previews = EditorClusterHostPreviews(self.preview_stack)
+        self.preview_stack.addWidget(self._overview_previews)
         self.editor_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self.editor_splitter.setChildrenCollapsible(False)
         self.editor_splitter.addWidget(self.tabs)
-        self.editor_splitter.addWidget(preview_panel)
+        self.editor_splitter.addWidget(self.preview_stack)
         self.editor_splitter.setStretchFactor(0, 3)
         self.editor_splitter.setStretchFactor(1, 2)
         self.editor_splitter.setSizes([850, 550])
@@ -171,7 +244,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         layout.addWidget(embedded, 1)
         self._embedded_page = page
         self._embedded_editor = embedded
-        index = self.tabs.addTab(page, "Embedded")
+        index = self.tabs.insertTab(1, page, "Embedded")
         self.tabs.setTabIcon(
             index, QIcon.fromTheme(
                 "network-wired",
