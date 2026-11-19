@@ -55,13 +55,20 @@ jobs:
           ref: b48050d51d8198e8b4b6263f6b0aff994290f989
           path: .ci/kkrunner
 
-      # The embedding GUI branch must be tested against its matching
-      # backend branch. Unrelated branches continue testing against develop.
+      # The embedding and editor branches use the native cluster backend,
+      # including its DATASET and ADSI validation and filename escaping.
       - name: Checkout ASE2SPRKKR
         uses: actions/checkout@v7
         with:
           repository: lokik/ase2sprkkr-chat
-          ref: ${{ (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.head_ref == 'cluster' || github.head_ref == 'embedding-host-scf' || github.head_ref == 'guided-structure-type' || github.ref_name == 'cluster' || github.ref_name == 'embedding-host-scf' || github.ref_name == 'guided-structure-type') && 'cluster' || 'develop' }}
+          ref: >-
+            ${{ (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
+                || github.head_ref == 'cluster' || github.head_ref == 'embedding-host-scf'
+                || github.head_ref == 'guided-structure-type' || github.head_ref == 'editor'
+                || github.head_ref == 'editor-native-identifiers'
+                || github.ref_name == 'cluster' || github.ref_name == 'embedding-host-scf'
+                || github.ref_name == 'guided-structure-type' || github.ref_name == 'editor'
+                || github.ref_name == 'editor-native-identifiers') && 'cluster' || 'develop' }}
           path: .ci/ase2sprkkr
 
       - name: Install package and test dependencies

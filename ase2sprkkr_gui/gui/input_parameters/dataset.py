@@ -7,22 +7,12 @@ from typing import Any
 from uuid import uuid4
 
 
-def dataset_error(value: str) -> bool:
-    """Whether a requested output prefix violates SPR-KKR naming rules."""
-    return re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", value) is None
-
-
-def adsi_error(value: str) -> bool:
-    """Whether a calculation suffix contains unsafe filename characters."""
-    return re.fullmatch(r"[A-Za-z0-9_.-]*", value) is None
-
-
 DATASET_PATH = ("CONTROL", "DATASET")
 _FILENAME_COMPONENT = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def filename_component(value: str) -> str:
-    """Convert a DATASET value to a safe single filename component."""
+    """Normalize a name to a single filename component."""
     return _FILENAME_COMPONENT.sub("_", value.strip()).strip("._")
 
 
@@ -81,5 +71,5 @@ def dataset_value(parameters: Any) -> str | None:
         return None
     if value is None:
         return None
-    text = str(value).strip()
+    text = str(value)
     return text or None

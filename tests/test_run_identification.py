@@ -1,7 +1,6 @@
 """Regression tests for editing output identifiers at launch."""
 from __future__ import annotations
 
-import copy
 import os
 from types import SimpleNamespace
 
@@ -9,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from ase import Atoms
+from ase2sprkkr.input_parameters.input_parameters import InputParameters
 from PyQt6.QtWidgets import QApplication
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
@@ -18,27 +18,11 @@ from ase2sprkkr_gui.gui.dialogs.profiles import ProfileSelectionDialog, RunIdent
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 
 
-class _Option:
-    def __init__(self, value=None):
-        self.value = value
-
-    def is_set(self):
-        return self.value is not None
-
-    def __call__(self):
-        return self.value
-
-    def set(self, value):
-        self.value = value
-
-
-class _Parameters:
-    def __init__(self, dataset="original", adsi="SCF"):
-        self.CONTROL = SimpleNamespace(DATASET=_Option(dataset), ADSI=_Option(adsi))
-
-    def copy(self, *, copy_values):
-        assert copy_values
-        return copy.deepcopy(self)
+def _Parameters(dataset="original", adsi="SCF"):
+    parameters = InputParameters.create("SCF")
+    parameters.CONTROL.DATASET = dataset
+    parameters.CONTROL.ADSI = adsi
+    return parameters
 
 
 class _Profiles:
@@ -88,8 +72,8 @@ def test_empty_dataset_means_automatic_naming(application, tmp_path):
 
 @pytest.mark.parametrize("field,value", [
     ("dataset_edit", "-3"), ("dataset_edit", "Fe$(id)"),
-    ("dataset_edit", "Fe;id"), ("adsi_edit", "bad/name"),
-    ("adsi_edit", "bad$(id)"), ("adsi_edit", "bad name"),
+    ("dataset_edit", "Fe;id"), ("adsi_edit", "bad#name"),
+    ("dataset_edit", " Fe "), ("adsi_edit", "bad$(id)"), ("adsi_edit", "bad name"),
 ])
 def test_run_dialog_rejects_unsafe_identifiers(application, monkeypatch, tmp_path, field, value):
     from ase2sprkkr_gui.gui.dialogs import profiles
@@ -104,6 +88,62 @@ def test_run_dialog_rejects_unsafe_identifiers(application, monkeypatch, tmp_pat
     assert warnings
     assert dialog.result() == dialog.DialogCode.Rejected
     dialog.close()
+
+
+@pytest.mark.parametrize("dataset,adsi", [
+    ("sub/-Fe+@%!:^~", "SCF"), ("Fe", "labels/-run+@%!:^~"),
+    ("Železo", "běh"), (".Fe", ""), ("../Fe", "-3"),
+])
+def test_run_dialog_accepts_native_identifiers(application, tmp_path, dataset, adsi):
+    parameters = _Parameters()
+    dialog = ProfileSelectionDialog(
+        input_parameters=parameters, store=_Profiles(), directory=str(tmp_path),
+    )
+    dialog.dataset_edit.setText(dataset)
+    dialog.adsi_edit.setText(adsi)
+    dialog.accept()
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert dialog.identification() == RunIdentification(dataset, adsi)
+    assert parameters.CONTROL.DATASET() == "original"
+    assert parameters.CONTROL.ADSI() == "SCF"
+
+
+def test_run_dialog_validates_dataset_relative_to_run_directory(application, monkeypatch, tmp_path):
+    from ase2sprkkr_gui.gui.dialogs import profiles
+
+    warnings = []
+    monkeypatch.setattr(profiles.QMessageBox, "warning", lambda *args: warnings.append(args))
+    dialog = ProfileSelectionDialog(
+        input_parameters=_Parameters(), store=_Profiles(), directory=str(tmp_path),
+    )
+    dialog.dataset_edit.setText(str(tmp_path / "-3"))
+    dialog.accept()
+    assert warnings[0][1] == "Invalid CONTROL.DATASET"
+    assert "hyphen" in warnings[0][2]
+    assert dialog.result() == dialog.DialogCode.Rejected
+
+
+def test_run_dialog_displays_option_validation_error(application, monkeypatch, tmp_path):
+    from ase2sprkkr.common.options import Option
+    from ase2sprkkr.common.warnings import DataValidityError
+    from ase2sprkkr_gui.gui.dialogs import profiles
+
+    original_validate = Option.validate
+
+    def validate(option, *args, **kwargs):
+        if option.name == "ADSI":
+            raise DataValidityError("Native option validation message")
+        return original_validate(option, *args, **kwargs)
+
+    warnings = []
+    monkeypatch.setattr(Option, "validate", validate)
+    monkeypatch.setattr(profiles.QMessageBox, "warning", lambda *args: warnings.append(args))
+    dialog = ProfileSelectionDialog(
+        input_parameters=_Parameters(), store=_Profiles(), directory=str(tmp_path),
+    )
+    dialog.accept()
+    assert warnings[0][2] == "Native option validation message"
+    assert dialog.result() == dialog.DialogCode.Rejected
 
 
 def test_run_dialog_allows_empty_adsi(application, tmp_path):

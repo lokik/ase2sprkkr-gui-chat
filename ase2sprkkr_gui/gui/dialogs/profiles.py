@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 from ase2sprkkr.sprkkr.projects import default_project_repository
-from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_error, adsi_error
+from ase2sprkkr.common.warnings import DataValidityError
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QRegularExpression
-from PyQt6.QtGui import QRegularExpressionValidator
+from PyQt6.QtCore import Qt
 from kkrunner.projects import ProjectRepository, ProjectRepositoryError
 
 from ruamel.yaml.error import YAMLError
@@ -33,7 +32,7 @@ from PyQt6.QtWidgets import (
 from ase2sprkkr_gui.gui.application.execution_profiles import ExecutionProfileStore
 from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometry
 from ase2sprkkr_gui.gui.dialogs.project_edit import ProjectEditDialog
-from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_value, filename_component
+from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_value
 from ase2sprkkr_gui.gui.widgets.settings.run_configurations import RunConfigurationsPage
 
 
@@ -108,6 +107,7 @@ class ProfileSelectionDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._require_directory = require_directory
+        self._input_parameters = input_parameters
         # The workspace directory is a fallback, not an explicit choice in
         # this dialog. Project directories take precedence until the user
         # types a directory or chooses one with Browse.
@@ -151,15 +151,9 @@ class ProfileSelectionDialog(QDialog):
                  else initial_identification.dataset) or ""
             )
             self.dataset_edit.setPlaceholderText("Automatic naming")
-            self.dataset_edit.setValidator(
-                QRegularExpressionValidator(
-                    QRegularExpression(r"(?:[A-Za-z0-9_][A-Za-z0-9_.-]*)?"), self.dataset_edit
-                )
-            )
             self.dataset_edit.setToolTip(
-                "SPR-KKR CONTROL.DATASET. Base name for output files. "
-                "Use letters, digits, underscores, periods and hyphens; "
-                "start with a letter, digit or underscore. "
+                "SPR-KKR CONTROL.DATASET. Filename prefix, optionally including directories. "
+                "Relative paths use the calculation working directory. "
                 "Use a different name for simultaneous runs in the same directory."
             )
             identifier_form.addRow("Output file prefix:", self.dataset_edit)
@@ -171,19 +165,14 @@ class ProfileSelectionDialog(QDialog):
             identifier_form.addRow("", dataset_hint)
 
             self.adsi_edit = QLineEdit(identifiers)
-            self.adsi_edit.setValidator(
-                QRegularExpressionValidator(
-                    QRegularExpression(r"[A-Za-z0-9_.-]*"), self.adsi_edit
-                )
-            )
             adsi = (
                 input_parameters.CONTROL.ADSI() if initial_identification is None
                 else initial_identification.adsi
             )
             self.adsi_edit.setText("" if adsi is None else str(adsi))
             self.adsi_edit.setToolTip(
-                "SPR-KKR CONTROL.ADSI. Optional suffix using letters, digits, "
-                "underscores, periods and hyphens."
+                "SPR-KKR CONTROL.ADSI. Optional suffix, appended after DATASET and an underscore. "
+                "Leave empty for no suffix."
             )
             identifier_form.addRow("Calculation label:", self.adsi_edit)
             adsi_hint = QLabel(
@@ -492,31 +481,23 @@ class ProfileSelectionDialog(QDialog):
             )
             self.directory_edit.setFocus()
             return
-        if self.dataset_edit is not None and not self.dataset_edit.hasAcceptableInput():
-            QMessageBox.warning(
-                self, "Invalid output prefix",
-                "Start with a letter, digit or underscore; use only letters, "
-                "digits, periods, underscores and hyphens.",
-            )
-            return
-        if self.dataset_edit is not None:
-            dataset = self.dataset_edit.text().strip()
-            if dataset and (dataset_error(dataset) or filename_component(dataset) != dataset):
-                QMessageBox.warning(
-                    self, "Invalid output prefix",
-                    "The output prefix must be a valid single filename component.",
-                )
-                return
-        if self.adsi_edit is not None and (
-            not self.adsi_edit.hasAcceptableInput()
-            or adsi_error(self.adsi_edit.text())
-        ):
-            QMessageBox.warning(
-                self, "Invalid calculation label",
-                "Use only letters, digits, periods, underscores and hyphens. "
-                "Leave the label empty for no suffix.",
-            )
-            return
+        if self.dataset_edit is not None and self.adsi_edit is not None:
+            # Explicit editing draft: validation must not mutate workspace input.
+            draft = self._input_parameters.copy(copy_values=True)
+            draft.directory = self.directory_name()
+            identification = self.identification()
+            for name, value, editor in (
+                ("DATASET", identification.dataset, self.dataset_edit),
+                ("ADSI", identification.adsi, self.adsi_edit),
+            ):
+                option = getattr(draft.CONTROL, name)
+                try:
+                    option.set(value, retain_invalid="all", report_invalid="ignore")
+                    option.validate()
+                except (DataValidityError, ValueError, TypeError) as exc:
+                    QMessageBox.warning(self, f"Invalid CONTROL.{name}", str(exc))
+                    editor.setFocus()
+                    return
         if (
             self._require_directory
             and self.assign_directory_checkbox.isEnabled()
@@ -543,8 +524,8 @@ class ProfileSelectionDialog(QDialog):
         if self.dataset_edit is None or self.adsi_edit is None:
             return None
         return RunIdentification(
-            dataset=self.dataset_edit.text().strip() or None,
-            adsi=self.adsi_edit.text().strip(),
+            dataset=self.dataset_edit.text() or None,
+            adsi=self.adsi_edit.text(),
         )
 
     def profile_name(self) -> str | None:

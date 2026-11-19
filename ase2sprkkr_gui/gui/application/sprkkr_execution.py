@@ -16,7 +16,7 @@ from ase2sprkkr_gui.gui.application.execution_cancellation import (
 )
 from ase2sprkkr_gui.gui.application.result_loading import LoadedResult, load_result
 from ase2sprkkr_gui.gui.application.workspace_controller import CalculationRequest
-from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_value, filename_component
+from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_value
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +54,8 @@ class SprkkrExecution:
         dataset = dataset_value(self.request.input_parameters)
         if dataset is None:
             return "%a_%T.inp", "%a.pot", "%a_%T.out"
-        base = filename_component(dataset)
-        if not base:
-            return "%a_%T.inp", "%a.pot", "%a_%T.out"
+        # DATASET is literal. Escape the percent markers used by ASE2SPRKKR.
+        base = dataset.replace("%", "%%")
         return f"{base}_%T.inp", f"{base}.pot", f"{base}_%T.out"
 
     def _with_mpi_warnings(self, operation):
@@ -122,6 +121,7 @@ class SprkkrExecution:
                 project=self._project_context(),
                 restart_scf=self.request.restart_scf,
                 clear_cache=self.request.clear_cache,
+                create_subdirs=True,
             )
         )
 
@@ -142,6 +142,7 @@ class SprkkrExecution:
             output_file=False,
             empty_spheres=False,
             restart_scf=self.request.restart_scf,
+            create_subdirs=True,
         )
 
     def _notify_persistent_job_changed(self, runner: Any) -> None:
