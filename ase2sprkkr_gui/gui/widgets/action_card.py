@@ -79,6 +79,7 @@ def configure_action_card(
     text_layout.setSpacing(2)
 
     title_label = QLabel(title, text_widget)
+    title_label.setObjectName("actionCardTitle")
     title_label.setForegroundRole(QPalette.ColorRole.ButtonText)
     title_label.setFont(heading_font(title_label.font(), "section"))
     title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -86,6 +87,7 @@ def configure_action_card(
 
     if description:
         description_label = QLabel(description, text_widget)
+        description_label.setObjectName("actionCardDescription")
         description_label.setForegroundRole(QPalette.ColorRole.ButtonText)
         description_label.setWordWrap(True)
         description_label.setAttribute(

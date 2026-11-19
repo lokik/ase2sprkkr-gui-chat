@@ -305,3 +305,56 @@ def test_tall_panel_keeps_groups_and_labels_compact():
         assert label.height() == label.sizeHint().height()
     assert panels[1].geometry().bottom() < widget.height() / 2
     widget.close()
+
+def test_cards_have_matching_heights_with_wrapped_and_missing_descriptions():
+    application = _app()
+    widget = WorkflowActionsWidget()
+    widget.set_plan(WorkflowPlan(
+        "subtitle",
+        (
+            AvailableActionGroup(
+                WorkflowSection.CREATE,
+                "Create",
+                (
+                    AvailableAction(
+                        StartOver(), "Short", "One line", "structure", ActionIcon.RESET,
+                    ),
+                    AvailableAction(
+                        StartOver(), "Long",
+                        "A longer description that wraps into several lines at the minimum "
+                        "column width, without changing the height of the other action cards.",
+                        "structure", ActionIcon.RESET,
+                    ),
+                    AvailableAction(
+                        StartOver(), "No description", "", "neutral", ActionIcon.RESET,
+                    ),
+                ),
+            ),
+            AvailableActionGroup(
+                WorkflowSection.LOAD,
+                "Load",
+                (
+                    AvailableAction(
+                        ContinueRecent("output", "/tmp/SCF.out"),
+                        "Recent", "", "load", ActionIcon.CONTINUE,
+                        menu=(ActionMenuGroup("Recent", (), empty_text="None"),),
+                    ),
+                ),
+            ),
+        ),
+    ))
+    widget.resize(320, 750)
+    widget.show()
+    application.processEvents()
+
+    buttons = widget.findChildren(QPushButton) + widget.findChildren(QToolButton)
+    assert len(buttons) == 4
+    assert len({button.height() for button in buttons}) == 1
+    narrow_height = buttons[0].height()
+    assert narrow_height >= 68
+
+    widget.resize(600, 750)
+    application.processEvents()
+    assert len({button.height() for button in buttons}) == 1
+    assert buttons[0].height() <= narrow_height
+    widget.close()

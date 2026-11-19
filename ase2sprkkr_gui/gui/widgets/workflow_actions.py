@@ -8,6 +8,7 @@ from PyQt6.QtGui import QAction, QIcon, QKeySequence, QPalette
 from PyQt6.QtWidgets import (
     QLabel,
     QLayout,
+    QAbstractButton,
     QMenu,
     QPushButton,
     QStyle,
@@ -123,6 +124,7 @@ class WorkflowActionsWidget(QWidget):
         super().__init__(parent)
         self._column = column
         self._plan: WorkflowPlan | None = None
+        self._action_buttons: list[QAbstractButton] = []
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(SPACE_LG)
@@ -181,10 +183,53 @@ class WorkflowActionsWidget(QWidget):
                 group_layout.addWidget(label)
 
             for action in actions:
-                group_layout.addWidget(self._action_button(action, group_widget))
+                button = self._action_button(action, group_widget)
+                self._action_buttons.append(button)
+                group_layout.addWidget(button)
             self._layout.addWidget(group_widget)
+        self._equalize_action_heights()
+
+    def _equalize_action_heights(self) -> None:
+        """Keep all cards equally tall while allowing descriptions to wrap."""
+        if not self._action_buttons:
+            return
+        height = 68
+        width = self.contentsRect().width()
+        for button in self._action_buttons:
+            layout = button.layout()
+            margins = layout.contentsMargins()
+            icon = layout.itemAt(0).widget()
+            text = layout.itemAt(1).widget()
+            text_layout = text.layout()
+            title = text.findChild(QLabel, "actionCardTitle")
+            description = text.findChild(QLabel, "actionCardDescription")
+            text_width = (
+                width - margins.left() - margins.right()
+                - layout.spacing() - icon.width()
+            )
+            if isinstance(button, _ShortcutActionButton):
+                hint = button.shortcut_hint
+                if hint is not None and width >= button._hint_required_width:
+                    text_width -= layout.spacing() + hint.sizeHint().width()
+            text_height = title.sizeHint().height()
+            if description is not None:
+                text_height += (
+                    text_layout.spacing()
+                    + description.heightForWidth(max(1, text_width))
+                )
+            height = max(
+                height, 2 * SPACE_SM + 2 + max(icon.height(), text_height)
+            )
+        for button in self._action_buttons:
+            if button.minimumHeight() != height or button.maximumHeight() != height:
+                button.setFixedHeight(height)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._equalize_action_heights()
 
     def _clear(self) -> None:
+        self._action_buttons.clear()
         while self._layout.count():
             item = self._layout.takeAt(0)
             widget = item.widget()
@@ -207,7 +252,7 @@ class WorkflowActionsWidget(QWidget):
             button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
             button.setMenu(self._action_menu(action, button))
             icon_size = QSize(24, 24)
-            minimum_height = 52
+            minimum_height = 68
             menu_button = True
         else:
             button = _ShortcutActionButton(parent) if shortcut else QPushButton(parent)
