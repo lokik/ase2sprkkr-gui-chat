@@ -336,7 +336,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 )
             # The unchanged host draft must not block cluster editing because
             # of a generic occupation check unrelated to cluster semantics.
-            if self._require_draft().is_unchanged():
+            if (self._require_draft().is_unchanged()
+                    and self._invalid_cell_parameters is None):
                 self.ok_btn.setEnabled(True)
         else:
             for action in ("scale", "repeat", "rotate"):
