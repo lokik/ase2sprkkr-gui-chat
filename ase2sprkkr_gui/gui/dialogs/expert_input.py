@@ -82,25 +82,28 @@ class InputParametersDialog(QDialog):
             lambda _has_errors: self._validation_error.hide()
         )
 
+        file_actions = QHBoxLayout()
+        root.addLayout(file_actions)
         footer = QHBoxLayout()
         footer.addStretch(1)
         root.addLayout(footer)
 
-        def add_button(text: str, slot: Any) -> QPushButton:
+        def add_button(text: str, slot: Any, *, finish: bool = False) -> QPushButton:
             button = QPushButton(text, self)
             button.clicked.connect(slot)
-            footer.addWidget(button)
+            (footer if finish else file_actions).addWidget(button)
             return button
 
         self.load_btn = add_button('Load input…', self._load_input)
         self.save_btn = add_button('Save Input…', self._save_input)
-        self.load_preset_btn = add_button('Replace with preset…', self._replace_preset)
-        self.merge_preset_btn = add_button('Merge preset…', self._merge_preset)
+        self.load_preset_btn = add_button('Replace by preset…', self._replace_preset)
+        self.merge_preset_btn = add_button('Load preset…', self._merge_preset)
         self.save_preset_btn = add_button('Save as preset…', self._save_preset)
         self.edit_input_btn = add_button('Edit input file…', self._edit_input_file)
-        self.cancel_btn = add_button('Cancel', self.reject)
+        file_actions.addStretch(1)
+        self.cancel_btn = add_button('Cancel', self.reject, finish=True)
         self.ok_btn = add_button(
-            'Calculate' if calculation_mode else 'OK', self._on_ok
+            'Calculate' if calculation_mode else 'OK', self._on_ok, finish=True
         )
         self.calculate_button = self.ok_btn if calculation_mode else None
         self.tree_editor.validationChanged.connect(

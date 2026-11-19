@@ -12,8 +12,8 @@ from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
 def test_expert_has_preset_buttons():
     app = QApplication.instance() or QApplication([])
     dialog = InputParametersDialog(InputParameters.for_task("DOS"))
-    assert dialog.load_preset_btn.text() == "Replace with preset…"
-    assert dialog.merge_preset_btn.text() == "Merge preset…"
+    assert dialog.load_preset_btn.text() == "Replace by preset…"
+    assert dialog.merge_preset_btn.text() == "Load preset…"
     assert dialog.save_preset_btn.text() == "Save as preset…"
 
 
@@ -22,7 +22,7 @@ def test_guided_has_preset_menu():
     dialog = GuidedInputParametersDialog("dos", InputParameters.for_task("DOS"))
     assert dialog.presets_btn.text() == "Presets…"
     assert [a.text() for a in dialog.presets_menu.actions()] == [
-        "Replace with preset…", "Merge preset…", "Save as preset…",
+        "Replace by preset…", "Load preset…", "Save as preset…",
     ]
 
 
