@@ -106,38 +106,38 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.lattice_group = EditorSection("Lattice vectors (Å)", lattice_page)
         # Reparent the existing vector grid into a frameless section. The
         # previous QGroupBox is an implementation detail of the base editor.
-        # Match the vector column widths to the compact lengths/angles inputs.
-        # The table itself already provides the required border.
-        vector_column_width = 136
-        header = self.lattice_vectors_table.horizontalHeader()
-        header.setStretchLastSection(False)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        for column in range(3):
-            self.lattice_vectors_table.setColumnWidth(column, vector_column_width)
-        self.lattice_vectors_table.setMaximumWidth(3 * vector_column_width + 72)
-        self.lattice_group.content_layout.addWidget(
-            self.lattice_vectors_table, 0, Qt.AlignmentFlag.AlignLeft
-        )
+        # Both sections use the same width; the table fills it rather than
+        # being limited to its small default QTableWidget size hint.
+        lattice_width = 500
+        self.lattice_group.setMaximumWidth(lattice_width)
+        table = self.lattice_vectors_table
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        table.setFixedHeight(165)  # Header, three site rows and a horizontal bar.
+        header = table.horizontalHeader()
+        header.setMinimumSectionSize(115)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.lattice_group.content_layout.addWidget(table)
         lattice_layout.addWidget(self.lattice_group)
         lattice_group.deleteLater()
 
-        parameter_frame = QFrame(lattice_page)
+        # Keep the heading outside the frame; only the six fields are framed.
+        parameter_box = EditorSection("Cell lengths and angles", lattice_page)
+        parameter_box.setMaximumWidth(lattice_width)
+        parameter_frame = QFrame(parameter_box)
         parameter_frame.setObjectName("structureEditorCellParametersFrame")
         parameter_frame.setFrameShape(QFrame.Shape.StyledPanel)
         parameter_frame.setFrameShadow(QFrame.Shadow.Plain)
-        parameter_frame.setMaximumWidth(430)
-        frame_layout = QVBoxLayout(parameter_frame)
-        frame_layout.setContentsMargins(10, 6, 10, 8)
-        parameter_box = EditorSection(
-            "Cell lengths and angles", parameter_frame, layout_type=QGridLayout,
-        )
-        frame_layout.addWidget(parameter_box)
-        parameter_grid = parameter_box.content_layout
+        parameter_grid = QGridLayout(parameter_frame)
+        parameter_grid.setContentsMargins(10, 8, 10, 8)
         parameter_grid.setHorizontalSpacing(10)
         parameter_grid.setVerticalSpacing(6)
         parameter_grid.setColumnStretch(4, 1)
+        parameter_box.content_layout.addWidget(parameter_frame)
         self.cell_parameter_frame = parameter_frame
+        self.cell_parameter_grid = parameter_grid
         self.cell_parameter_spins = {}
+        vector_column_width = 136
         for index, (key, symbol) in enumerate((
             ("a", "a"), ("b", "b"), ("c", "c"),
             ("alpha", "α"), ("beta", "β"), ("gamma", "γ"),
@@ -161,9 +161,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             parameter_grid.addWidget(
                 spin, row, column + 1, Qt.AlignmentFlag.AlignLeft
             )
-        lattice_layout.addWidget(
-            parameter_frame, 0, Qt.AlignmentFlag.AlignLeft
-        )
+        lattice_layout.addWidget(parameter_box)
         self.cell_parameter_group = parameter_box
         self.cell_parameter_error = QLabel(lattice_page)
         self.cell_parameter_error.setWordWrap(True)

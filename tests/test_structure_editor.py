@@ -516,23 +516,32 @@ def test_lattice_inputs_have_uniform_compact_width_and_parameter_frame():
 
     dialog = _dialog()
     assert dialog.cell_parameter_frame.frameShape() == QFrame.Shape.StyledPanel
-    assert dialog.cell_parameter_frame.maximumWidth() <= 450
-    assert dialog.cell_parameter_frame.layout().indexOf(dialog.cell_parameter_group) >= 0
+    assert dialog.cell_parameter_frame.parentWidget() is dialog.cell_parameter_group.content
+    assert dialog.cell_parameter_group.content_layout.indexOf(
+        dialog.cell_parameter_frame
+    ) >= 0
     assert dialog.lattice_group.title() == "Lattice vectors (Å)"
+    assert dialog.cell_parameter_group.title() == "Cell lengths and angles"
+    assert dialog.lattice_group.maximumWidth() == dialog.cell_parameter_group.maximumWidth()
     widths = {spin.width() for spin in dialog.cell_parameter_spins.values()}
     assert len(widths) == 1
     (width,) = tuple(widths)
     assert 110 <= width <= 145
     table = dialog.lattice_vectors_table
     header = table.horizontalHeader()
-    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Fixed
-    assert all(table.columnWidth(i) == width for i in range(3))
-    assert table.maximumWidth() < 500
-    grid = dialog.cell_parameter_group.content_layout
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
+    assert header.minimumSectionSize() == 115
+    assert table.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    assert table.height() >= 150
+    grid = dialog.cell_parameter_grid
     assert grid.columnStretch(4) == 1
     for index in range(6):
         row, column = index % 3, 0 if index < 3 else 2
         assert grid.itemAtPosition(row, column + 1).alignment() == Qt.AlignmentFlag.AlignLeft
+    dialog.show()
+    QApplication.processEvents()
+    assert dialog.lattice_group.width() == dialog.cell_parameter_group.width()
     dialog.close()
 
 
