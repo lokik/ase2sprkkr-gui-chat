@@ -1335,14 +1335,22 @@ def test_cell_site_and_editing_columns_keep_actions_below_site_table():
     assert columns[1].mapTo(dialog, QPoint()).x() < columns[2].mapTo(dialog, QPoint()).x()
     expansion = dialog.add_radius_button.parentWidget()
     assert expansion.parentWidget() is details_panel
-    assert expansion.geometry().top() >= details_splitter.geometry().bottom()
+    assert expansion.geometry().bottom() <= details_splitter.geometry().top()
+    assert expansion.title() == "Cluster centre"
+    assert dialog.centre_label.parentWidget() is expansion
+    assert dialog.centre_button.parentWidget() is expansion
+    assert dialog.add_radius_button.text() == "Include within radius"
+    assert dialog.add_shells_button.text() == "Include shells"
     assert dialog.symmetric.parentWidget() is columns[0]
     assert dialog.displacement_group.parentWidget() is columns[2]
-    for button in (dialog.include_button, dialog.exclude_button, dialog.centre_button):
+    for button in (dialog.include_button, dialog.exclude_button):
         assert button.parentWidget() is columns[1]
         assert button.mapTo(dialog, QPoint()).y() >= dialog.sites.mapTo(
             dialog, QPoint(0, dialog.sites.height())
         ).y()
+    assert dialog.centre_button.mapTo(dialog, QPoint()).y() < dialog.sites.mapTo(
+        dialog, QPoint()
+    ).y()
 
 
 def test_embedding_footer_equal_buttons_and_compact_scope_labels():
@@ -1358,6 +1366,8 @@ def test_embedding_footer_equal_buttons_and_compact_scope_labels():
         dialog.buttons.button(QDialogButtonBox.StandardButton.Cancel),
     )
     assert len({button.width() for button in buttons}) == 1
+    assert dialog.hint.text().startswith("Select a repeated host cell")
+    assert dialog.layout().itemAt(0).widget() is not dialog.hint
     assert [dialog.global_scope.itemText(i) for i in range(2)] == [
         "Whole structure", "Current layer",
     ]

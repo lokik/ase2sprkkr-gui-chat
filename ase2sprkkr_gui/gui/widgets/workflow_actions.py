@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Literal
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon, QPalette
+from PyQt6.QtGui import QAction, QIcon, QKeySequence, QPalette
 from PyQt6.QtWidgets import (
     QLabel,
     QLayout,
@@ -23,7 +23,13 @@ from ase2sprkkr_gui.gui.workflow.model import (
     ActionIcon,
     AvailableAction,
     ConvergeHostScf,
+    CreateStructure,
+    CreateStructureKind,
+    EditStructure,
+    Load,
+    LoadKind,
     RunTask,
+    SaveStructure,
     UpdateEmptySpheres,
     UseForNewCalculation,
     WorkflowPlan,
@@ -42,6 +48,63 @@ _CALCULATION_COMMANDS = (
 def _action_column(action: AvailableAction) -> Literal["structure", "calculate"]:
     """Separate workflow actions by command semantics, never their display text."""
     return "calculate" if isinstance(action.command, _CALCULATION_COMMANDS) else "structure"
+
+
+def _shortcut_for_command(command) -> str | None:
+    """Reserve shortcuts by command identity, not translated action titles."""
+    if isinstance(command, CreateStructure) and command.kind is CreateStructureKind.THREE_D:
+        return "Ctrl+N"
+    if isinstance(command, Load) and command.kind is LoadKind.STRUCTURE:
+        return "Ctrl+O"
+    if isinstance(command, EditStructure):
+        return "Ctrl+E"
+    if isinstance(command, SaveStructure):
+        return "Ctrl+S"
+    return None
+
+
+class _ShortcutActionButton(QPushButton):
+    """Action card with a right-aligned shortcut hint that collapses on resize."""
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.shortcut_hint: QLabel | None = None
+        self._hint_required_width = 0
+
+    def configure_hint(self, shortcut: str, title: str) -> None:
+        hint = QLabel(shortcut, self)
+        hint.setObjectName("workflowShortcutHint")
+        hint.setForegroundRole(QPalette.ColorRole.Mid)
+        hint.setStyleSheet(
+            f"color: {self.palette().color(QPalette.ColorRole.Mid).name()};"
+        )
+        hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        hint.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        self.layout().addWidget(hint, 0, Qt.AlignmentFlag.AlignRight)
+        self.shortcut_hint = hint
+        title_label = next(
+            (label for label in self.findChildren(QLabel) if label.text() == title),
+            None,
+        )
+        title_width = (
+            title_label.fontMetrics().horizontalAdvance(title)
+            if title_label is not None
+            else self.fontMetrics().horizontalAdvance(title)
+        )
+        # Two margins, the icon, two gaps, the full unbroken title and hint.
+        self._hint_required_width = (
+            2 * SPACE_LG + 26 + 2 * SPACE_LG
+            + title_width + hint.sizeHint().width() + SPACE_SM
+        )
+        self._update_hint_visibility()
+
+    def _update_hint_visibility(self) -> None:
+        if self.shortcut_hint is not None:
+            self.shortcut_hint.setVisible(self.width() >= self._hint_required_width)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_hint_visibility()
 
 
 class WorkflowActionsWidget(QWidget):
@@ -136,6 +199,7 @@ class WorkflowActionsWidget(QWidget):
         action: AvailableAction,
         parent: QWidget,
     ) -> QPushButton | QToolButton:
+        shortcut = _shortcut_for_command(action.command)
         if action.menu:
             button = QToolButton(parent)
             button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
@@ -144,7 +208,7 @@ class WorkflowActionsWidget(QWidget):
             minimum_height = 52
             menu_button = True
         else:
-            button = QPushButton(parent)
+            button = _ShortcutActionButton(parent) if shortcut else QPushButton(parent)
             icon_size = None
             minimum_height = 68
             menu_button = False
@@ -163,6 +227,13 @@ class WorkflowActionsWidget(QWidget):
             menu_button=menu_button,
             subtle=action.category == "neutral",
         )
+        if shortcut:
+            button.setShortcut(QKeySequence(shortcut))
+            button.setToolTip(
+                "\n".join(filter(None, (action.tooltip, f"Shortcut: {shortcut}")))
+            )
+            if isinstance(button, _ShortcutActionButton):
+                button.configure_hint(shortcut, action.title)
         button.clicked.connect(
             lambda _checked=False, command=action.command: self.commandRequested.emit(
                 command

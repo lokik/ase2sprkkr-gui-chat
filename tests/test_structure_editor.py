@@ -58,6 +58,38 @@ def test_overview_first_and_advanced_removed_with_shared_preview():
     dialog.close()
 
 
+def test_embedded_tab_reuses_guided_embedding_icon():
+    from PyQt6.QtGui import QIcon
+    from ase2sprkkr_gui.gui.misc.resources import icon_path
+
+    dialog = _dialog(_cluster())
+    index = dialog._embedded_index()
+    assert index >= 0
+    expected = QIcon(str(icon_path("bulk_crystal.png")))
+    assert not expected.isNull()
+    size = dialog.tabs.iconSize()
+    assert dialog.tabs.tabIcon(index).pixmap(size).toImage() == (
+        expected.pixmap(size).toImage()
+    )
+    dialog.close()
+
+
+def test_editor_page_hints_live_in_shared_footer():
+    dialog = _dialog(_cluster())
+    action_row = dialog.layout().itemAt(dialog.layout().count() - 1).layout()
+    assert action_row.indexOf(dialog.footer_hint) >= 0
+    dialog.tabs.setCurrentWidget(dialog._sites_page)
+    assert "host sites and occupations" in dialog.footer_hint.text()
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    assert "HOST POTENTIAL lattice" in dialog.footer_hint.text()
+    assert dialog._lattice_page.layout().itemAt(0).widget() is dialog.lattice_group
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    assert "Select a repeated host cell" in dialog.footer_hint.text()
+    dialog.tabs.setCurrentWidget(dialog.overview)
+    assert dialog.footer_hint.text() == ""
+    dialog.close()
+
+
 def test_build_derived_in_transform_not_advanced():
     dialog = _dialog()
     dialog.tabs.setCurrentIndex(3)
@@ -76,7 +108,8 @@ def test_noop_and_cancel_do_not_modify_source():
     dialog.close()
     dialog = _dialog(source)
     dialog._draft.split_site(dialog._draft.sites[0])
-    dialog.reject()
+    # This test isolates cancellation from the interactive close confirmation.
+    editor_module.QDialog.reject(dialog)
     assert source.info["occupancy"] == {"0": {"Fe": 1.0}}
     np.testing.assert_array_equal(source.get_array("spacegroup_kinds"), [0, 0])
     dialog.close()
@@ -124,7 +157,7 @@ def test_cancel_transform_keeps_staged_lattice_edit(monkeypatch):
     dialog.lattice_spinboxes[0][0].setValue(2.0)
     dialog.scale_button.click()
     np.testing.assert_allclose(dialog._draft.cell[0, 0], 2.0)
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_embedded_page_edits_host_and_hides_shared_preview():
@@ -148,6 +181,245 @@ def test_embedded_page_edits_host_and_hides_shared_preview():
     assert dialog.preview_stack.currentWidget() is dialog._overview_previews
     assert dialog._shared_preview.isHidden()
     dialog.close()
+
+
+def test_discard_cluster_is_a_transform_and_retains_host(monkeypatch):
+    cluster = _cluster()
+    host = cluster.embedding_host
+    dialog = _dialog(cluster)
+    assert dialog.discard_cluster_button.property("workflowActionTitle") == "Discard cluster"
+    assert dialog.cluster_actions.title() == "Embedded cluster"
+    assert not dialog.cluster_actions.isHidden()
+    assert not hasattr(dialog, "apply_cluster_button")
+    assert not dialog._embedded_page.isAncestorOf(dialog.discard_cluster_button)
+    dialog.tabs.setCurrentWidget(dialog._transform_page)
+    monkeypatch.setattr(
+        editor_module.QMessageBox, "question",
+        lambda *_args, **_kwargs: editor_module.QMessageBox.StandardButton.Yes,
+    )
+    dialog.discard_cluster_button.click()
+    assert dialog._working_atoms is host
+    assert dialog.tabs.currentWidget() is dialog.overview
+    assert [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())] == [
+        "Overview", "Sites", "Lattice", "Transform"
+    ]
+    assert dialog.cluster_actions.isHidden()
+    assert dialog._result is None
+    assert "sprkkr_embedding" in cluster.arrays
+    editor_module.QDialog.reject(dialog)
+
+
+def test_discard_cluster_retains_native_host_potential(monkeypatch):
+    from ase2sprkkr.potentials.potential_base import Potential
+
+    cluster = _cluster()
+    host = Potential.from_atoms(cluster.embedding_host)
+    host.SCF_INFO.SCFSTATUS = "CONVERGED"
+    cluster.embedding_host = host
+    dialog = _dialog(cluster)
+    monkeypatch.setattr(
+        editor_module.QMessageBox, "question",
+        lambda *_args, **_kwargs: editor_module.QMessageBox.StandardButton.Yes,
+    )
+    dialog.discard_cluster_button.click()
+    assert host.SCF_INFO.SCFSTATUS() == "CONVERGED"
+    assert cluster.embedding_host is host
+    dialog._on_ok()
+    assert dialog._result is host.atoms
+    assert dialog._result.potential is host
+    assert host.SCF_INFO.SCFSTATUS() == "CONVERGED"
+    dialog.close()
+
+
+def test_navigation_preserves_embedded_draft_and_undo(monkeypatch):
+    cluster = _cluster()
+    dialog = _dialog(cluster)
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    embedded = dialog._embedded_editor
+    undo_stack = embedded.undo_stack
+    site = next(iter(embedded.draft.entries))
+    assert undo_stack.apply(
+        lambda: embedded.draft.set_occupation([site], {"Fe": 1.0}),
+        "Change cluster occupation",
+    )
+    assert embedded.has_unapplied_changes()
+    saved_index = undo_stack.index()
+    monkeypatch.setattr(
+        dialog, "_confirm_close_changes",
+        lambda: (_ for _ in ()).throw(AssertionError("navigation must not prompt")),
+    )
+    for destination in (dialog.overview, dialog._sites_page,
+                        dialog._lattice_page, dialog._embedded_page):
+        dialog.tabs.setCurrentWidget(destination)
+        assert dialog._embedded_editor is embedded
+        assert embedded.undo_stack is undo_stack
+        assert undo_stack.index() == saved_index
+    assert dialog._working_atoms is cluster
+    assert dialog._result is None
+    assert "Fe" in dialog._candidate().sites[0].occupation.to_dict(True)
+    undo_stack.undo()
+    assert embedded.draft.is_unchanged()
+    assert not dialog._has_unapplied_changes()
+    editor_module.QDialog.reject(dialog)
+
+
+def test_navigation_with_incomplete_cluster_field_stays_editable(monkeypatch):
+    dialog = _dialog(_cluster())
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    embedded = dialog._embedded_editor
+    monkeypatch.setattr(embedded, "_unfinished_numbers", lambda: [object()])
+    monkeypatch.setattr(
+        dialog, "_confirm_close_changes",
+        lambda: (_ for _ in ()).throw(AssertionError("navigation must not prompt")),
+    )
+    dialog.tabs.setCurrentWidget(dialog.overview)
+    assert dialog.tabs.currentWidget() is dialog.overview
+    assert dialog._embedded_editor is embedded
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    assert dialog._embedded_editor is embedded
+    editor_module.QDialog.reject(dialog)
+
+
+def test_final_apply_blocks_incomplete_embedded_values(monkeypatch):
+    dialog = _dialog(_cluster())
+    embedded = dialog._embedded_editor
+    monkeypatch.setattr(embedded, "_unfinished_numbers", lambda: [object()])
+    warnings = []
+    monkeypatch.setattr(
+        editor_module.QMessageBox, "warning",
+        lambda _parent, title, message, *_args, **_kwargs:
+            warnings.append((title, message)),
+    )
+    dialog._on_ok()
+    assert dialog._result is None
+    assert any("Incomplete Cluster Edit" == title for title, _ in warnings)
+    assert dialog._embedded_editor is embedded
+    editor_module.QDialog.reject(dialog)
+
+
+def test_host_and_embedded_changes_are_composed_at_final_apply():
+    cluster = _cluster()
+    original_positions = cluster.positions.copy()
+    original_host_cell = cluster.embedding_host.cell.copy()
+    dialog = _dialog(cluster)
+    site = next(iter(dialog._embedded_editor.draft.entries))
+    dialog._embedded_editor.draft.set_occupation([site], {"Fe": 1.0})
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    dialog.lattice_spinboxes[0][0].setValue(4.0)
+    assert dialog._embedded_editor.has_unapplied_changes()
+    preview = dialog._candidate()
+    assert "Fe" in preview.sites[0].occupation.to_dict(True)
+    np.testing.assert_allclose(preview.embedding_host.cell[0, 0], 4.0)
+    assert dialog._working_atoms is cluster
+    assert dialog._result is None
+    np.testing.assert_allclose(cluster.positions, original_positions)
+    np.testing.assert_array_equal(cluster.embedding_host.cell, original_host_cell)
+    dialog._on_ok()
+    assert dialog._result is not None
+    assert "Fe" in dialog._result.sites[0].occupation.to_dict(True)
+    np.testing.assert_allclose(dialog._result.embedding_host.cell[0, 0], 4.0)
+    dialog.close()
+
+
+def test_discard_cluster_keeps_pending_host_geometry(monkeypatch):
+    cluster = _cluster()
+    old_host = cluster.embedding_host
+    dialog = _dialog(cluster)
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    dialog.lattice_spinboxes[0][0].setValue(4.0)
+    monkeypatch.setattr(
+        editor_module.QMessageBox, "question",
+        lambda *_args, **_kwargs: editor_module.QMessageBox.StandardButton.Yes,
+    )
+    dialog.discard_cluster_button.click()
+    assert dialog.tabs.currentWidget() is dialog.overview
+    assert dialog._embedded_editor is None
+    np.testing.assert_allclose(dialog._working_atoms.cell[0, 0], 4.0)
+    np.testing.assert_allclose(old_host.cell[0, 0], 2.0)
+    dialog._on_ok()
+    assert dialog._result is not None
+    np.testing.assert_allclose(dialog._result.cell[0, 0], 4.0)
+    dialog.close()
+
+
+def test_host_edit_after_cluster_discard_is_checked_on_final_apply(monkeypatch):
+    from ase2sprkkr.potentials.potential_base import Potential
+
+    cluster = _cluster()
+    host = Potential.from_atoms(cluster.embedding_host)
+    host.SCF_INFO.SCFSTATUS = "CONVERGED"
+    cluster.embedding_host = host
+    dialog = _dialog(cluster)
+    monkeypatch.setattr(
+        editor_module.QMessageBox, "question",
+        lambda *_args, **_kwargs: editor_module.QMessageBox.StandardButton.Yes,
+    )
+    dialog.discard_cluster_button.click()
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    dialog.lattice_spinboxes[0][0].setValue(3.5)
+    warnings = []
+    def confirm(_parent, title, message, *_args, **_kwargs):
+        warnings.append((title, message))
+        return editor_module.QMessageBox.StandardButton.Yes
+    monkeypatch.setattr(editor_module.QMessageBox, "warning", confirm)
+    dialog._on_ok()
+    assert any(title == "Host Transformation Invalidates SCF"
+               for title, _ in warnings)
+    np.testing.assert_allclose(dialog._result.cell[0, 0], 3.5)
+    assert host.SCF_INFO.SCFSTATUS() == "CONVERGED"
+    dialog.close()
+
+
+def test_close_prompts_only_once_for_entire_editor(monkeypatch):
+    cluster = _cluster()
+    dialog = _dialog(cluster)
+    embedded = dialog._embedded_editor
+    site = next(iter(embedded.draft.entries))
+    embedded.draft.set_occupation([site], {"Fe": 1.0})
+    outcomes = []
+    def choose():
+        outcomes.append("called")
+        return "continue"
+    monkeypatch.setattr(dialog, "_confirm_close_changes", choose)
+    dialog.show()
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    dialog.tabs.setCurrentWidget(dialog.overview)
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    assert outcomes == []
+    dialog.reject()
+    assert outcomes == ["called"]
+    assert dialog.isVisible()
+    assert dialog._result is None
+    monkeypatch.setattr(dialog, "_confirm_close_changes", lambda: "apply")
+    dialog.reject()
+    assert dialog.result() == editor_module.QDialog.DialogCode.Accepted
+    assert dialog._result is not None
+    assert "Fe" in dialog._result.sites[0].occupation.to_dict(True)
+    assert "Co" in cluster.sites[0].occupation.to_dict(True)
+    dialog.close()
+
+    dialog = _dialog(_cluster())
+    site = next(iter(dialog._embedded_editor.draft.entries))
+    dialog._embedded_editor.draft.set_occupation([site], {"Fe": 1.0})
+    monkeypatch.setattr(dialog, "_confirm_close_changes", lambda: "discard")
+    dialog.reject()
+    assert dialog.result() == editor_module.QDialog.DialogCode.Rejected
+    assert dialog._result is None
+
+
+def test_window_close_can_continue_editing_or_discard(monkeypatch):
+    dialog = _dialog(_cluster())
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    site = next(iter(dialog._embedded_editor.draft.entries))
+    dialog._embedded_editor.draft.set_occupation([site], {"Fe": 1.0})
+    monkeypatch.setattr(dialog, "_confirm_close_changes", lambda: "continue")
+    dialog.show()
+    dialog.close()
+    assert dialog.isVisible()
+    assert dialog._embedded_editor.has_unapplied_changes()
+    monkeypatch.setattr(dialog, "_confirm_close_changes", lambda: "discard")
+    dialog.close()
+    assert not dialog.isVisible()
 
 
 def test_editing_host_lattice_rebases_cluster_displacement_without_touching_original():
@@ -174,7 +446,7 @@ def test_newly_built_embedded_structure_adds_and_selects_page():
     assert dialog.tabs.currentIndex() == 1
     assert dialog.tabs.tabText(1) == "Embedded"
     assert dialog._embedded_editor is not None
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_0d_transform_rejects_unknown_site_mapping():
@@ -238,15 +510,100 @@ def test_overview_reports_hall_number_for_3d_and_left_right_bulk_for_2d():
 
 
 
+def test_lattice_inputs_have_uniform_compact_width_and_parameter_frame():
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QFrame, QHeaderView
+
+    dialog = _dialog()
+    assert dialog.cell_parameter_frame.frameShape() == QFrame.Shape.StyledPanel
+    assert dialog.cell_parameter_frame.maximumWidth() <= 450
+    assert dialog.cell_parameter_frame.layout().indexOf(dialog.cell_parameter_group) >= 0
+    assert dialog.lattice_group.title() == "Lattice vectors (Å)"
+    widths = {spin.width() for spin in dialog.cell_parameter_spins.values()}
+    assert len(widths) == 1
+    (width,) = tuple(widths)
+    assert 110 <= width <= 145
+    table = dialog.lattice_vectors_table
+    header = table.horizontalHeader()
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Fixed
+    assert all(table.columnWidth(i) == width for i in range(3))
+    assert table.maximumWidth() < 500
+    grid = dialog.cell_parameter_group.content_layout
+    assert grid.columnStretch(4) == 1
+    for index in range(6):
+        row, column = index % 3, 0 if index < 3 else 2
+        assert grid.itemAtPosition(row, column + 1).alignment() == Qt.AlignmentFlag.AlignLeft
+    dialog.close()
+
+
+def test_overview_uses_indented_aligned_two_column_facts():
+    from PyQt6.QtWidgets import QBoxLayout
+    from ase2sprkkr_gui.gui.widgets.structures.editor_overview import (
+        _fact_columns, _fact_table,
+    )
+
+    dialog = _dialog(_cluster())
+    overview = dialog.overview
+    sections = (
+        overview.info_box, overview.host_box, overview.table_box,
+        *(box for box, _ in overview.bulk_boxes.values()),
+    )
+    assert all(section.content_layout.contentsMargins().left() == 14 for section in sections)
+    dialog.show()
+    QApplication.processEvents()
+    expected_direction = (
+        QBoxLayout.Direction.LeftToRight
+        if overview.scroll.viewport().width() >= 720
+        else QBoxLayout.Direction.TopToBottom
+    )
+    assert overview.info_columns.direction() == expected_direction
+    assert overview.info_columns.spacing() == 40
+    assert "Type:" in overview.main.text()
+    assert "Cell (Å):" in overview.symmetry.text()
+    assert "Cluster symmetry:" in overview.symmetry.text()
+    assert "<table" in overview.host_facts.text()
+    assert "Space group:" in overview.host_facts.text()
+    summary, details = _fact_columns(
+        "Type: 3D\nSites: 2\nCell (Å): a=2\nAngles (°): α=90",
+        "Space group: Pm-3m",
+    )
+    assert summary == ["Type: 3D", "Sites: 2"]
+    assert details == ["Cell (Å): a=2", "Angles (°): α=90", "Space group: Pm-3m"]
+    assert _fact_table(summary, details).count("<tr>") == 3
+    assert '<td width="36"></td>' in _fact_table(summary, details)
+    assert _fact_table(["Elements: Fe < Co"]).count("&lt;") == 1
+    dialog.close()
+
+
 def test_info_headings_and_unframed_sites():
     from PyQt6.QtWidgets import QFrame
 
     dialog = _dialog()
     assert dialog.overview.info_box.title() == "Structure information"
     assert dialog.overview.table_box.title() == "Atomic sites"
-    assert "font-weight: 700" in dialog.overview.info_box.styleSheet()
-    assert "font-weight: 700" in dialog.overview.table_box.styleSheet()
+    from PyQt6.QtWidgets import QGroupBox
+    from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
+
+    sections = (
+        dialog.overview.info_box,
+        dialog.overview.host_box,
+        dialog.overview.table_box,
+        *(box for box, _label in dialog.overview.bulk_boxes.values()),
+        dialog.lattice_group,
+        dialog.cell_parameter_group,
+        dialog.geometry_group,
+        dialog.derived_group,
+    )
+    assert all(isinstance(section, EditorSection) for section in sections)
+    assert all(not isinstance(section, QGroupBox) for section in sections)
+    assert all(section.heading.font().bold() for section in sections)
+    assert all(
+        section.heading.font().pointSizeF() > dialog.font().pointSizeF()
+        for section in sections
+    )
     assert dialog.scroll.frameShape() == QFrame.Shape.NoFrame
+    assert dialog.overview.site_table.horizontalHeader().count() == 8
+    assert not hasattr(dialog, "cell_summary")
     dialog.close()
 
 
@@ -283,7 +640,7 @@ def test_edit_lengths_angles_preserves_fractional_coordinates():
     )
     assert not np.allclose(result.positions, atoms.positions)
     np.testing.assert_allclose(np.asarray(atoms.cell), np.eye(3))
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_lattice_host_potential_label_and_cell_parameters_rebase_cluster():
@@ -311,7 +668,7 @@ def test_lattice_host_potential_label_and_cell_parameters_rebase_cluster():
     np.testing.assert_allclose(
         np.asarray(old_host.cell), np.diag([2, 2, 4]),
     )
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_host_table_highlights_all_matching_cluster_atoms():
@@ -345,3 +702,41 @@ def test_host_table_highlights_all_matching_cluster_atoms():
     assert tuple(np.flatnonzero(previews.cluster_preview._widths > 1)) == (1,)
     assert not np.any(previews.host_preview._widths > 1)
     dialog.close()
+
+
+def test_site_scope_radios_are_stacked_beside_table():
+    from PyQt6.QtWidgets import QVBoxLayout
+
+    dialog = _dialog(_cluster())
+    overview = dialog.overview
+    assert isinstance(overview.site_scope.layout(), QVBoxLayout)
+    assert overview.site_scope.layout().itemAt(0).widget() is overview.cluster_radio
+    assert overview.site_scope.layout().itemAt(1).widget() is overview.host_radio
+    assert overview.table_row.itemAt(0).widget() is overview.site_table
+    assert overview.table_row.itemAt(1).widget() is overview.site_scope
+    assert overview.table_box.title() == "Atomic sites"
+    dialog.close()
+
+
+def test_cannot_make_lattice_vector_zero():
+    dialog = _dialog()
+    before = dialog._require_draft().cell.copy()
+    # Initially the a vector is (1, 0, 0). The first component may not
+    # be changed to zero, because that would make the entire vector zero.
+    dialog.lattice_spinboxes[0][0].setValue(0.0)
+    np.testing.assert_array_equal(dialog._require_draft().cell, before)
+    assert dialog.lattice_spinboxes[0][0].value() == 1.0
+    assert "zero length" in dialog.cell_parameter_error.text()
+    dialog.close()
+
+
+def test_loaded_zero_vector_can_be_repaired_without_crashing():
+    atoms = _atoms()
+    atoms.set_cell([[1, 0, 0], [0, 1, 0], [0, 0, 0]])
+    atoms.set_pbc((True, True, False))
+    dialog = _dialog(atoms)
+    assert not dialog.cell_parameter_group.isEnabled()
+    dialog.lattice_spinboxes[2][2].setValue(2.0)
+    assert dialog.cell_parameter_group.isEnabled()
+    assert not np.isclose(np.linalg.norm(dialog._require_draft().cell[2]), 0)
+    editor_module.QDialog.reject(dialog)

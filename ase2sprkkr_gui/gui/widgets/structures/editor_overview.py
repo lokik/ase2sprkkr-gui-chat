@@ -1,12 +1,15 @@
 """Detailed, read-only overview with linked cluster/host site selection."""
 from __future__ import annotations
 
+from html import escape
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QFormLayout, QGroupBox, QHeaderView, QHBoxLayout, QLabel, QRadioButton,
+    QBoxLayout, QFormLayout, QHeaderView, QHBoxLayout, QLabel, QRadioButton,
     QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
 from ase2sprkkr_gui.gui.widgets.structures.overview import structure_facts
 from ase2sprkkr_gui.physics.composition import site_composition
 
@@ -30,11 +33,42 @@ def _symmetry_description(atoms):
     )
 
 
-def _section(title, parent):
-    """Use identical bold section titles without bolding their contents."""
-    box = QGroupBox(title, parent)
-    box.setStyleSheet("QGroupBox::title { font-weight: 700; }")
-    return box
+def _fact_columns(facts: str, symmetry: str = "") -> tuple[list[str], list[str]]:
+    """Keep identity and geometry/symmetry in distinct readable columns."""
+    identity, details = [], []
+    for line in facts.splitlines():
+        if line.startswith(("Cell (Å):", "Angles (°):", "SCF status:")):
+            details.append(line)
+        else:
+            identity.append(line)
+    details.extend(symmetry.splitlines())
+    return identity, details
+
+
+def _fact_cells(line: str | None) -> str:
+    """Produce one label/value pair with a consistent value starting position."""
+    if line is None:
+        return "<td></td><td></td>"
+    if ":" not in line:
+        return f'<td colspan="2">{escape(line)}</td>'
+    label, value = line.split(":", 1)
+    return (
+        f'<td valign="top" style="padding-right: 10px; white-space: nowrap;">'
+        f'{escape(label)}:</td><td valign="top">{escape(value.strip())}</td>'
+    )
+
+
+def _fact_table(left: list[str], right: list[str] | None = None) -> str:
+    """Aligned, selectable facts with a modest gap between the two groups."""
+    rows = []
+    for index in range(max(len(left), len(right or []))):
+        lhs = left[index] if index < len(left) else None
+        cells = _fact_cells(lhs)
+        if right is not None:
+            rhs = right[index] if index < len(right) else None
+            cells += '<td width="36"></td>' + _fact_cells(rhs)
+        rows.append(f"<tr>{cells}</tr>")
+    return '<table cellspacing="0" cellpadding="2">' + "".join(rows) + "</table>"
 
 
 class EditorOverviewWidget(QWidget):
@@ -59,53 +93,54 @@ class EditorOverviewWidget(QWidget):
         self.scroll.setWidget(content)
         layout = QVBoxLayout(content)
 
-        self.info_box = _section("Structure information", content)
-        info_layout = QVBoxLayout(self.info_box)
+        self.info_box = EditorSection("Structure information", content)
+        info_layout = self.info_box.content_layout
+        info_layout.setContentsMargins(14, 0, 0, 0)
+        self.info_columns = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.info_columns.setSpacing(40)
         self.main = QLabel(self.info_box)
         self.main.setWordWrap(True)
+        self.main.setTextFormat(Qt.TextFormat.RichText)
         self.main.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        info_layout.addWidget(self.main)
+        self.info_columns.addWidget(self.main, 1, Qt.AlignmentFlag.AlignTop)
         self.symmetry = QLabel(self.info_box)
         self.symmetry.setWordWrap(True)
+        self.symmetry.setTextFormat(Qt.TextFormat.RichText)
         self.symmetry.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        info_layout.addWidget(self.symmetry)
+        self.info_columns.addWidget(self.symmetry, 1, Qt.AlignmentFlag.AlignTop)
+        info_layout.addLayout(self.info_columns)
         layout.addWidget(self.info_box)
 
-        self.host_box = _section("Host structure", content)
-        host_layout = QFormLayout(self.host_box)
+        self.host_box = EditorSection(
+            "Host structure", content, layout_type=QFormLayout,
+        )
+        host_layout = self.host_box.content_layout
+        host_layout.setContentsMargins(14, 0, 0, 0)
         self.host_facts = QLabel(self.host_box)
         self.host_facts.setWordWrap(True)
+        self.host_facts.setTextFormat(Qt.TextFormat.RichText)
         self.host_facts.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         host_layout.addRow(self.host_facts)
         layout.addWidget(self.host_box)
 
         self.bulk_boxes = {}
         for side in ("left", "right"):
-            box = _section(f"{side.title()} bulk", content)
-            section = QFormLayout(box)
+            box = EditorSection(
+                f"{side.title()} bulk", content, layout_type=QFormLayout,
+            )
+            section = box.content_layout
+            section.setContentsMargins(14, 0, 0, 0)
             summary = QLabel(box)
             summary.setWordWrap(True)
+            summary.setTextFormat(Qt.TextFormat.RichText)
             summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             section.addRow(summary)
             layout.addWidget(box)
             self.bulk_boxes[side] = (box, summary)
 
-        self.table_box = _section("Atomic sites", content)
-        table_layout = QVBoxLayout(self.table_box)
-        table_header = QHBoxLayout()
-        table_header.addStretch(1)
-        self.site_scope = QWidget(self.table_box)
-        scope_layout = QHBoxLayout(self.site_scope)
-        scope_layout.setContentsMargins(0, 0, 0, 0)
-        self.cluster_radio = QRadioButton("Cluster", self.site_scope)
-        self.host_radio = QRadioButton("Host", self.site_scope)
-        self.cluster_radio.setChecked(True)
-        self.cluster_radio.toggled.connect(self._scope_changed)
-        self.host_radio.toggled.connect(self._scope_changed)
-        scope_layout.addWidget(self.cluster_radio)
-        scope_layout.addWidget(self.host_radio)
-        table_header.addWidget(self.site_scope)
-        table_layout.addLayout(table_header)
+        self.table_box = EditorSection("Atomic sites", content)
+        table_layout = self.table_box.content_layout
+        table_layout.setContentsMargins(14, 0, 0, 0)
 
         self.site_table = QTableWidget(0, 8, self.table_box)
         self.site_table.setHorizontalHeaderLabels([
@@ -120,7 +155,27 @@ class EditorOverviewWidget(QWidget):
             QHeaderView.ResizeMode.ResizeToContents
         )
         self.site_table.currentCellChanged.connect(self._selection_changed)
-        table_layout.addWidget(self.site_table)
+
+        # Radio buttons are to the right of the table in two rows; the table
+        # keeps its own grid and column headers.
+        self.site_scope = QWidget(self.table_box)
+        scope_layout = QVBoxLayout(self.site_scope)
+        scope_layout.setContentsMargins(0, 0, 0, 0)
+        scope_layout.setSpacing(5)
+        self.cluster_radio = QRadioButton("Cluster", self.site_scope)
+        self.host_radio = QRadioButton("Host", self.site_scope)
+        self.cluster_radio.setChecked(True)
+        self.cluster_radio.toggled.connect(self._scope_changed)
+        self.host_radio.toggled.connect(self._scope_changed)
+        scope_layout.addWidget(self.cluster_radio)
+        scope_layout.addWidget(self.host_radio)
+
+        self.table_row = QHBoxLayout()
+        self.table_row.addWidget(self.site_table, 1)
+        self.table_row.addWidget(
+            self.site_scope, 0, Qt.AlignmentFlag.AlignTop,
+        )
+        table_layout.addLayout(self.table_row)
         layout.addWidget(self.table_box, 1)
         layout.addStretch(1)
 
@@ -201,19 +256,22 @@ class EditorOverviewWidget(QWidget):
         self.site_scope.setVisible(self._host_atoms is not None)
         if self._host_atoms is None and self.host_radio.isChecked():
             self.cluster_radio.setChecked(True)
-        self.main.setText(structure_facts(atoms))
-        self.symmetry.setText(
+        symmetry = (
             "Cluster symmetry: refer to the host symmetry below"
             if is_cluster else
             _symmetry_description(atoms) if all(atoms.pbc) else
             "Space groups of the two bulk regions are shown separately"
         )
+        summary, details = _fact_columns(structure_facts(atoms), symmetry)
+        self.main.setText(_fact_table(summary))
+        self.symmetry.setText(_fact_table(details))
         self.host_box.setVisible(self._host_atoms is not None)
         if self._host_atoms is not None:
-            self.host_facts.setText(
-                structure_facts(self._host_atoms) + "\n"
-                + _symmetry_description(self._host_atoms)
+            summary, details = _fact_columns(
+                structure_facts(self._host_atoms),
+                _symmetry_description(self._host_atoms),
             )
+            self.host_facts.setText(_fact_table(summary, details))
         regions = getattr(
             self._host_atoms if is_cluster else atoms, "regions", {},
         )
@@ -224,7 +282,19 @@ class EditorOverviewWidget(QWidget):
                 continue
             try:
                 part = region.create_atoms()
-                label.setText(structure_facts(part) + "\n" + _symmetry_description(part))
+                summary, details = _fact_columns(
+                    structure_facts(part), _symmetry_description(part),
+                )
+                label.setText(_fact_table(summary, details))
             except (ValueError, TypeError, AttributeError) as error:
-                label.setText(f"Unavailable: {error}")
+                label.setText(_fact_table([f"Unavailable: {error}"]))
         self._populate_sites()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Preserve two columns in the normal editor, but stack when narrow.
+        self.info_columns.setDirection(
+            QBoxLayout.Direction.LeftToRight
+            if self.scroll.viewport().width() >= 720
+            else QBoxLayout.Direction.TopToBottom
+        )

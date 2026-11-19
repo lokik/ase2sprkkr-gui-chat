@@ -23,4 +23,5 @@ The structure editor tab icons (`structure-sites.svg`,
 original Ase2sprkkr artwork. They follow the existing structure-creation
 icons' navy outlines, teal atomic highlights, and lightly shaded cells,
 while remaining legible at the editor's 22 px tab size. The Overview and
-Embedded tabs retain their existing system-theme icons.
+The Embedded tab and embedding action reuse the existing packaged embedding
+icon from the Guided workflow (currently `bulk_crystal.png`).

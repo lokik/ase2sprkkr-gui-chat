@@ -62,6 +62,11 @@ class _PendingDisplacement:
 class BuildEmbeddingDialog(QDialog):
     """Build/edit a cluster without mutating its periodic host."""
 
+    HELP_TEXT = (
+        "Select a repeated host cell, then include or modify individual sites. "
+        "Only included sites are written to the cluster; the host remains unchanged."
+    )
+
     def __init__(self, atoms, parent: QWidget | None = None, *, embedded=False):
         super().__init__(parent)
         self._embedded = embedded
@@ -120,15 +125,6 @@ class BuildEmbeddingDialog(QDialog):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        hint = QLabel(
-            "Select a repeated host cell, then include or modify individual sites. "
-            "Only included sites are written to the cluster; the host remains unchanged."
-        )
-        hint.setWordWrap(True)
-        root.addWidget(hint)
-
-        self.centre_label = QLabel()
-        root.addWidget(self.centre_label)
         body = QSplitter(Qt.Orientation.Vertical, self)
         body.setChildrenCollapsible(False)
         root.addWidget(body, 1)
@@ -205,6 +201,49 @@ class BuildEmbeddingDialog(QDialog):
         details_panel = QWidget(splitter)
         details_layout = QVBoxLayout(details_panel)
         details_layout.setContentsMargins(0, 0, 0, 0)
+        # Centre and expansion apply to the cluster as a whole, so they
+        # precede the per-cell table and individual site editing.
+        options = QGroupBox("Cluster centre", details_panel)
+        options_layout = QVBoxLayout(options)
+        centre_row = QHBoxLayout()
+        self.centre_label = QLabel(options)
+        self.centre_label.setWordWrap(True)
+        centre_row.addWidget(self.centre_label, 1)
+        self.centre_button = QPushButton("Use selected site as centre", options)
+        self.centre_button.setToolTip(
+            "Set the host site used for symmetry and radius/shell expansion"
+        )
+        self.centre_button.clicked.connect(self._set_centre)
+        centre_row.addWidget(self.centre_button)
+        options_layout.addLayout(centre_row)
+        opt_row = QHBoxLayout()
+        options_layout.addLayout(opt_row)
+        opt_row.addWidget(QLabel("Radius (Å):"))
+        self.radius = QDoubleSpinBox()
+        self.radius.setRange(0, 1000)
+        self.radius.setDecimals(2)
+        self.radius.setValue(5.0)
+        self.radius.valueChanged.connect(self._schedule_expansion_preview)
+        opt_row.addWidget(self.radius)
+        self.add_radius_button = QPushButton("Include within radius")
+        self.add_radius_button.clicked.connect(self._add_radius)
+        opt_row.addWidget(self.add_radius_button)
+        opt_row.addWidget(QLabel("Coordination shells:"))
+        self.shells = QSpinBox()
+        self.shells.setRange(0, 50)
+        self.shells.setValue(1)
+        self.shells.valueChanged.connect(self._schedule_expansion_preview)
+        opt_row.addWidget(self.shells)
+        self.add_shells_button = QPushButton("Include shells")
+        self.add_shells_button.clicked.connect(self._add_shells)
+        opt_row.addWidget(self.add_shells_button)
+        opt_row.addStretch(1)
+        self.expansion_info = QLabel()
+        self.expansion_info.setWordWrap(True)
+        self.expansion_info.hide()
+        options_layout.addWidget(self.expansion_info)
+        details_layout.addWidget(options)
+
         details_splitter = QSplitter(Qt.Orientation.Horizontal, details_panel)
         details_splitter.setChildrenCollapsible(False)
         details_layout.addWidget(details_splitter, 1)
@@ -233,10 +272,6 @@ class BuildEmbeddingDialog(QDialog):
         self.exclude_button = QPushButton("Exclude")
         self.exclude_button.clicked.connect(self._exclude)
         site_actions.addWidget(self.exclude_button)
-        self.centre_button = QPushButton("Use as symmetry centre")
-        self.centre_button.setToolTip("Centre for point symmetry and radius/shell expansion")
-        self.centre_button.clicked.connect(self._set_centre)
-        site_actions.addWidget(self.centre_button)
         site_layout.addLayout(site_actions)
         details_splitter.addWidget(site_group)
 
@@ -284,36 +319,6 @@ class BuildEmbeddingDialog(QDialog):
         details_splitter.setSizes([510, 500])
         splitter.addWidget(details_panel)
         splitter.setSizes([350, 1010])
-
-        options = QGroupBox("Expand cluster around centre")
-        options_layout = QVBoxLayout(options)
-        opt_row = QHBoxLayout()
-        options_layout.addLayout(opt_row)
-        opt_row.addWidget(QLabel("Radius (Å):"))
-        self.radius = QDoubleSpinBox()
-        self.radius.setRange(0, 1000)
-        self.radius.setDecimals(2)
-        self.radius.setValue(5.0)
-        self.radius.valueChanged.connect(self._schedule_expansion_preview)
-        opt_row.addWidget(self.radius)
-        self.add_radius_button = QPushButton("Add radius")
-        self.add_radius_button.clicked.connect(self._add_radius)
-        opt_row.addWidget(self.add_radius_button)
-        opt_row.addWidget(QLabel("Coordination shells:"))
-        self.shells = QSpinBox()
-        self.shells.setRange(0, 50)
-        self.shells.setValue(1)
-        self.shells.valueChanged.connect(self._schedule_expansion_preview)
-        opt_row.addWidget(self.shells)
-        self.add_shells_button = QPushButton("Add shells")
-        self.add_shells_button.clicked.connect(self._add_shells)
-        opt_row.addWidget(self.add_shells_button)
-        opt_row.addStretch(1)
-        self.expansion_info = QLabel()
-        self.expansion_info.setWordWrap(True)
-        self.expansion_info.hide()
-        options_layout.addWidget(self.expansion_info)
-        details_layout.addWidget(options)
 
         preview_splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
@@ -409,7 +414,12 @@ class BuildEmbeddingDialog(QDialog):
         width = max(button.sizeHint().width() for button in history_buttons + standard_buttons)
         for button in history_buttons + standard_buttons:
             button.setFixedWidth(width)
-        footer.addStretch(1)
+        if self._embedded:
+            footer.addStretch(1)
+        else:
+            self.hint = QLabel(self.HELP_TEXT, self)
+            self.hint.setWordWrap(True)
+            footer.addWidget(self.hint, 1)
         footer.addWidget(self.buttons)
         if self._embedded:
             # The parent Structure Editor owns Apply / Cancel. Undo and redo
@@ -1048,7 +1058,7 @@ class BuildEmbeddingDialog(QDialog):
     def _refresh_summary(self):
         center = self.draft.center
         self.centre_label.setText(
-            f"Symmetry / expansion centre: host site #{center.original_site + 1} in {center.cell_index}"
+            f"Host site #{center.original_site + 1} in cell {center.cell_index}"
         )
         included = len(self.draft.entries)
         changed = sum(self._is_modified(site) for site in self.draft.entries)
@@ -1255,10 +1265,28 @@ class BuildEmbeddingDialog(QDialog):
                 self.accept()
         self._guard(action)
 
+    def has_unapplied_changes(self) -> bool:
+        """Include both changed cluster data and unfinished input controls."""
+        return (
+            not self.draft.is_unchanged()
+            or self._pending_displacement is not None
+            or bool(self._unfinished_numbers())
+            or (self._selected_site is not None and self._has_occupation_buffer())
+        )
+
     def finalize_embedded(self) -> bool:
-        """Validate and export one staged embedded draft without closing a tab."""
+        """Validate and export the draft only at the outer Apply Structure."""
         if not self._embedded:
             raise RuntimeError("finalize_embedded is for inline editors")
+        if (self._unfinished_numbers()
+                or (self._selected_site is not None
+                    and self._has_occupation_buffer())):
+            QMessageBox.warning(
+                self, "Incomplete Cluster Edit",
+                "Finish or restore incomplete site occupations and displacements "
+                "before applying the structure.",
+            )
+            return False
         self._accept()
         return self._applied
 

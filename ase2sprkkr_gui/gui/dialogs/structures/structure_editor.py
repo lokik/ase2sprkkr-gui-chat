@@ -12,7 +12,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
-    QDialog, QDoubleSpinBox, QFrame, QGridLayout, QGroupBox, QLabel,
+    QDialog, QDoubleSpinBox, QFrame, QGridLayout, QGroupBox, QHeaderView, QLabel,
     QMessageBox, QPushButton, QSplitter, QStackedWidget,
     QStyle, QTabWidget, QVBoxLayout, QWidget,
 )
@@ -32,6 +32,7 @@ from ase2sprkkr_gui.gui.dialogs.structures.transforms import (
 from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
 from ase2sprkkr_gui.gui.widgets.structures.editor_overview import EditorOverviewWidget
 from ase2sprkkr_gui.gui.widgets.structures.editor_preview import EditorClusterHostPreviews
+from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
 from ase2sprkkr_gui.physics.cell_parameters import (
     cell_from_lengths_angles, lengths_and_angles,
 )
@@ -53,11 +54,15 @@ class StructureEditorDialog(ElementAssignmentDialog):
     ) -> None:
         self._original_atoms = atoms
         self._working_atoms = atoms
+        self._result = None
         self._recent_files = recent_files
         self._allow_build_2d = allow_build_2d
         self._allow_build_embedding = allow_build_embedding
         self._embedded_editor = None
         self._embedded_page = None
+        self._discarded_host_atoms = None
+        self._discarded_host_potential = None
+        self._discarded_host_modified = False
         self._switching_tabs = False
         self._last_tab = 0
         self._editor_ready = False
@@ -89,24 +94,49 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.tabs.addTab(sites_panel, "Sites")
 
-        self.site_notice = QLabel(
-            "For embedded structures this page edits the host sites and "
-            "occupations. Cluster substitutions are edited on Embedded.",
-            sites_panel,
-        )
-        self.site_notice.setWordWrap(True)
-        sites_panel.layout().insertWidget(0, self.site_notice)
+        self._sites_page = sites_panel
+        self._site_hint = ""
+        self.footer_hint = QLabel(self)
+        self.footer_hint.setObjectName("structureEditorFooterHint")
+        self.footer_hint.setWordWrap(True)
 
         lattice_page = QWidget(self.tabs)
+        self._lattice_page = lattice_page
         lattice_layout = QVBoxLayout(lattice_page)
-        self.lattice_note = QLabel(lattice_page)
-        self.lattice_note.setWordWrap(True)
-        lattice_layout.addWidget(self.lattice_note)
-        lattice_layout.addWidget(lattice_group)
-        self.lattice_group = lattice_group
+        self.lattice_group = EditorSection("Lattice vectors (Å)", lattice_page)
+        # Reparent the existing vector grid into a frameless section. The
+        # previous QGroupBox is an implementation detail of the base editor.
+        # Match the vector column widths to the compact lengths/angles inputs.
+        # The table itself already provides the required border.
+        vector_column_width = 136
+        header = self.lattice_vectors_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        for column in range(3):
+            self.lattice_vectors_table.setColumnWidth(column, vector_column_width)
+        self.lattice_vectors_table.setMaximumWidth(3 * vector_column_width + 72)
+        self.lattice_group.content_layout.addWidget(
+            self.lattice_vectors_table, 0, Qt.AlignmentFlag.AlignLeft
+        )
+        lattice_layout.addWidget(self.lattice_group)
+        lattice_group.deleteLater()
 
-        parameter_box = QGroupBox("Cell lengths and angles", lattice_page)
-        parameter_grid = QGridLayout(parameter_box)
+        parameter_frame = QFrame(lattice_page)
+        parameter_frame.setObjectName("structureEditorCellParametersFrame")
+        parameter_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        parameter_frame.setFrameShadow(QFrame.Shadow.Plain)
+        parameter_frame.setMaximumWidth(430)
+        frame_layout = QVBoxLayout(parameter_frame)
+        frame_layout.setContentsMargins(10, 6, 10, 8)
+        parameter_box = EditorSection(
+            "Cell lengths and angles", parameter_frame, layout_type=QGridLayout,
+        )
+        frame_layout.addWidget(parameter_box)
+        parameter_grid = parameter_box.content_layout
+        parameter_grid.setHorizontalSpacing(10)
+        parameter_grid.setVerticalSpacing(6)
+        parameter_grid.setColumnStretch(4, 1)
+        self.cell_parameter_frame = parameter_frame
         self.cell_parameter_spins = {}
         for index, (key, symbol) in enumerate((
             ("a", "a"), ("b", "b"), ("c", "c"),
@@ -120,28 +150,34 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 100000.0 if index < 3 else 179.9,
             )
             spin.setSuffix(" Å" if index < 3 else "°")
+            spin.setFixedWidth(vector_column_width)
             spin.setObjectName(f"cellParameter{key.title()}")
             spin.valueChanged.connect(self._cell_parameters_edited)
             self.cell_parameter_spins[key] = spin
             row, column = index % 3, 0 if index < 3 else 2
-            parameter_grid.addWidget(QLabel(symbol, parameter_box), row, column)
-            parameter_grid.addWidget(spin, row, column + 1)
-        lattice_layout.addWidget(parameter_box)
+            parameter_grid.addWidget(
+                QLabel(symbol, parameter_box), row, column, Qt.AlignmentFlag.AlignLeft
+            )
+            parameter_grid.addWidget(
+                spin, row, column + 1, Qt.AlignmentFlag.AlignLeft
+            )
+        lattice_layout.addWidget(
+            parameter_frame, 0, Qt.AlignmentFlag.AlignLeft
+        )
         self.cell_parameter_group = parameter_box
         self.cell_parameter_error = QLabel(lattice_page)
         self.cell_parameter_error.setWordWrap(True)
         self.cell_parameter_error.setStyleSheet("color: #bb4545;")
         lattice_layout.addWidget(self.cell_parameter_error)
-        self.cell_summary = QLabel(lattice_page)
-        self.cell_summary.setWordWrap(True)
-        lattice_layout.addWidget(self.cell_summary)
         lattice_layout.addStretch(1)
         self.tabs.addTab(lattice_page, "Lattice")
 
         transformations = QWidget(self.tabs)
+        self._transform_page = transformations
         transform_layout = QVBoxLayout(transformations)
-        geometry = QGroupBox("Geometric transformations", transformations)
-        geometry_layout = QVBoxLayout(geometry)
+        geometry = EditorSection("Geometric transformations", transformations)
+        self.geometry_group = geometry
+        geometry_layout = geometry.content_layout
         for label, description, icon, action in (
             ("Scale lattice", "Change lattice lengths in the current structure",
              "transform-scale", "scale"),
@@ -167,8 +203,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
             setattr(self, action + "_button", button)
         transform_layout.addWidget(geometry)
 
-        self.derived_group = QGroupBox("Build derived structure", transformations)
-        derived_layout = QVBoxLayout(self.derived_group)
+        self.derived_group = EditorSection("Build derived structure", transformations)
+        derived_layout = self.derived_group.content_layout
         self.build_surface_button = QPushButton(self.derived_group)
         configure_action_card(
             self.build_surface_button, "Create 2D surface",
@@ -201,15 +237,29 @@ class StructureEditorDialog(ElementAssignmentDialog):
         configure_action_card(
             self.embedding_button, "Build embedded cluster",
             "Create an embedded cluster from the current host",
-            QIcon.fromTheme(
-                "network-wired",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon),
-            ),
+            QIcon(str(icon_path("bulk_crystal.png"))),
             category="structure",
         )
         self.embedding_button.clicked.connect(self._build_embedding)
         derived_layout.addWidget(self.embedding_button)
         transform_layout.addWidget(self.derived_group)
+
+        # A conversion of the whole structure, not an Embedded-site action.
+        self.cluster_actions = EditorSection("Embedded cluster", transformations)
+        self.discard_cluster_button = QPushButton(self.cluster_actions)
+        configure_action_card(
+            self.discard_cluster_button,
+            "Discard cluster",
+            "Return to the host; retain its potential if the geometry is unchanged",
+            QIcon.fromTheme(
+                "edit-delete",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon),
+            ),
+            category="structure",
+        )
+        self.discard_cluster_button.clicked.connect(self._discard_cluster)
+        self.cluster_actions.content_layout.addWidget(self.discard_cluster_button)
+        transform_layout.addWidget(self.cluster_actions)
         transform_layout.addStretch(1)
         self.tabs.addTab(transformations, "Transform")
 
@@ -259,11 +309,9 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self._embedded_page = page
         self._embedded_editor = embedded
         index = self.tabs.insertTab(1, page, "Embedded")
+        # Match the bundled icon used for embedding in Guided workflows.
         self.tabs.setTabIcon(
-            index, QIcon.fromTheme(
-                "network-wired",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon),
-            )
+            index, QIcon(str(icon_path("bulk_crystal.png")))
         )
 
     def _remove_embedded_page(self) -> None:
@@ -281,6 +329,9 @@ class StructureEditorDialog(ElementAssignmentDialog):
     def setup(self, atoms: Any, back: bool = False) -> None:
         # Called after a transform, on construction, or when publishing the
         # embedded draft to the surrounding editing session.
+        self._discarded_host_atoms = None
+        self._discarded_host_potential = None
+        self._discarded_host_modified = False
         self._working_atoms = atoms
         cluster = _is_cluster(atoms)
         target = host_atoms(atoms.embedding_host) if cluster else atoms
@@ -289,14 +340,12 @@ class StructureEditorDialog(ElementAssignmentDialog):
         try:
             super().setup(target, back=back)
             self._invalid_cell_parameters = None
-            self._refresh_cell_summary()
             self._sync_cell_parameter_spins()
-            self.site_notice.setVisible(cluster)
             self.lattice_group.setTitle(
                 "Host potential lattice vectors (Å)" if cluster
                 else "Lattice vectors (Å)"
             )
-            self.lattice_note.setText(
+            self._lattice_hint = (
                 "These controls edit the HOST POTENTIAL lattice. The embedded "
                 "cluster will be remapped to the updated host (including atom "
                 "positions and displacements)."
@@ -315,6 +364,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             self._switching_tabs = previous_guard
         self._last_tab = self.tabs.currentIndex()
         self._update_preview_panel()
+        self._update_footer_hint()
 
     def _embedded_index(self):
         if self._embedded_page is None:
@@ -333,7 +383,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 button.setToolTip(reason)
             supported, message = embedded_host_transform_capability(current, "sites")
             self.scroll.setEnabled(supported)
-            self.site_notice.setText(
+            self._site_hint = (
                 "Editing host sites and occupations; edit cluster substitutions "
                 "on Embedded." if supported else message
             )
@@ -354,6 +404,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
                     and self._invalid_cell_parameters is None):
                 self.ok_btn.setEnabled(True)
         else:
+            self._site_hint = ""
             for action in ("scale", "repeat", "rotate"):
                 button = getattr(self, action + "_button")
                 button.setEnabled(True)
@@ -378,14 +429,38 @@ class StructureEditorDialog(ElementAssignmentDialog):
         # isVisible() would be false while the Transform tab is hidden.
         # Derive this from the structure kind, not transient Qt visibility.
         self.derived_group.setVisible(build_2d or build_embedded)
+        self.cluster_actions.setVisible(cluster)
 
     def _on_lattice_vector_changed(self, value: float) -> None:
+        # A zero-length lattice vector has no physical meaning. Revert just
+        # the newly invalid row, without blocking repairs of an already
+        # malformed structure that was loaded with a zero vector.
+        draft = self._require_draft()
+        before = draft.cell
+        proposed = np.array([
+            [spin.value() for spin in row] for row in self.lattice_spinboxes
+        ], dtype=float)
+        was_nonzero = np.linalg.norm(before, axis=1) > 1e-10
+        now_zero = np.linalg.norm(proposed, axis=1) <= 1e-10
+        invalid = np.flatnonzero(was_nonzero & now_zero)
+        if len(invalid):
+            for row in invalid:
+                for col, spin in enumerate(self.lattice_spinboxes[int(row)]):
+                    spin.blockSignals(True)
+                    spin.setValue(float(before[row, col]))
+                    spin.blockSignals(False)
+            if hasattr(self, "cell_parameter_error"):
+                names = ", ".join("abc"[i] for i in invalid)
+                self.cell_parameter_error.setText(
+                    f"Lattice vector {names} must not have zero length."
+                )
+            return
+
         super()._on_lattice_vector_changed(value)
         if hasattr(self, "cell_parameter_spins"):
             self._invalid_cell_parameters = None
             self.cell_parameter_error.clear()
             self._sync_cell_parameter_spins()
-            self._refresh_cell_summary()
             self._update_ok_state()
 
     def _sync_cell_parameter_spins(self) -> None:
@@ -433,21 +508,12 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 spin.setValue(float(cell[i, j]))
                 spin.blockSignals(False)
         self._draw_preview()
-        self._refresh_cell_summary()
         self._update_ok_state()
 
     def _update_ok_state(self) -> None:
         super()._update_ok_state()
         if self._invalid_cell_parameters is not None:
             self.ok_btn.setEnabled(False)
-
-    def _refresh_cell_summary(self) -> None:
-        cell = self._require_draft().cell
-        lengths = np.linalg.norm(cell, axis=1)
-        self.cell_summary.setText(
-            "Cell lengths (Å): " +
-            "   ".join(f"{axis} = {length:.5g}" for axis, length in zip("abc", lengths))
-        )
 
     def _overview_site_selected(self, scope: str, row: int) -> None:
         self._overview_previews.update_selection(scope, row)
@@ -466,18 +532,38 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 else self._shared_preview
             )
 
-    def _candidate(self) -> Any:
+    def _embedded_candidate(self):
+        """Preview the Embedded draft without accepting it or resetting Undo.
+
+        Preview atoms are detached; the original potential's radial data remain
+        untouched. Data-loss confirmation belongs to the final Apply Structure.
+        """
+        widget = self._embedded_editor
+        if widget is None:
+            return self._working_atoms
+        if (widget._unfinished_numbers()
+                or widget._pending_displacement is not None
+                or (widget._selected_site is not None
+                    and widget._has_occupation_buffer())):
+            raise ValueError("Finish the incomplete Embedded-site edit before applying.")
+        if widget.draft.is_unchanged():
+            return self._working_atoms
+        return widget.draft.to_atoms(allow_radial_reset=True)
+
+    def _candidate(self, *, embedded_atoms=None) -> Any:
+        """Compose host and Embedded drafts without committing either one."""
         draft = self._require_draft()
         if self._invalid_cell_parameters is not None:
             raise ValueError(self._invalid_cell_parameters)
-        if draft.is_unchanged():
-            return self._working_atoms
         if not draft.is_valid():
             raise ValueError("Correct incomplete site occupations before applying.")
-        result = draft.apply()
-        if _is_cluster(self._working_atoms):
-            return rebase_embedded_host(self._working_atoms, result)
-        return result
+        base = self._embedded_candidate() if embedded_atoms is None else embedded_atoms
+        if draft.is_unchanged():
+            return base
+        updated_host = draft.apply()
+        if _is_cluster(base):
+            return rebase_embedded_host(base, updated_host)
+        return updated_host
 
     def _accept_operation_result(self, result: Any, base: Any) -> bool:
         if result is None or result is base:
@@ -494,59 +580,171 @@ class StructureEditorDialog(ElementAssignmentDialog):
             self._update_preview_panel()
         return True
 
-    def _flush_embedded(self) -> bool:
-        if self._embedded_editor is None:
-            return True
-        widget = self._embedded_editor
-        if not widget.finalize_embedded():
-            return False
-        result = widget.result_atoms
-        if result is not None and result is not self._working_atoms:
-            self.setup(result)
-        return True
+    def _confirm_close_changes(self) -> str:
+        """Only abandonment of the whole editor requires a dirty-state prompt."""
+        question = QMessageBox(self)
+        question.setIcon(QMessageBox.Icon.Warning)
+        question.setWindowTitle("Unapplied Structure Changes")
+        question.setText("The structure editor contains unapplied changes.")
+        question.setInformativeText(
+            "Apply Structure commits the complete edited structure. "
+            "Discard closes without saving. Continue editing leaves the editor open."
+        )
+        apply_button = question.addButton(
+            "Apply Structure", QMessageBox.ButtonRole.AcceptRole
+        )
+        discard_button = question.addButton(
+            "Discard changes", QMessageBox.ButtonRole.DestructiveRole
+        )
+        continue_button = question.addButton(
+            "Continue editing", QMessageBox.ButtonRole.RejectRole
+        )
+        question.setDefaultButton(continue_button)
+        question.exec()
+        selected = question.clickedButton()
+        if selected is apply_button:
+            return "apply"
+        if selected is discard_button:
+            return "discard"
+        return "continue"
 
-    def _tab_changed(self, index: int) -> None:
-        if self._switching_tabs or not getattr(self, "_editor_ready", False):
+    def _discard_cluster(self) -> None:
+        """Stage conversion back to host, retaining pending host edits."""
+        if self._embedded_editor is None:
             return
-        old = self._last_tab
-        self._switching_tabs = True
-        valid = True
+        host = self._working_atoms.embedding_host
+        if host is None:
+            QMessageBox.warning(
+                self, "Missing Host", "This embedded cluster has no host structure."
+            )
+            return
+        host_modified = not self._require_draft().is_unchanged()
+        message = (
+            "Discard the embedded cluster and return to its host structure?\n\n"
+            "The host potential and its SCF data will be retained."
+        )
+        if host_modified:
+            message = (
+                "Discard the embedded cluster and keep the edited host geometry?\n\n"
+                "The host edits will be retained, but they invalidate the "
+                "previous host electronic data."
+            )
+        answer = QMessageBox.question(
+            self, "Discard Embedded Cluster?",
+            message + " The workspace changes only after Apply Structure.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        from ase2sprkkr.potentials.potential_base import Potential
         try:
-            if old == self._embedded_index() and index != old:
-                valid = self._flush_embedded()
-            if valid and index == self._embedded_index():
-                try:
-                    candidate = self._candidate()
-                    if self._accept_operation_result(candidate, self._working_atoms):
-                        # Replacing the embedded editor removes its current tab.
-                        # Restore the user's target after constructing the new page.
-                        self.tabs.setCurrentIndex(self._embedded_index())
-                        index = self.tabs.currentIndex()
-                except (ValueError, TypeError, NotImplementedError) as error:
-                    QMessageBox.warning(self, "Cannot Update Host", str(error))
-                    valid = False
-            if not valid:
-                self.tabs.setCurrentIndex(old)
-                index = old
-            elif index == 0:
-                try:
-                    overview_atoms = self._candidate()
-                except (ValueError, TypeError):
-                    overview_atoms = self._working_atoms
-                self._overview_previews.set_structure(
-                    overview_atoms if _is_cluster(overview_atoms) else None
+            if host_modified:
+                # Use the normal rebase path: it preserves the updated host
+                # geometry, while correctly resetting incompatible radial data.
+                converted = rebase_embedded_host(
+                    self._working_atoms, self._require_draft().apply()
                 )
-                self.overview.set_structure(overview_atoms)
+                host = converted.embedding_host
+            result = host_atoms(host)
+        except (ValueError, TypeError, IndexError) as error:
+            QMessageBox.warning(self, "Cannot Discard Cluster", str(error))
+            return
+        previous_guard = self._switching_tabs
+        self._switching_tabs = True
+        try:
+            self.setup(result)
+            self._discarded_host_atoms = result
+            self._discarded_host_potential = (
+                host if isinstance(host, Potential) else None
+            )
+            self._discarded_host_modified = host_modified
+            self.tabs.setCurrentIndex(0)
+            self._last_tab = 0
             self._update_preview_panel()
         finally:
-            self._switching_tabs = False
+            self._switching_tabs = previous_guard
+
+    def _tab_changed(self, index: int) -> None:
+        """Navigation never applies, discards or reconstructs a page draft."""
+        if self._switching_tabs or not getattr(self, "_editor_ready", False):
+            return
         self._last_tab = index
+        if index == self.tabs.indexOf(self.overview):
+            try:
+                overview_atoms = self._candidate()
+            except (ValueError, TypeError, IndexError):
+                # An incomplete field stays editable. Avoid losing its draft.
+                overview_atoms = self._working_atoms
+            self._overview_previews.set_structure(
+                overview_atoms if _is_cluster(overview_atoms) else None
+            )
+            self.overview.set_structure(overview_atoms)
+        self._update_preview_panel()
+        self._update_footer_hint()
+
+    def _update_footer_hint(self) -> None:
+        page = self.tabs.currentWidget()
+        if page is self._sites_page:
+            message = self._site_hint
+        elif page is self._lattice_page:
+            message = self._lattice_hint
+        elif page is self._embedded_page and self._embedded_editor is not None:
+            message = self._embedded_editor.HELP_TEXT
+            if not self._require_draft().is_unchanged():
+                message += (
+                    " Host changes from Sites/Lattice will be combined at Apply "
+                    "Structure; this site's preview still uses the original host."
+                )
+        else:
+            message = ""
+        self.footer_hint.setText(message)
+
+    def _has_unapplied_changes(self) -> bool:
+        """Whole-dialog dirty state, including changes confirmed on other tabs."""
+        return (
+            self._working_atoms is not self._original_atoms
+            or not self._require_draft().is_unchanged()
+            or self._invalid_cell_parameters is not None
+            or (
+                self._embedded_editor is not None
+                and self._embedded_editor.has_unapplied_changes()
+            )
+        )
+
+    def _request_close(self) -> bool:
+        """Handle Cancel, Escape and window-manager close uniformly."""
+        # A successful Apply Structure has already accepted the dialog.
+        # Later cleanup close() calls must not prompt again or override it.
+        if self.result() == QDialog.DialogCode.Accepted:
+            return True
+        if not self._editor_ready or not self._has_unapplied_changes():
+            QDialog.reject(self)
+            return True
+        choice = self._confirm_close_changes()
+        if choice == "apply":
+            # Uses the same validation and potential-state handling as the
+            # existing Apply Structure button.
+            self._on_ok()
+            return self.result() == QDialog.DialogCode.Accepted
+        if choice == "discard":
+            QDialog.reject(self)
+            return True
+        return False
+
+    def reject(self) -> None:
+        self._request_close()
+
+    def closeEvent(self, event) -> None:
+        if self._request_close():
+            event.accept()
+        else:
+            event.ignore()
 
     def _run_operation(self, operation, label: str) -> None:
         try:
+            # A cancelled transform leaves both drafts and Embedded Undo intact.
             base = self._candidate()
-            if _is_cluster(base) and not self._flush_embedded():
-                return
             result = operation(base)
             self._accept_operation_result(result, base)
         except (ValueError, TypeError, NotImplementedError) as exc:
@@ -605,24 +803,56 @@ class StructureEditorDialog(ElementAssignmentDialog):
         )
 
         def build(atoms):
-            prepared = prepare_embedding_source(atoms)
+            # Building again immediately after discarding a cluster must
+            # reuse the same native host Potential, including its SCF state.
+            prepared = (
+                self._discarded_host_potential
+                if (atoms is self._discarded_host_atoms
+                    and self._discarded_host_potential is not None)
+                else prepare_embedding_source(atoms)
+            )
             result = select_build_embedding_structure(prepared, parent=self)
             return None if result is prepared else result
 
         self._run_operation(build, "Cannot Build Embedded Cluster")
 
     def _on_ok(self) -> None:
-        if not self._flush_embedded():
+        # The sole commit boundary: validate both drafts before a lossy
+        # materialization or any radial-data confirmation is requested.
+        if self._invalid_cell_parameters is not None:
+            QMessageBox.warning(
+                self, "Cannot Apply Structure", self._invalid_cell_parameters
+            )
             return
+        if not self._require_draft().is_valid():
+            QMessageBox.warning(
+                self, "Cannot Apply Structure",
+                "Correct incomplete host occupations before applying.",
+            )
+            return
+        embedded_atoms = None
+        if self._embedded_editor is not None:
+            if not self._embedded_editor.finalize_embedded():
+                return
+            embedded_atoms = self._embedded_editor.result_atoms
         try:
-            result = self._candidate()
+            result = self._candidate(embedded_atoms=embedded_atoms)
         except (ValueError, TypeError, NotImplementedError) as exc:
             QMessageBox.warning(self, "Cannot Apply Structure", str(exc))
             return
-        if (result is not self._original_atoms
-                and _is_cluster(self._original_atoms)
-                and _is_cluster(result)
-                and result.embedding_host is not self._original_atoms.embedding_host):
+        host_changed = (
+            _is_cluster(self._original_atoms)
+            and (
+                (_is_cluster(result)
+                 and result.embedding_host is not self._original_atoms.embedding_host)
+                or (
+                    self._discarded_host_atoms is not None
+                    and (self._discarded_host_modified
+                         or not self._require_draft().is_unchanged())
+                )
+            )
+        )
+        if result is not self._original_atoms and host_changed:
             # The backend resets electronic data on a host rebase. Ensure
             # this is a deliberate acceptance when the old SCF is reusable.
             old_host = self._original_atoms.embedding_host
@@ -650,6 +880,11 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 )
                 if answer != QMessageBox.StandardButton.Yes:
                     return
+        if (result is self._discarded_host_atoms
+                and self._discarded_host_potential is not None):
+            # Do not change the source's potential while the dialog is open.
+            # A discarded cluster must not create a fresh START potential.
+            result._potential = self._discarded_host_potential
         self._result = None if result is self._original_atoms else result
         self.accept()
 
