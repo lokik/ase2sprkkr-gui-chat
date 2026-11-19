@@ -246,14 +246,36 @@ class EmbeddingPreview(QWidget):
         self._update_labels()
         self._apply_limits()
 
+    def _fit_padding(self):
+        """Logical pixels reserved for the largest scatter marker and its rim.
+
+        Scatter sizes are areas in points squared (independent of camera zoom).
+        Convert the marker radius and half its edge linewidth into canvas pixels;
+        the former fixed 28px margin could clip atoms at larger size settings.
+        """
+        if not len(self._sizes):
+            return 28.
+        areas = np.asarray(self._sizes, dtype=float)
+        outlines = np.asarray(self._widths, dtype=float)
+        radii = (np.sqrt(np.maximum(areas, 0)) + np.maximum(outlines, 0)) / 2
+        radii = radii[np.isfinite(radii)]
+        if not len(radii):
+            return 28.
+        # Qt widget dimensions are logical pixels; Matplotlib's DPI can be
+        # scaled for high-DPI screens, so undo the device-pixel ratio here.
+        px_per_point = self.figure.dpi / (
+            72. * max(self.canvas.devicePixelRatioF(), 1.)
+        )
+        return max(28., float(radii.max()) * px_per_point + 8.)
+
     def _apply_limits(self, *_):
         if not len(self._extent):
             return
         width, height = max(self.canvas.width(), 1), max(self.canvas.height(), 1)
         span = np.ptp(self._extent, axis=0)
-        # Fit the actual projected shape into the *whole* rectangular canvas.
-        # Keep physical aspect, reserving pixel space for markers and labels.
-        padding = 28
+        # Fit projected positions and cell corners, including visible marker
+        # diameters. Leave a small extra gap beyond the outermost atom.
+        padding = self._fit_padding()
         units = max(span[0] / max(width - 2 * padding, 1),
                     span[1] / max(height - 2 * padding, 1), 1e-6)
         centre = (self._extent.min(axis=0) + self._extent.max(axis=0)) / 2 + self._pan
