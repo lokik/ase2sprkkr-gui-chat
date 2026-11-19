@@ -1411,7 +1411,8 @@ def test_cell_site_and_editing_columns_keep_actions_below_site_table():
     assert expansion.parentWidget() is details_panel
     assert expansion.geometry().bottom() <= details_splitter.geometry().top()
     assert expansion.title() == ""
-    assert dialog.centre_label.parentWidget() is expansion
+    assert dialog.centre_label.parentWidget() is details_panel
+    assert dialog.centre_label.geometry().bottom() <= expansion.geometry().top()
     assert not dialog.centre_label.wordWrap()
     assert dialog.centre_label.text().startswith("<b>Cluster centre:</b> Host site")
     assert dialog.centre_button.parentWidget() is columns[1]
@@ -1434,6 +1435,29 @@ def test_cell_site_and_editing_columns_keep_actions_below_site_table():
     assert dialog.centre_button.mapTo(dialog, QPoint()).x() > dialog.cell_label.mapTo(
         dialog, QPoint()
     ).x()
+
+
+@pytest.mark.parametrize("dimension", [2, 3])
+def test_host_cell_controls_are_beside_preview_and_sections_are_bold(dimension):
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QApplication
+
+    atoms = host()
+    atoms.pbc = (True, True, dimension == 3)
+    dialog = BuildEmbeddingDialog(atoms)
+    dialog.show()
+    QApplication.processEvents()
+    controls = [dialog.cell_rings]
+    if dimension == 3:
+        controls += [dialog.cell_plane, dialog.layer]
+        assert dialog.layer_label.text() == "Layer"
+        dialog.cell_plane.setCurrentIndex(1)
+        assert dialog.layer_label.text() == "Layer"
+    for control in controls:
+        assert control.mapTo(dialog, QPoint()).x() < dialog.cells.mapTo(dialog, QPoint()).x()
+    assert not hasattr(dialog, "map_indices")
+    assert "QGroupBox::title { font-weight: bold; }" in dialog.styleSheet()
+    dialog.close()
 
 
 def test_embedding_footer_equal_buttons_and_compact_scope_labels():

@@ -164,8 +164,31 @@ class BuildEmbeddingDialog(QDialog):
 
         left = QGroupBox("Host cells", splitter)
         left_v = QVBoxLayout(left)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Wigner–Seitz rings"))
+        map_row = QHBoxLayout()
+        map_controls = QWidget(left)
+        map_controls.setMaximumWidth(125)
+        map_controls_layout = QVBoxLayout(map_controls)
+        map_controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.cell_plane = QComboBox()
+        for name, axes in (("XY", (0, 1)), ("XZ", (0, 2)), ("YZ", (1, 2))):
+            self.cell_plane.addItem(name, axes)
+        self.cell_plane.setToolTip("Cartesian projection of the repeated host-cell lattice")
+        self.cell_plane.currentIndexChanged.connect(self._plane_changed)
+        if self.draft.dimension == 3:
+            map_controls_layout.addWidget(QLabel("Projection"))
+            map_controls_layout.addWidget(self.cell_plane)
+            self.layer_label = QLabel("Layer")
+            self.layer = QSpinBox()
+            self.layer.setRange(-100000, 100000)
+            self.layer.setValue(self._selected_cell[2])
+            self.layer.setToolTip("Cell translation perpendicular to the selected lattice plane")
+            self.layer.valueChanged.connect(self._layer_changed)
+            map_controls_layout.addWidget(self.layer_label)
+            map_controls_layout.addWidget(self.layer)
+        else:
+            self.layer = None
+            self.cell_plane.hide()
+        map_controls_layout.addWidget(QLabel("WS rings"))
         self.cell_rings = QSpinBox()
         self.cell_rings.setRange(0, 20)
         self.cell_rings.setValue(2)
@@ -175,40 +198,13 @@ class BuildEmbeddingDialog(QDialog):
             "Drawn cells remain primitive parallelograms."
         )
         self.cell_rings.valueChanged.connect(self._display_region_changed)
-        row.addWidget(self.cell_rings)
-        self.map_indices = QLabel("n1, n2")
-        row.addWidget(self.map_indices)
-        if self.draft.dimension == 3:
-            self.layer_label = QLabel("Layer n3")
-            self.layer = QSpinBox()
-            self.layer.setRange(-100000, 100000)
-            self.layer.setValue(self._selected_cell[2])
-            self.layer.setToolTip("Cell translation index n3, not an individual atomic plane")
-            self.layer.valueChanged.connect(self._layer_changed)
-        else:
-            self.layer = None
-        row.addStretch(1)
-        left_v.addLayout(row)
-        self.cell_plane = QComboBox()
-        for name, axes in (("XY", (0, 1)), ("XZ", (0, 2)), ("YZ", (1, 2))):
-            self.cell_plane.addItem(name, axes)
-        self.cell_plane.setToolTip(
-            "Cartesian projection; XY varies n1,n2, XZ varies n1,n3, YZ varies n2,n3"
-        )
-        self.cell_plane.currentIndexChanged.connect(self._plane_changed)
-        if self.draft.dimension == 3:
-            plane_row = QHBoxLayout()
-            plane_row.addWidget(QLabel("Projection"))
-            plane_row.addWidget(self.cell_plane)
-            plane_row.addWidget(self.layer_label)
-            plane_row.addWidget(self.layer)
-            plane_row.addStretch(1)
-            left_v.addLayout(plane_row)
-        else:
-            self.cell_plane.hide()
+        map_controls_layout.addWidget(self.cell_rings)
+        map_controls_layout.addStretch(1)
+        map_row.addWidget(map_controls)
         self.cells = HostCellMap(left)
         self.cells.cellSelected.connect(self._cell_changed)
-        left_v.addWidget(self.cells, 1)
+        map_row.addWidget(self.cells, 1)
+        left_v.addLayout(map_row, 1)
         self.symmetric = QCheckBox("Apply actions to symmetry-equivalent sites")
         self.symmetric.setChecked(True)
         self.symmetric.setToolTip(
@@ -231,12 +227,12 @@ class BuildEmbeddingDialog(QDialog):
         # The centre and expansion settings apply to the whole cluster.
         # Show the centre heading and its value on one line, with the action
         # for choosing a new centre next to the per-cell site selection.
-        options = QGroupBox(details_panel)
-        options_layout = QVBoxLayout(options)
-        self.centre_label = QLabel(options)
+        self.centre_label = QLabel(details_panel)
         self.centre_label.setTextFormat(Qt.TextFormat.RichText)
         self.centre_label.setWordWrap(False)
-        options_layout.addWidget(self.centre_label)
+        details_layout.addWidget(self.centre_label)
+        options = QGroupBox(details_panel)
+        options_layout = QVBoxLayout(options)
         opt_row = QHBoxLayout()
         options_layout.addLayout(opt_row)
         opt_row.addWidget(QLabel("Radius (Å):"))
@@ -348,7 +344,7 @@ class BuildEmbeddingDialog(QDialog):
         details_splitter.addWidget(right)
         details_splitter.setSizes([510, 500])
         splitter.addWidget(details_panel)
-        splitter.setSizes([350, 1010])
+        splitter.setSizes([490, 870])
 
         preview_splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
@@ -383,6 +379,8 @@ class BuildEmbeddingDialog(QDialog):
         global_layout.addWidget(self.global_preview, 1)
         preview_splitter.addWidget(global_group)
         preview_splitter.setSizes([650, 650])
+        # Bold section headings without changing the font of child controls.
+        self.setStyleSheet("QGroupBox::title { font-weight: bold; }")
         body.addWidget(preview_splitter)
         body.setSizes([350, 450])
 
@@ -606,15 +604,13 @@ class BuildEmbeddingDialog(QDialog):
         return next(i for i in range(3) if i not in self._plane_axes())
 
     def _plane_changed(self, *_):
-        axes = self._plane_axes()
         fixed = self._fixed_axis()
         self.layer.blockSignals(True)
         self.layer.setValue(self._selected_cell[fixed])
         self.layer.blockSignals(False)
-        self.map_indices.setText(f"n{axes[0] + 1}, n{axes[1] + 1}")
-        self.layer_label.setText(f"Layer n{fixed + 1}")
         self.global_scope.setItemData(
-            1, f"Current cell layer (n{fixed + 1})", Qt.ItemDataRole.ToolTipRole
+            1, "Host cells in the currently selected lattice layer",
+            Qt.ItemDataRole.ToolTipRole,
         )
         self._display_region_changed()
 
