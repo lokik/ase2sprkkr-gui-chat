@@ -34,6 +34,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     StartOver,
     UpdateEmptySpheres,
     UseForNewCalculation,
+    VisualizeStructure,
     WorkflowPlan,
     WorkflowSection,
 )
@@ -194,8 +195,11 @@ def test_current_structure_plan_has_canonical_group_order_without_output_loader(
     )
     assert plan.group(WorkflowSection.LOAD) is None
     assert plan.group(WorkflowSection.VIEW).title == "Structure"
-    assert EditStructure() in _commands(plan, WorkflowSection.VIEW)
-    assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
+    assert _commands(plan, WorkflowSection.VIEW) == (
+        EditStructure(),
+        VisualizeStructure(),
+        SaveStructure(),
+    )
     assert all(
         command != Load(LoadKind.OUTPUT)
         for group in plan.groups

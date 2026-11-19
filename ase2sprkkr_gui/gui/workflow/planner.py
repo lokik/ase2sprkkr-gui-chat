@@ -388,15 +388,7 @@ class WorkflowPlanner:
 
         groups.append(_custom_group(True))
 
-        structure_actions = [
-            _action(
-                VisualizeStructure(),
-                "Visualize Structure",
-                "Open the current structure in the configured ASE viewer",
-                "neutral",
-                ActionIcon.VIEW,
-            ),
-        ]
+        structure_actions = []
         if not invalid_cluster:
             structure_actions.append(
                 _action(
@@ -407,6 +399,15 @@ class WorkflowPlanner:
                     ActionIcon.EDIT,
                 )
             )
+        structure_actions.append(
+            _action(
+                VisualizeStructure(),
+                "Visualize Structure",
+                "Open the current structure in the configured ASE viewer",
+                "neutral",
+                ActionIcon.VIEW,
+            )
+        )
         structure_actions.append(
             _action(
                 SaveStructure(),
