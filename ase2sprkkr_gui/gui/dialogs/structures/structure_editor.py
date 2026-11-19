@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr.sprkkr.embedding import host_atoms
+from ase2sprkkr_gui.ase.embedding import reset_cluster_center
 from ase2sprkkr.sprkkr.embedding_transforms import (
     embedded_host_transform_capability,
     rebase_embedded_host,
@@ -560,13 +561,20 @@ class StructureEditorDialog(ElementAssignmentDialog):
             return base
         updated_host = draft.apply()
         if _is_cluster(base):
-            return rebase_embedded_host(base, updated_host)
+            rebased = rebase_embedded_host(base, updated_host)
+            # A new host geometry invalidates the old centre selection.
+            reset_cluster_center(rebased)
+            return rebased
         return updated_host
 
     def _accept_operation_result(self, result: Any, base: Any) -> bool:
         if result is None or result is base:
             return False
         was_cluster = _is_cluster(self._working_atoms)
+        if was_cluster and _is_cluster(result):
+            # Replacing/transformation of a cluster must not silently inherit
+            # a centre that belonged to the previous geometry.
+            reset_cluster_center(result)
         self.setup(result)
         if _is_cluster(result) and not was_cluster:
             self._switching_tabs = True

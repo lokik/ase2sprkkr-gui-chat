@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 from ase import Atoms
 
+from ase2sprkkr_gui.ase.embedding import GUI_CLUSTER_CENTER
+
 
 _STRUCTURAL_ARRAYS = (
     "spacegroup_kinds",
@@ -19,7 +21,7 @@ _STRUCTURAL_ARRAYS = (
     "initial_magmoms",
     "sprkkr_embedding",
 )
-_STRUCTURAL_INFO = ("occupancy", "sprkkr_embedding_host")
+_STRUCTURAL_INFO = ("occupancy", "sprkkr_embedding_host", GUI_CLUSTER_CENTER)
 
 
 def _freeze(value: Any) -> Any:
@@ -95,7 +97,9 @@ class StructureSnapshot:
             name: (atom_info[name] if name == "sprkkr_embedding_host"
                    else _freeze(atom_info[name]))
             for name in _STRUCTURAL_INFO
-            if name in atom_info and (name != "sprkkr_embedding_host" or embedded)
+            if name in atom_info and (
+                name not in ("sprkkr_embedding_host", GUI_CLUSTER_CENTER) or embedded
+            )
         }
         return cls(
             numbers=tuple(int(number) for number in atoms.numbers),
@@ -135,6 +139,8 @@ class StructureSnapshot:
             atoms.set_positions(np.asarray(self.positions, dtype=float))
             for site, magnetisation in zip(atoms.sites, self.embedding_magnetisations):
                 site.magnetisation = np.asarray(magnetisation, dtype=float)
+            if GUI_CLUSTER_CENTER in self.info:
+                atoms.info[GUI_CLUSTER_CENTER] = tuple(_thaw(self.info[GUI_CLUSTER_CENTER]))
             return atoms
 
         atoms = Atoms(

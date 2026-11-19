@@ -343,6 +343,21 @@ def test_centre_change_undo_restores_summary_and_has_no_host_side_effects(dialog
     np.testing.assert_array_equal(atoms.positions, [[0, 0, 0]])
 
 
+def test_centre_only_change_is_undoable_and_committed_on_accept(atoms):
+    draft = EmbeddingDraft(atoms)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    dialog = BuildEmbeddingDialog(cluster)
+    original = dialog.draft.center
+    alternative = HostSite(0, (1, 0, 0))
+    dialog.draft.set_center(alternative)
+    assert dialog.has_unapplied_changes()
+    dialog._accept()
+    assert dialog.result_atoms is not cluster
+    assert EmbeddingDraft(atoms, dialog.result_atoms).center == alternative
+    assert EmbeddingDraft(atoms, cluster).center == original
+
+
 def test_undo_to_original_cluster_preserves_unchanged_acceptance(atoms):
     draft = EmbeddingDraft(atoms)
     draft.include([draft.center])

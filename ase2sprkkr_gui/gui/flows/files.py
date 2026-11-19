@@ -228,6 +228,12 @@ def load_embedded_cluster(
         if decision != QMessageBox.StandardButton.Yes:
             return False
 
+    # A freshly parsed CLUPOT has no GUI centre. Assign its geometrical
+    # centre on load; metadata stays on these cluster atoms, not on the host.
+    if "sprkkr_embedding" in getattr(cluster, "arrays", {}):
+        from ase2sprkkr_gui.ase.embedding import reset_cluster_center
+        reset_cluster_center(cluster)
+
     change = controller.replace_structure(
         cluster,
         directory=str(path.parent),

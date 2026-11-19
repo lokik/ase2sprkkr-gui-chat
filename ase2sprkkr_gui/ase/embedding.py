@@ -40,12 +40,70 @@ class EmbeddedSiteDraft:
                 and np.array_equal(self.magnetisation, other.magnetisation))
 
 
+# GUI metadata travels with one embedded Atoms object, not with its host or
+# the native CLUPOT format (which has no separate centre field).
+GUI_CLUSTER_CENTER = "sprkkr_embedding_center"
+
+
 @dataclass(frozen=True)
 class EmbeddingDraftState:
     """Detached editable state; contains no host or original radial data."""
 
     center: HostSite
     entries: dict[HostSite, EmbeddedSiteDraft]
+
+
+def cluster_center(host, cluster: SPRKKRAtoms) -> HostSite:
+    """Return an explicit GUI centre, or the included site nearest the centroid.
+
+    The native cluster file stores sites but has no independent centre field.
+    Selection is deterministic for equidistant sites and independent of file
+    ordering. This function never modifies the input cluster or host.
+    """
+    stored = cluster.info.get(GUI_CLUSTER_CENTER)
+    if (isinstance(stored, (tuple, list)) and len(stored) == 6
+            and all(isinstance(i, (int, np.integer)) and not isinstance(i, bool)
+                    for i in stored)):
+        try:
+            selected = HostSite(int(stored[0]), tuple(int(i) for i in stored[1:])).canonical(host)
+            if selected.original_site in embedding_host_indices(host):
+                selected.position(host)
+                return selected
+        except (ValueError, TypeError, IndexError):
+            pass
+
+    rows = embedding_data(cluster)
+    if not len(rows):
+        raise ValueError("An embedded cluster needs at least one site")
+    sites = [
+        HostSite(int(row[0]), tuple(int(i) for i in row[1:])).canonical(host)
+        for row in rows
+    ]
+    positions = np.asarray(cluster.positions, dtype=float)
+    centroid = positions.mean(axis=0)
+    distances = np.linalg.norm(positions - centroid, axis=1)
+    nearest = np.flatnonzero(np.isclose(
+        distances, distances.min(), rtol=0, atol=1e-9,
+    ))
+    return min(sites[int(i)] for i in nearest)
+
+
+def set_cluster_center(cluster: SPRKKRAtoms, site: HostSite) -> None:
+    """Store centre on these cluster atoms only; never touch the host."""
+    host = cluster.embedding_host
+    selected = site.canonical(host)
+    if selected.original_site not in embedding_host_indices(host):
+        raise ValueError("The centre must belong to an embeddable host site")
+    selected.position(host)
+    cluster.info[GUI_CLUSTER_CENTER] = (
+        selected.original_site, *(int(i) for i in selected.translations(host)),
+    )
+
+
+def reset_cluster_center(cluster: SPRKKRAtoms) -> None:
+    """Forget a previous cluster's selection after replacing its geometry."""
+    cluster.info.pop(GUI_CLUSTER_CENTER, None)
+    set_cluster_center(cluster, cluster_center(cluster.embedding_host, cluster))
 
 
 def parse_occupation(value: str) -> dict[str, float]:
@@ -214,8 +272,9 @@ class EmbeddingDraft:
                     magnetisation=np.asarray(site.magnetisation, dtype=float).copy(),
                 )
             if self.entries:
-                self.center = next(iter(self.entries))
+                self.center = cluster_center(host, cluster)
             self._original_entries = deepcopy(self.entries)
+        self._original_center = self.center
 
     def snapshot(self) -> EmbeddingDraftState:
         """Capture independent editable values, keeping the host shared."""
@@ -226,13 +285,16 @@ class EmbeddingDraft:
         self.center = state.center
         self.entries = deepcopy(state.entries)
 
-    def is_unchanged(self) -> bool:
-        """Whether a reopened cluster has exactly its original physical data."""
+    def _physical_data_unchanged(self) -> bool:
         return self.original_cluster is not None and self.entries == self._original_entries
 
+    def is_unchanged(self) -> bool:
+        """Whether the physical sites and selected GUI centre are unchanged."""
+        return self._physical_data_unchanged() and self.center == self._original_center
+
     def would_discard_radial_data(self) -> bool:
-        """True when rebuilding an edited cluster would discard radial results."""
-        if self.original_cluster is None or self.is_unchanged():
+        """A centre-only GUI edit cannot invalidate native radial results."""
+        if self.original_cluster is None or self._physical_data_unchanged():
             return False
         return any(
             atom_type.potential is not None
@@ -367,14 +429,20 @@ class EmbeddingDraft:
             return self.original_cluster
         if not self.entries:
             raise ValueError("The cluster must contain at least one site")
-        atoms = SPRKKRAtoms.from_embedding(
-            self.host,
-            [(site.original_site, site.cell_index, entry.occupation)
-             for site, entry in sorted(self.entries.items())],
-        )
-        for site, entry in zip(atoms.sites, (self.entries[k] for k in sorted(self.entries))):
-            site.embedding.displacement = entry.displacement
-            site.magnetisation = entry.magnetisation.copy()
+        if self._physical_data_unchanged():
+            # Only the GUI centre changed: retain all native radial/SCF data
+            # and leave the source atoms untouched until outer Apply.
+            atoms = copy_for_edit(self.original_cluster)
+        else:
+            atoms = SPRKKRAtoms.from_embedding(
+                self.host,
+                [(site.original_site, site.cell_index, entry.occupation)
+                 for site, entry in sorted(self.entries.items())],
+            )
+            for site, entry in zip(atoms.sites, (self.entries[k] for k in sorted(self.entries))):
+                site.embedding.displacement = entry.displacement
+                site.magnetisation = entry.magnetisation.copy()
+        set_cluster_center(atoms, self.center)
         return atoms
 
 

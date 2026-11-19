@@ -18,7 +18,11 @@ from ase2sprkkr.sprkkr.embedding_geometry import HostSite
 
 from ase2sprkkr_gui.ase.embedding import (
     EmbeddingDraft,
+    GUI_CLUSTER_CENTER,
     cell_ring_offsets,
+    cluster_center,
+    reset_cluster_center,
+    set_cluster_center,
     embedding_source,
     occupation_label,
     parse_occupation,
@@ -90,6 +94,64 @@ def test_draft_creates_explicit_cluster_without_mutating_host():
     assert parent.get_chemical_symbols() == ["Cu"]
 
 
+def test_loaded_cluster_centre_uses_geometry_not_first_native_site():
+    from ase2sprkkr import SPRKKRAtoms
+
+    parent = host()
+    cluster = SPRKKRAtoms.from_embedding(parent, [
+        (0, (-2, 0, 0), "Cu"),
+        (0, (0, 0, 0), "Cu"),
+        (0, (1, 0, 0), "Cu"),
+    ])
+    assert EmbeddingDraft(parent, cluster).center == HostSite(0, (0, 0, 0))
+    assert GUI_CLUSTER_CENTER not in cluster.info  # Merely opening is read-only.
+    reset_cluster_center(cluster)
+    assert cluster.info[GUI_CLUSTER_CENTER] == (0, 0, 0, 0, 0, 0)
+
+
+def test_explicit_centre_survives_apply_copy_and_reopening_without_rebuild():
+    from ase2sprkkr import SPRKKRAtoms
+
+    parent = host()
+    original = SPRKKRAtoms.from_embedding(parent, [
+        (0, (-2, 0, 0), "Cu"),
+        (0, (0, 0, 0), "Cu"),
+        (0, (1, 0, 0), "Cu"),
+    ])
+    draft = EmbeddingDraft(parent, original)
+    selected = HostSite(0, (1, 0, 0))
+    draft.set_center(selected)
+    assert not draft.is_unchanged()
+    assert not draft.would_discard_radial_data()
+    result = draft.to_atoms()
+    assert result is not original
+    assert GUI_CLUSTER_CENTER not in original.info
+    assert result.info[GUI_CLUSTER_CENTER] == (0, 1, 0, 0, 0, 0)
+    reopened = EmbeddingDraft(parent, result.copy())
+    assert reopened.center == selected
+    assert reopened.is_unchanged()
+    assert result.embedding_host is parent
+
+
+def test_replacement_cluster_never_inherits_previous_centre():
+    from ase2sprkkr import SPRKKRAtoms
+
+    parent = host()
+    original = SPRKKRAtoms.from_embedding(parent, [
+        (0, (-2, 0, 0), "Cu"),
+        (0, (0, 0, 0), "Cu"),
+        (0, (1, 0, 0), "Cu"),
+    ])
+    set_cluster_center(original, HostSite(0, (1, 0, 0)))
+    replacement = SPRKKRAtoms.from_embedding(parent, [
+        (0, (-2, 0, 0), "Cu"), (0, (0, 0, 0), "Cu"),
+    ])
+    assert GUI_CLUSTER_CENTER not in replacement.info
+    assert EmbeddingDraft(parent, replacement).center == HostSite(0, (-2, 0, 0))
+    # Copying the original is not replacing it; its metadata remains attached.
+    assert EmbeddingDraft(parent, original.copy()).center == HostSite(0, (1, 0, 0))
+
+
 def test_symmetry_preview_can_modify_real_host_sites():
     parent = host()
     draft = EmbeddingDraft(parent)
@@ -145,6 +207,18 @@ def test_snapshot_restores_embedded_occupations_positions_and_host_reference():
     assert restored.sites[0].embedding.cell_index == (1, 0, 0)
     np.testing.assert_allclose(restored.positions, original.positions)
     assert detect_structure_kind(restored) == "0d"
+
+
+def test_snapshot_retains_gui_cluster_centre():
+    parent = host()
+    draft = EmbeddingDraft(parent)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    selected = HostSite(0, (1, 0, 0))
+    set_cluster_center(cluster, selected)
+    recovered = StructureSnapshot.capture(cluster).to_atoms()
+    assert recovered.info[GUI_CLUSTER_CENTER] == (0, 1, 0, 0, 0, 0)
+    assert EmbeddingDraft(parent, recovered).center == selected
 
 
 def test_dialog_builds_cluster_and_is_cancel_safe():
