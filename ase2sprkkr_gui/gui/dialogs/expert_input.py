@@ -1,7 +1,7 @@
 """Modal workflow for editing an isolated copy of ``InputParameters``."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from ase2sprkkr import InputParameters
 from PyQt6.QtWidgets import (
@@ -17,6 +17,7 @@ from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometr
 from ase2sprkkr_gui.gui.flows import presets as preset_flows
 from ase2sprkkr_gui.gui.flows.input_parameters import (
     choose_and_load_input_parameters,
+    choose_and_save_input_parameters,
     edit_input_parameters_file,
 )
 from ase2sprkkr_gui.gui.input_parameters.dataset import apply_default_dataset
@@ -42,8 +43,12 @@ class InputParametersDialog(QDialog):
         *,
         show_changed_only: bool = False,
         atoms: Any = None,
+        calculation_mode: bool = False,
+        calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
     ) -> None:
         super().__init__(parent)
+        self._calculation_mode = calculation_mode
+        self._calculation_unavailable_reason = calculation_unavailable_reason
         if isinstance(parameters, InputParametersSession):
             self.session = parameters.fork(self)
         else:
@@ -88,21 +93,55 @@ class InputParametersDialog(QDialog):
             return button
 
         self.load_btn = add_button('Load input…', self._load_input)
+        self.save_btn = add_button('Save Input…', self._save_input)
         self.load_preset_btn = add_button('Replace with preset…', self._replace_preset)
         self.merge_preset_btn = add_button('Merge preset…', self._merge_preset)
         self.save_preset_btn = add_button('Save as preset…', self._save_preset)
         self.edit_input_btn = add_button('Edit input file…', self._edit_input_file)
         self.cancel_btn = add_button('Cancel', self.reject)
-        self.ok_btn = add_button('OK', self._on_ok)
+        self.ok_btn = add_button(
+            'Calculate' if calculation_mode else 'OK', self._on_ok
+        )
+        self.calculate_button = self.ok_btn if calculation_mode else None
+        self.tree_editor.validationChanged.connect(
+            lambda _invalid: self._update_calculation_availability()
+        )
+        self.session.valueChanged.connect(self._update_calculation_availability)
+        self.session.parametersReplaced.connect(self._update_calculation_availability)
+        self._update_calculation_availability()
+
+    def _update_calculation_availability(self, *_args) -> None:
+        if not self._calculation_mode:
+            return
+        parameters = self.session.working_parameters
+        try:
+            validate_setup(parameters)
+            reason = (
+                self._calculation_unavailable_reason(parameters)
+                if self._calculation_unavailable_reason is not None else None
+            )
+        except (InputParametersValidationError, ValueError) as error:
+            reason = str(error)
+        self.ok_btn.setEnabled(not reason)
+        self.ok_btn.setToolTip(
+            reason or "Run a calculation with the current input parameters"
+        )
 
     def _load_input(self) -> None:
         if choose_and_load_input_parameters(self.session, self):
             self.tree_editor.set_show_changed_only(True)
 
     def _edit_input_file(self) -> None:
+        self.dataset_editor.commit()
         if not self.tree_editor.commit_pending():
             return
         edit_input_parameters_file(self.session, self)
+
+    def _save_input(self) -> None:
+        self.dataset_editor.commit()
+        if not self.tree_editor.commit_pending():
+            return
+        choose_and_save_input_parameters(self.session.result(), self)
 
     def _replace_preset(self) -> None:
         if self.tree_editor.commit_pending():
@@ -118,12 +157,18 @@ class InputParametersDialog(QDialog):
 
     def _on_ok(self) -> None:
         self._validation_error.hide()
+        self.dataset_editor.commit()
         if not self.tree_editor.commit_pending():
             return
         try:
             validate_setup(self.session.working_parameters)
         except InputParametersValidationError as error:
             self._validation_error.setText(str(error))
+            self._validation_error.show()
+            return
+        self._update_calculation_availability()
+        if self._calculation_mode and not self.ok_btn.isEnabled():
+            self._validation_error.setText(self.ok_btn.toolTip())
             self._validation_error.show()
             return
         self.accept()
