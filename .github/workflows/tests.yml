@@ -61,7 +61,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lokik/ase2sprkkr-chat
-          ref: ${{ (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.head_ref == 'cluster' || github.head_ref == 'embedding-host-scf' || github.head_ref == 'guided-structure-type' || github.ref_name == 'cluster' || github.ref_name == 'embedding-host-scf' || github.ref_name == 'guided-structure-type') && 'cluster' || 'develop' }}
+          ref: editor
           path: .ci/ase2sprkkr
 
       - name: Install package and test dependencies
