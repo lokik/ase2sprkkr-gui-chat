@@ -352,7 +352,7 @@ def test_hostless_clupot_loads_read_only_without_save_prompt(monkeypatch, tmp_pa
     from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
     from ase2sprkkr_gui.gui.flows import files as file_flows
     from ase2sprkkr_gui.gui.workflow.model import (
-        CreateHostPotential, LoadHostPotential, WorkflowSection,
+        AttachHostPotential, CreateHostPotential, LoadHostPotential, WorkflowSection,
     )
     from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
 
@@ -388,7 +388,7 @@ def test_hostless_clupot_loads_read_only_without_save_prompt(monkeypatch, tmp_pa
     assert not controller.has_unsaved_structure
     plan = WorkflowPlanner().for_workspace(controller)
     assert tuple(a.command for a in plan.group(WorkflowSection.CREATE).actions) == (
-        LoadHostPotential(), CreateHostPotential(),
+        AttachHostPotential(), LoadHostPotential(), CreateHostPotential(),
     )
     assert "read-only" in plan.subtitle.lower()
 
@@ -441,7 +441,7 @@ def test_attaching_host_to_read_only_clupot_enables_editing(monkeypatch, tmp_pat
         controller, recent, cluster_path, None,
     )
     assert controller.unresolved_cluster is not None
-    assert file_flows.load_host_potential(controller, recent, None)
+    assert file_flows.attach_host_potential(controller, recent, None)
     assert controller.unresolved_cluster is None
     assert controller.unresolved_cluster_path is None
     assert controller.atoms is embedded
@@ -511,7 +511,7 @@ def test_cancelling_host_attachment_preserves_read_only_clupot(
     recent = Recent()
     assert file_flows.load_embedded_cluster(controller, recent, path, None)
     potential = controller.unresolved_cluster
-    assert not file_flows.load_host_potential(controller, recent, None)
+    assert not file_flows.attach_host_potential(controller, recent, None)
     assert controller.unresolved_cluster is potential
     assert controller.atoms is None
     assert not controller.has_unsaved_structure

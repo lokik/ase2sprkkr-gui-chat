@@ -131,6 +131,11 @@ class SaveStructure:
 
 @dataclass(frozen=True)
 class LoadHostPotential:
+    """Replace the active structure with a periodic host POTFIL."""
+
+
+@dataclass(frozen=True)
+class AttachHostPotential:
     """Associate a matching host POTFIL with an embedded cluster."""
 
 
@@ -163,6 +168,7 @@ WorkflowCommand = Union[
     EditStructure,
     SaveStructure,
     LoadHostPotential,
+    AttachHostPotential,
     CreateHostPotential,
     UseForNewCalculation,
     StartOver,

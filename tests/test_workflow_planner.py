@@ -27,6 +27,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     LoadHostPotential,
+    AttachHostPotential,
     CreateHostPotential,
     RunTask,
     SaveStructure,
@@ -391,7 +392,7 @@ def test_embedded_structure_plan_offers_cluster_scf_and_save_without_host_potent
     assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
     assert "host POTFIL" in plan.group(WorkflowSection.CALCULATE).actions[0].description
     assert _commands(plan, WorkflowSection.CREATE) == (
-        LoadHostPotential(), CreateHostPotential(), BuildEmbedding(),
+        AttachHostPotential(), LoadHostPotential(), CreateHostPotential(), BuildEmbedding(),
     )
     assert _commands(plan, WorkflowSection.VIEW)[-1] == SaveStructure()
 
@@ -449,7 +450,7 @@ def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
         assert filtered == expected
 
 
-def test_read_only_clupot_is_not_a_structure_and_offers_only_host_attachment():
+def test_read_only_clupot_offers_explicit_attachment_and_replacement():
     class Hostless(Workspace):
         unresolved_cluster_path = "/tmp/imported.clu"
         atoms = None
@@ -457,7 +458,7 @@ def test_read_only_clupot_is_not_a_structure_and_offers_only_host_attachment():
     workspace = Hostless(atoms=None)
     plan = WorkflowPlanner().for_workspace(workspace)
     create = _commands(plan, WorkflowSection.CREATE)
-    assert create == (LoadHostPotential(), CreateHostPotential())
+    assert create == (AttachHostPotential(), LoadHostPotential(), CreateHostPotential())
     assert _commands(plan, WorkflowSection.CALCULATE) == ()
     assert "read-only" in plan.subtitle.lower()
     assert "imported.clu" in plan.subtitle
