@@ -116,6 +116,7 @@ def test_initial_plan_uses_typed_commands_and_planned_recent_menu():
     assert tuple(group.section for group in plan.groups) == (
         WorkflowSection.CREATE,
         WorkflowSection.LOAD,
+        WorkflowSection.CUSTOM,
     )
     assert _commands(plan, WorkflowSection.CREATE) == (
         CreateStructure(CreateStructureKind.THREE_D),
@@ -179,6 +180,7 @@ def test_current_structure_plan_has_canonical_group_order_without_output_loader(
 
     assert tuple(group.section for group in plan.groups) == (
         WorkflowSection.CALCULATE,
+        WorkflowSection.CUSTOM,
         WorkflowSection.VIEW,
         WorkflowSection.CREATE,
         WorkflowSection.OTHER,

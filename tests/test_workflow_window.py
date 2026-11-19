@@ -50,32 +50,18 @@ def _commands(window):
     )
 
 
-def test_results_load_button_imports_output_in_guided_and_expert(tmp_path, monkeypatch):
-    application = QApplication.instance() or QApplication([])
+def test_results_load_button_imports_output_in_guided(tmp_path, monkeypatch):
+    _application = QApplication.instance() or QApplication([])
     gui, guided = _workflow(tmp_path)
-    expert = gui.create_main_window()
     imports = []
-
-    def import_output(controller, recent_files, parent):
-        imports.append((controller, recent_files, parent))
-
     monkeypatch.setattr(
-        workflow_module.file_flows, "choose_and_load_output", import_output
+        workflow_module.file_flows, "choose_and_load_output",
+        lambda controller, history, parent: imports.append((controller, history, parent)),
     )
-
-    # The action is available even before any results have been loaded.
-    for window in (guided, expert):
-        widget = window.result_actions_widget
-        assert widget.load_result_button.isEnabled()
-        widget.load_result_button.click()
-
-    assert imports == [
-        (gui.controller, gui.recent_files, guided),
-        (gui.controller, gui.recent_files, expert),
-    ]
-    expert.close()
+    assert guided.result_actions_widget.load_result_button.isEnabled()
+    guided.result_actions_widget.load_result_button.click()
+    assert imports == [(gui.controller, gui.recent_files, guided)]
     guided.close()
-
 
 def test_result_import_directory_is_wired_in_guided(tmp_path, monkeypatch):
     _application = QApplication.instance() or QApplication([])
@@ -103,35 +89,22 @@ def test_navigation_shortcuts_are_exposed_in_tooltips(tmp_path):
     guided.close()
 
 
-def test_workflow_and_expert_share_one_workspace(tmp_path, monkeypatch):
+def test_workflow_uses_one_workspace_without_expert_shell(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     workspace = WorkspaceState()
     gui, window = _workflow(tmp_path, workspace=workspace)
 
-    assert gui._main_window is None
-    window._open_expert_mode()
-    expert = gui.create_main_window()
-    assert expert.controller is window.controller is gui.controller
-    assert expert.recent_history is window.recent_history is gui.recent_files
-
-    expert.controller.replace_structure(
-        Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
-    )
+    assert not hasattr(gui, "create_main_window")
+    gui.controller.replace_structure(Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True))
     application.processEvents()
 
-    assert workspace.structure.value.atoms is not None
-    assert expert.controller.atoms is workspace.structure.value.atoms
+    assert workspace.structure.value.atoms is gui.controller.atoms
     assert RunTask("scf") in _commands(window)
-    # Closing a dirty expert window asks for confirmation. Reply explicitly
-    # rather than leaving an unattended modal dialog blocking the test suite.
-    def discard_unsaved(_parent, title, _message, *_args):
-        assert title == "Unsaved Work"
-        return QMessageBox.StandardButton.Discard
-
-    monkeypatch.setattr(QMessageBox, "question", discard_unsaved)
-    expert.close()
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Discard,
+    )
     window.close()
-
 
 def test_action_columns_classify_embedded_and_restart_workflows():
     from ase2sprkkr_gui.gui.widgets.workflow_actions import _action_column
@@ -548,12 +521,12 @@ def test_workflow_navigation_is_one_bottom_panel_with_four_icon_buttons(
     buttons = navigation.findChildren(QToolButton)
     assert buttons == [
         window._project_browser_button,
-        window._expert_button,
+        window._load_input_button,
         window._settings_button,
         window._close_button,
     ]
     assert [button.text() for button in buttons] == [
-        "Project Browser", "Expert Mode", "Settings", "Close"
+        "Project Browser", "Load Input File", "Settings", "Close"
     ]
     assert all(not button.icon().isNull() for button in buttons)
     assert all(
@@ -562,7 +535,10 @@ def test_workflow_navigation_is_one_bottom_panel_with_four_icon_buttons(
     )
 
     actions = []
-    window._open_expert = lambda: actions.append("expert")
+    monkeypatch.setattr(
+        workflow_module.custom_flow, "choose_custom_input",
+        lambda *_args, **_kwargs: actions.append("load"),
+    )
     monkeypatch.setattr(
         workflow_module,
         "edit_settings",
@@ -571,16 +547,16 @@ def test_workflow_navigation_is_one_bottom_panel_with_four_icon_buttons(
     window.projectBrowserRequested.connect(lambda: actions.append("projects"))
 
     window._project_browser_button.click()
-    window._expert_button.click()
+    window._load_input_button.click()
     window._settings_button.click()
 
     assert actions == [
         "projects",
-        "expert",
+        "load",
         ("settings", gui.settings, window),
     ]
     # The application composition root must still connect this button to
-    # the same non-modal project browser as the expert window.
+    # the same non-modal project browser as the main window.
     assert gui._project_browser is not None
     assert gui._project_browser.isVisible()
     window.show()
@@ -629,24 +605,6 @@ def test_cancelled_exit_keeps_workflow_and_browser_open(tmp_path, monkeypatch):
     assert gui._project_browser is None or not gui._project_browser.isVisible()
 
 
-def test_expert_exit_menu_uses_shared_shutdown(tmp_path):
-    application = QApplication.instance() or QApplication([])
-    gui, workflow = _workflow(tmp_path)
-    workflow.show()
-    expert = gui.create_main_window()
-    expert.show()
-    gui.show_project_browser()
-
-    structure_menu = expert.menuBar().actions()[0].menu()
-    exit_action = next(
-        action for action in structure_menu.actions() if action.text() == "E&xit"
-    )
-    exit_action.trigger()
-    application.processEvents()
-
-    assert not expert.isVisible()
-    assert not workflow.isVisible()
-    assert gui._project_browser is None or not gui._project_browser.isVisible()
 
 
 def test_guided_save_structure_writes_normal_atoms_without_running(tmp_path, monkeypatch):
