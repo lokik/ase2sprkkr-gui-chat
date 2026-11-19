@@ -50,7 +50,7 @@ def _commands(window):
 
 
 def test_results_load_button_imports_output_in_guided_and_expert(tmp_path, monkeypatch):
-    QApplication.instance() or QApplication([])
+    application = QApplication.instance() or QApplication([])
     gui, guided = _workflow(tmp_path)
     expert = gui.create_main_window()
     imports = []
