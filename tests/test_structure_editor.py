@@ -438,6 +438,69 @@ def test_overview_reports_hall_number_for_3d_and_left_right_bulk_for_2d():
 
 
 
+def test_lattice_inputs_have_uniform_compact_width_and_parameter_frame():
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QFrame, QHeaderView
+
+    dialog = _dialog()
+    assert dialog.cell_parameter_frame.frameShape() == QFrame.Shape.StyledPanel
+    assert dialog.cell_parameter_frame.maximumWidth() <= 450
+    assert dialog.cell_parameter_frame.layout().indexOf(dialog.cell_parameter_group) >= 0
+    assert dialog.lattice_group.title() == "Lattice vectors (Å)"
+    widths = {spin.width() for spin in dialog.cell_parameter_spins.values()}
+    assert len(widths) == 1
+    (width,) = tuple(widths)
+    assert 110 <= width <= 145
+    table = dialog.lattice_vectors_table
+    header = table.horizontalHeader()
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Fixed
+    assert all(table.columnWidth(i) == width for i in range(3))
+    assert table.maximumWidth() < 500
+    grid = dialog.cell_parameter_group.content_layout
+    assert grid.columnStretch(4) == 1
+    for index in range(6):
+        row, column = index % 3, 0 if index < 3 else 2
+        assert grid.itemAtPosition(row, column + 1).alignment() == Qt.AlignmentFlag.AlignLeft
+    dialog.close()
+
+
+def test_overview_uses_indented_aligned_two_column_facts():
+    from PyQt6.QtWidgets import QBoxLayout
+    from ase2sprkkr_gui.gui.widgets.structures.editor_overview import (
+        _fact_columns, _fact_table,
+    )
+
+    dialog = _dialog(_cluster())
+    overview = dialog.overview
+    sections = (
+        overview.info_box, overview.host_box, overview.table_box,
+        *(box for box, _ in overview.bulk_boxes.values()),
+    )
+    assert all(section.content_layout.contentsMargins().left() == 14 for section in sections)
+    dialog.show()
+    QApplication.processEvents()
+    expected_direction = (
+        QBoxLayout.Direction.LeftToRight
+        if overview.scroll.viewport().width() >= 620
+        else QBoxLayout.Direction.TopToBottom
+    )
+    assert overview.info_columns.direction() == expected_direction
+    assert "Type:" in overview.main.text()
+    assert "Cell (Å):" in overview.symmetry.text()
+    assert "Cluster symmetry:" in overview.symmetry.text()
+    assert "<table" in overview.host_facts.text()
+    assert "Space group:" in overview.host_facts.text()
+    summary, details = _fact_columns(
+        "Type: 3D\nSites: 2\nCell (Å): a=2\nAngles (°): α=90",
+        "Space group: Pm-3m",
+    )
+    assert summary == ["Type: 3D", "Sites: 2"]
+    assert details == ["Cell (Å): a=2", "Angles (°): α=90", "Space group: Pm-3m"]
+    assert _fact_table(summary, details).count("<tr>") == 3
+    assert _fact_table(["Elements: Fe < Co"]).count("&lt;") == 1
+    dialog.close()
+
+
 def test_info_headings_and_unframed_sites():
     from PyQt6.QtWidgets import QFrame
 
