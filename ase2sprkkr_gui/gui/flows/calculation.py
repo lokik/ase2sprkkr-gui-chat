@@ -587,7 +587,6 @@ def recompute_result(
         return None
 
     structure_generation = controller.structure_generation
-    input_generation = controller.input_parameters_generation
     atoms = controller.atoms
     if atoms is None:
         return None
@@ -599,7 +598,6 @@ def recompute_result(
         return None
 
     position_like_window: str
-    request_override = None
     if is_guided_task(task_name):
         dialog = GuidedInputParametersDialog(
             task_name,
@@ -611,27 +609,18 @@ def recompute_result(
             return None
         parameters = dialog.parameters()
         position_like_window = "guided-input"
-        request_override = _one_off_task_request(
-            controller, parameters,
-            expected_structure_generation=structure_generation, parent=parent,
-        )
-        if request_override is None:
-            return None
     else:
         edited = edit_input_parameters(parameters, parent=parent, atoms=atoms)
         if edited is None:
             return None
         parameters = edited
         position_like_window = "expert-input"
-        if not document_change_applied(
-            parent,
-            controller.replace_input_parameters(
-                parameters,
-                expected_input_parameters_generation=input_generation,
-                expected_structure_generation=structure_generation,
-            ),
-        ):
-            return None
+    request_override = _one_off_task_request(
+        controller, parameters,
+        expected_structure_generation=structure_generation, parent=parent,
+    )
+    if request_override is None:
+        return None
     return run_calculation(
         controller,
         recent_files,
