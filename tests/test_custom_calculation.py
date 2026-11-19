@@ -162,7 +162,7 @@ def test_task_chooser_filters_sorts_and_keeps_unsupported_selectable(monkeypatch
     chooser = TaskChooserDialog(object())
     assert [chooser.table.horizontalHeaderItem(i).text()
             for i in range(chooser.table.columnCount())] == [
-        "Applicable to structure", "Experimental", "Name", "Info"
+        "Name", "Applicable to structure", "Experimental", "Info"
     ]
     assert _names(chooser.table) == ["A", "Z", "B", "C"]
 
@@ -198,7 +198,7 @@ def test_task_chooser_without_structure_has_no_applicability_column(monkeypatch)
     chooser = TaskChooserDialog(None)
     assert [chooser.table.horizontalHeaderItem(i).text()
             for i in range(chooser.table.columnCount())] == [
-        "Experimental", "Name", "Info"
+        "Name", "Experimental", "Info"
     ]
     assert chooser.applicability_filter is None
     assert _names(chooser.table) == ["A", "C", "B", "Z"]

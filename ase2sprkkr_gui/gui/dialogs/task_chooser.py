@@ -166,8 +166,10 @@ class TaskChooserDialog(QDialog):
             toolbar.addWidget(self.applicability_filter)
         root.addLayout(toolbar)
 
-        self._fields = (["applicable"] if self._has_structure else [])
-        self._fields.extend(("experimental", "name", "info"))
+        self._fields = ["name"]
+        if self._has_structure:
+            self._fields.append("applicable")
+        self._fields.extend(("experimental", "info"))
         self.table = QTableWidget(0, len(self._fields), self)
         self.table.setObjectName("customTaskTable")
         self.table.setHorizontalHeaderLabels([
