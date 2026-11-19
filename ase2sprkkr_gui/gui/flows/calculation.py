@@ -145,7 +145,7 @@ def run_calculation(
     # Guided actions are not the only entry point (Expert Mode also calls this
     # function). Never submit an embedded run against a START periodic host.
     # A partially converged host is permitted only after explicit confirmation.
-    if request_override is None and controller.structure_kind() == "0d" and controller.can_run_embedding():
+    if (request_override is None or request_override.potential is None) and controller.structure_kind() == "0d" and controller.can_run_embedding():
         host_status = controller.embedding_host_scf_status()
         if host_status == "START":
             QMessageBox.information(
@@ -223,7 +223,7 @@ def run_calculation(
                    else controller.create_calculation_request())
     except CalculationNotReady:
         return None
-    # A completed run writes the input parameters to its calculation directory.
+    # A submitted run writes the input parameters to its calculation directory.
     # Remember which workspace revision it came from: edits made while the
     # calculation runs must remain unsaved. Explicit request overrides (e.g.
     # host SCF) do not represent the workspace's input-parameter document.
@@ -244,6 +244,8 @@ def run_calculation(
             return None
         cluster_file = written.CONTROL.POTFIL_CLU()
         additional = f"\nCluster potential: {cluster_file}" if cluster_file else ""
+        if submitted_input_generation is not None:
+            controller.mark_input_parameters_saved(submitted_input_generation)
         QMessageBox.information(
             parent, "SPR-KKR Files Prepared",
             f"Input: {input_file}\nHost potential: {host_file}{additional}\n"
@@ -266,11 +268,13 @@ def run_calculation(
         adoption = (controller.adopt_calculation_result(loaded, request=request)
                     if on_result_loaded is None else
                     on_result_loaded(loaded, request))
-        if submitted_input_generation is not None:
-            # The successful run has written its input file. Clear the unsaved
-            # flag only if the user has not edited the inputs since launch.
-            controller.mark_input_parameters_saved(submitted_input_generation)
         adoption_completed(adoption)
+
+    def submitted() -> None:
+        if submitted_input_generation is not None:
+            # submit() returned successfully; input files are already written.
+            # Later workspace edits retain their own unsaved generation.
+            controller.mark_input_parameters_saved(submitted_input_generation)
 
     try:
         description = profile_description(profile_name)
@@ -303,6 +307,7 @@ def run_calculation(
         project_id=project_id,
         parent=None if track_launch_monitor is not None else parent,
         on_finished=finished,
+        on_submitted=submitted,
         on_back_to_setup=back_to_run_setup if select_profile else None,
     )
     try:
@@ -317,6 +322,37 @@ def run_calculation(
     return window
 
 
+def _one_off_task_request(
+    controller: WorkspaceController,
+    parameters,
+    *,
+    expected_structure_generation,
+    parent: QWidget,
+) -> CalculationRequest | None:
+    """Build a Guided request without creating an input document in workspace.
+
+    A transient Guided task has the same structure/state provenance as an
+    Expert task, but its parameters belong only to this run and its history.
+    """
+    if controller.structure_generation != expected_structure_generation:
+        QMessageBox.warning(
+            parent, "Structure Changed",
+            "The structure changed while configuring this calculation. "
+            "Please choose its parameters again.",
+        )
+        return None
+    if controller.atoms is None or controller.structure_id is None or controller.state_id is None:
+        return None
+    return CalculationRequest(
+        atoms=controller.atoms,
+        input_parameters=parameters.copy(copy_values=True),
+        directory=controller.directory or "",
+        structure_id=controller.structure_id,
+        state_id=controller.state_id,
+        restart_scf=controller.restarted,
+    )
+
+
 def configure_and_run_task(
     controller: WorkspaceController,
     recent_files: RecentFiles,
@@ -327,9 +363,8 @@ def configure_and_run_task(
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
 ) -> SprkkrRunWindow | None:
-    """Configure one Guided task, commit it, choose execution, and run it."""
+    """Configure and run a one-off Guided task without editing workspace inputs."""
     structure_generation = controller.structure_generation
-    input_generation = controller.input_parameters_generation
     atoms = controller.atoms
     if atoms is None:
         QMessageBox.information(
@@ -365,14 +400,11 @@ def configure_and_run_task(
         if not ensure_embedded_host_potential(controller, parent):
             return None
         structure_generation = controller.structure_generation
-    if not document_change_applied(
-        parent,
-        controller.replace_input_parameters(
-            parameters,
-            expected_input_parameters_generation=input_generation,
-            expected_structure_generation=structure_generation,
-        ),
-    ):
+    request = _one_off_task_request(
+        controller, parameters,
+        expected_structure_generation=structure_generation, parent=parent,
+    )
+    if request is None:
         return None
     return run_calculation(
         controller,
@@ -381,6 +413,7 @@ def configure_and_run_task(
         position_like_window="guided-input",
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        request_override=request,
     )
 
 
@@ -566,6 +599,7 @@ def recompute_result(
         return None
 
     position_like_window: str
+    request_override = None
     if is_guided_task(task_name):
         dialog = GuidedInputParametersDialog(
             task_name,
@@ -577,22 +611,27 @@ def recompute_result(
             return None
         parameters = dialog.parameters()
         position_like_window = "guided-input"
+        request_override = _one_off_task_request(
+            controller, parameters,
+            expected_structure_generation=structure_generation, parent=parent,
+        )
+        if request_override is None:
+            return None
     else:
         edited = edit_input_parameters(parameters, parent=parent, atoms=atoms)
         if edited is None:
             return None
         parameters = edited
         position_like_window = "expert-input"
-
-    if not document_change_applied(
-        parent,
-        controller.replace_input_parameters(
-            parameters,
-            expected_input_parameters_generation=input_generation,
-            expected_structure_generation=structure_generation,
-        ),
-    ):
-        return None
+        if not document_change_applied(
+            parent,
+            controller.replace_input_parameters(
+                parameters,
+                expected_input_parameters_generation=input_generation,
+                expected_structure_generation=structure_generation,
+            ),
+        ):
+            return None
     return run_calculation(
         controller,
         recent_files,
@@ -600,4 +639,5 @@ def recompute_result(
         position_like_window=position_like_window,
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        request_override=request_override,
     )

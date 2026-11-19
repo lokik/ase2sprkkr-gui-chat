@@ -182,11 +182,11 @@ def test_cancelling_run_dialog_leaves_workspace_unchanged(application, monkeypat
 
 
 
-@pytest.mark.parametrize("edited_while_running", [False, True])
-def test_completed_run_saves_only_submitted_input_revision(
-    application, monkeypatch, tmp_path, edited_while_running,
+@pytest.mark.parametrize("edit_timing", ["none", "before_submission_ack", "after_submission_ack"])
+def test_submitted_run_saves_only_the_input_revision_written_at_launch(
+    application, monkeypatch, tmp_path, edit_timing,
 ):
-    """A finished DOS run has already written its input; later edits stay dirty."""
+    """The input is saved at submit(), not when DOS finishes or results load."""
     from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
     from ase2sprkkr_gui.gui.application.workspace_controller import ResultAdoption
 
@@ -219,20 +219,28 @@ def test_completed_run_saves_only_submitted_input_revision(
         select_profile=False,
         on_result_loaded=lambda _loaded, _request: ResultAdoption(),
     ) is not None
-    # The draft is not saved just by opening the execution monitor.
+    # Preparing the monitor is not sufficient; the backend must accept submit.
     assert controller.has_unsaved_input_parameters
 
-    if edited_while_running:
-        controller.replace_input_parameters(_Parameters(dataset="edited_during_run"))
+    if edit_timing == "before_submission_ack":
+        controller.replace_input_parameters(_Parameters(dataset="changed_early"))
 
+    launched["on_submitted"]()
+    if edit_timing == "after_submission_ack":
+        controller.replace_input_parameters(_Parameters(dataset="changed_later"))
+
+    changed = edit_timing != "none"
+    assert controller.has_unsaved_input_parameters is changed
+
+    # Postprocessing completion does not change the saved revision again.
     launched["on_finished"](LoadedResult(
         result=None, output_path=None, potential_path=None, atoms=None,
         potential_error=None, directory=str(tmp_path),
     ))
-    assert controller.has_unsaved_input_parameters is edited_while_running
+    assert controller.has_unsaved_input_parameters is changed
 
 
-def test_finished_host_run_does_not_mark_unrelated_workspace_inputs_saved(
+def test_submitted_host_run_does_not_mark_unrelated_workspace_inputs_saved(
     application, monkeypatch, tmp_path,
 ):
     """An explicit request override is not the workspace's input document."""
@@ -267,11 +275,57 @@ def test_finished_host_run_does_not_mark_unrelated_workspace_inputs_saved(
         on_result_loaded=lambda _loaded, _request: ResultAdoption(),
     ) is not None
 
+    launched["on_submitted"]()
+    assert controller.has_unsaved_input_parameters
     launched["on_finished"](LoadedResult(
         result=None, output_path=None, potential_path=None, atoms=None,
         potential_error=None, directory=str(tmp_path),
     ))
     assert controller.has_unsaved_input_parameters
+
+
+
+@pytest.mark.parametrize("preparation_succeeds", [True, False])
+def test_save_files_only_marks_inputs_saved_only_after_success(
+    application, monkeypatch, tmp_path, preparation_succeeds,
+):
+    controller = WorkspaceController(WorkspaceState(
+        atoms=Atoms("Fe"),
+        input_parameters=_Parameters(dataset="dos"),
+        directory=str(tmp_path),
+    ))
+    monkeypatch.setattr(
+        calculation_flow, "_select_profile",
+        lambda *_args, **_kwargs: (
+            True, None, None, str(tmp_path), None, True, False,
+        ),
+    )
+    monkeypatch.setattr(
+        calculation_flow, "SprkkrRunWindow",
+        lambda **_kwargs: pytest.fail("Save-only must not launch"),
+    )
+
+    class Preparation:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def prepare_files(self):
+            if not preparation_succeeds:
+                raise OSError("input write failed")
+            written = SimpleNamespace(
+                CONTROL=SimpleNamespace(POTFIL_CLU=lambda: None)
+            )
+            return written, str(tmp_path / "dos.inp"), "Fe.pot", None
+
+    monkeypatch.setattr(calculation_flow, "SprkkrExecution", Preparation)
+    monkeypatch.setattr(calculation_flow.QMessageBox, "information", lambda *_args: None)
+    monkeypatch.setattr(calculation_flow.QMessageBox, "critical", lambda *_args: None)
+    assert controller.has_unsaved_input_parameters
+    assert calculation_flow.run_calculation(
+        controller, RecentFiles(tmp_path / "recent.json"), object(),
+    ) is None
+    assert controller.has_unsaved_input_parameters is not preparation_succeeds
+
 
 
 def test_execution_dialog_requires_working_directory_and_can_browse(
