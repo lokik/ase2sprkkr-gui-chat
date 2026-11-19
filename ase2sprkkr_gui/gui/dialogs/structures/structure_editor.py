@@ -54,6 +54,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
     ) -> None:
         self._original_atoms = atoms
         self._working_atoms = atoms
+        self._result = None
         self._recent_files = recent_files
         self._allow_build_2d = allow_build_2d
         self._allow_build_embedding = allow_build_embedding
@@ -602,7 +603,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             return
         answer = QMessageBox.question(
             self, "Discard Embedded Cluster?",
-            "Discard the entire embedded cluster and return to its host structure?\\n\\n"
+            "Discard the entire embedded cluster and return to its host structure?\n\n"
             "The host potential and its electronic state will be retained. "
             "The workspace will change only after Apply Structure.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
@@ -685,6 +686,10 @@ class StructureEditorDialog(ElementAssignmentDialog):
 
     def _request_close(self) -> bool:
         """Handle Cancel, Escape and window-manager close uniformly."""
+        # A successful Apply Structure has already accepted the dialog.
+        # Later cleanup close() calls must not prompt again or override it.
+        if self.result() == QDialog.DialogCode.Accepted:
+            return True
         if not self._editor_ready or not self._has_unapplied_changes():
             QDialog.reject(self)
             return True

@@ -76,7 +76,8 @@ def test_noop_and_cancel_do_not_modify_source():
     dialog.close()
     dialog = _dialog(source)
     dialog._draft.split_site(dialog._draft.sites[0])
-    dialog.reject()
+    # This test isolates cancellation from the interactive close confirmation.
+    editor_module.QDialog.reject(dialog)
     assert source.info["occupancy"] == {"0": {"Fe": 1.0}}
     np.testing.assert_array_equal(source.get_array("spacegroup_kinds"), [0, 0])
     dialog.close()
@@ -124,7 +125,7 @@ def test_cancel_transform_keeps_staged_lattice_edit(monkeypatch):
     dialog.lattice_spinboxes[0][0].setValue(2.0)
     dialog.scale_button.click()
     np.testing.assert_allclose(dialog._draft.cell[0, 0], 2.0)
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_embedded_page_edits_host_and_hides_shared_preview():
@@ -167,7 +168,7 @@ def test_embedded_discard_cluster_returns_host_without_publishing(monkeypatch):
     ]
     assert dialog._result is None
     assert "sprkkr_embedding" in cluster.arrays
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_discard_cluster_retains_native_host_potential(monkeypatch):
@@ -232,7 +233,7 @@ def test_embedded_navigation_prompts_to_confirm_discard_or_continue(monkeypatch)
     assert dialog._working_atoms is not dialog._original_atoms
     assert not dialog._embedded_editor.has_unapplied_changes()
     assert dialog._result is None
-    dialog.reject()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_cancel_with_unsaved_embedded_edits_has_three_choices(monkeypatch):
@@ -327,7 +328,7 @@ def test_newly_built_embedded_structure_adds_and_selects_page():
     assert dialog.tabs.currentIndex() == 1
     assert dialog.tabs.tabText(1) == "Embedded"
     assert dialog._embedded_editor is not None
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_0d_transform_rejects_unknown_site_mapping():
@@ -456,7 +457,7 @@ def test_edit_lengths_angles_preserves_fractional_coordinates():
     )
     assert not np.allclose(result.positions, atoms.positions)
     np.testing.assert_allclose(np.asarray(atoms.cell), np.eye(3))
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_lattice_host_potential_label_and_cell_parameters_rebase_cluster():
@@ -484,7 +485,7 @@ def test_lattice_host_potential_label_and_cell_parameters_rebase_cluster():
     np.testing.assert_allclose(
         np.asarray(old_host.cell), np.diag([2, 2, 4]),
     )
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
 
 
 def test_host_table_highlights_all_matching_cluster_atoms():
@@ -555,4 +556,4 @@ def test_loaded_zero_vector_can_be_repaired_without_crashing():
     dialog.lattice_spinboxes[2][2].setValue(2.0)
     assert dialog.cell_parameter_group.isEnabled()
     assert not np.isclose(np.linalg.norm(dialog._require_draft().cell[2]), 0)
-    dialog.close()
+    editor_module.QDialog.reject(dialog)
