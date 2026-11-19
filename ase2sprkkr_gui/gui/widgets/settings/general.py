@@ -68,10 +68,10 @@ class _AtomSizeExample(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._atoms = Atoms("CAu")
-        self.figure = Figure(figsize=(3.2, 1.0))
+        self.figure = Figure(figsize=(3.0, 2.2))
         self.canvas = FigureCanvasQTAgg(self.figure)
-        # Compact reference: sizes follow the real plot, even at extreme scales.
-        self.canvas.setFixedHeight(180)
+        # Slightly taller, but compact enough to sit beside the radius options.
+        self.canvas.setFixedSize(285, 215)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
@@ -93,16 +93,13 @@ class _AtomSizeExample(QWidget):
         self.axes.set_xlim(0, 3)
         self.axes.set_ylim(0, 1)
         self.axes.set_axis_off()
+        # These neighbours should appear as a close pair, as in a crystal,
+        # rather than at opposite sides of the reference canvas.
         self.markers = self.axes.scatter(
-            [0.75, 2.25], [0.62, 0.62], s=areas,
+            [1.32, 1.68], [0.5, 0.5], s=areas,
             c=["#55595d", "#d8ab36"], edgecolors="#333a42",
             linewidths=0.65,
         )
-        for x, symbol in ((0.75, "C"), (2.25, "Au")):
-            self.axes.text(
-                x, 0.20, symbol, ha="center", va="center",
-                color=self.palette().windowText().color().name(),
-            )
         self.canvas.draw_idle()
 
 
@@ -170,13 +167,19 @@ class GeneralSettingsPage(QFrame):
         size_layout.addWidget(self.atom_size_slider, 1)
         size_layout.addWidget(self.atom_size_percent)
         atom_form.addRow("Atom size:", size_row)
+        example_row = QWidget(self.atom_appearance_group)
+        example_row_layout = QHBoxLayout(example_row)
+        example_row_layout.setContentsMargins(0, 0, 0, 0)
+        example_row_layout.setSpacing(20)
+        radius_options = QVBoxLayout()
+        radius_options.setSpacing(12)
         self.atom_relative_sizes = QCheckBox(
-            "Use element-dependent Wigner–Seitz radii", self.atom_appearance_group
+            "Use element-dependent Wigner–Seitz radii", example_row
         )
         self.atom_relative_sizes.setChecked(settings.atom_relative_sizes)
-        atom_form.addRow(self.atom_relative_sizes)
+        radius_options.addWidget(self.atom_relative_sizes)
         self.atom_potential_radii = QCheckBox(
-            "Use potential radii when available", self.atom_appearance_group
+            "Use potential radii when available", example_row
         )
         self.atom_potential_radii.setToolTip(
             "Only use RWS from an ITERATING or CONVERGED potential. "
@@ -184,20 +187,25 @@ class GeneralSettingsPage(QFrame):
         )
         self.atom_potential_radii.setChecked(settings.atom_potential_radii)
         self.atom_potential_radii.setEnabled(self.atom_relative_sizes.isChecked())
-        atom_form.addRow(self.atom_potential_radii)
+        radius_options.addWidget(self.atom_potential_radii)
+        radius_options.addStretch(1)
+        example_row_layout.addLayout(radius_options)
         self.atom_relative_sizes.toggled.connect(
             self.atom_potential_radii.setEnabled
         )
-        self.atom_size_example = _AtomSizeExample(self.atom_appearance_group)
-        atom_form.addRow("Example (C / Au):", self.atom_size_example)
-        note = QLabel(
-            "Preview uses the same Matplotlib marker area as Guided "
-            "(48 pt² at 100%), with static WSR. Potential radii are "
-            "site-dependent and used only for eligible loaded potentials.",
-            self.atom_appearance_group,
-        )
-        note.setWordWrap(True)
-        atom_form.addRow("", note)
+
+        example_column = QWidget(example_row)
+        example_column_layout = QVBoxLayout(example_column)
+        example_column_layout.setContentsMargins(0, 0, 0, 0)
+        example_column_layout.setSpacing(3)
+        self.atom_size_example = _AtomSizeExample(example_column)
+        example_column_layout.addWidget(self.atom_size_example)
+        self.atom_example_caption = QLabel("Example (C / Au)", example_column)
+        self.atom_example_caption.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        example_column_layout.addWidget(self.atom_example_caption)
+        example_row_layout.addWidget(example_column)
+        example_row_layout.addStretch(1)
+        atom_form.addRow("", example_row)
         self.atom_size_slider.valueChanged.connect(self._size_slider_changed)
         self.atom_size_percent.valueChanged.connect(self._size_percent_changed)
         self.atom_relative_sizes.toggled.connect(self._update_atom_preview)

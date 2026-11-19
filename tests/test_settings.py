@@ -367,6 +367,39 @@ def test_logarithmic_atom_size_range_and_preview_uses_real_marker_areas(tmp_path
         dialog.close()
 
 
+def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QApplication, QLabel
+    from ase2sprkkr_gui.gui.dialogs.settings import SettingsDialog
+
+    dialog = SettingsDialog(
+        ApplicationSettings(tmp_path / "settings.json"),
+        profile_store=_FakeProfileStore(),
+    )
+    try:
+        dialog.show()
+        QApplication.processEvents()
+        page = dialog.general_page
+        example = page.atom_size_example
+        assert example.mapTo(page, QPoint()).x() > page.atom_relative_sizes.mapTo(
+            page, QPoint()
+        ).x()
+        assert example.canvas.height() == 215
+        assert page.atom_example_caption.text() == "Example (C / Au)"
+        assert page.atom_example_caption.mapTo(page, QPoint()).y() >= example.mapTo(
+            page, QPoint(0, example.height())
+        ).y()
+        assert not any(
+            "Preview uses" in label.text()
+            for label in page.atom_appearance_group.findChildren(QLabel)
+        )
+        positions = example.markers.get_offsets()
+        assert 0 < positions[1, 0] - positions[0, 0] < 0.5
+        assert len(example.axes.texts) == 0
+    finally:
+        dialog.close()
+
+
 def test_legacy_and_large_atom_sizes_are_loaded(tmp_path):
     path = tmp_path / "settings.json"
     for percent in (5, 25, 200, 750, 1000, 2000):
