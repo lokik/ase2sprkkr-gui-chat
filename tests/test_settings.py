@@ -385,8 +385,8 @@ def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
             page, QPoint()
         ).x()
         assert example.canvas.height() == 215
-        assert page.atom_example_caption.text() == "Example (C / Au) · distance 2.49 Å"
-        assert example.distance_angstrom == 2.49
+        assert page.atom_example_caption.text() == "Example (C / Au) · distance 2.5 Å"
+        assert example.distance_angstrom == 2.5
         assert page.atom_example_caption.mapTo(page, QPoint()).y() >= example.mapTo(
             page, QPoint(0, example.height())
         ).y()

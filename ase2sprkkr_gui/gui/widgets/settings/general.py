@@ -68,9 +68,9 @@ class _AtomSizeExample(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         # Illustrative C/Au pair, at the BCC Fe reference's nearest-neighbour
-        # distance (~2.49 Å for a = 2.87 Å). These are real Å coordinates,
-        # not a pixel-derived distance or a claim about a C–Au crystal.
-        self._atoms = Atoms("CAu", positions=[(0, 0, 0), (2.49, 0, 0)])
+        # distance (~2.49 Å for a = 2.87 Å), rounded to 2.5 Å here.
+        # These are real Å coordinates, not a claim about a C–Au crystal.
+        self._atoms = Atoms("CAu", positions=[(0, 0, 0), (2.5, 0, 0)])
         self.distance_angstrom = self._atoms.get_distance(0, 1)
         self.figure = Figure(figsize=(3.0, 2.2))
         self.canvas = FigureCanvasQTAgg(self.figure)
@@ -206,7 +206,7 @@ class GeneralSettingsPage(QFrame):
         self.atom_size_example = _AtomSizeExample(example_column)
         example_column_layout.addWidget(self.atom_size_example)
         self.atom_example_caption = QLabel(
-            f"Example (C / Au) · distance {self.atom_size_example.distance_angstrom:.2f} Å",
+            f"Example (C / Au) · distance {self.atom_size_example.distance_angstrom:.1f} Å",
             example_column,
         )
         self.atom_example_caption.setToolTip(
