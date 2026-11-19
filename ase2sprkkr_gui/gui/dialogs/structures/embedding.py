@@ -228,21 +228,15 @@ class BuildEmbeddingDialog(QDialog):
         details_panel = QWidget(splitter)
         details_layout = QVBoxLayout(details_panel)
         details_layout.setContentsMargins(0, 0, 0, 0)
-        # Centre and expansion apply to the cluster as a whole, so they
-        # precede the per-cell table and individual site editing.
-        options = QGroupBox("Cluster centre", details_panel)
+        # The centre and expansion settings apply to the whole cluster.
+        # Show the centre heading and its value on one line, with the action
+        # for choosing a new centre next to the per-cell site selection.
+        options = QGroupBox(details_panel)
         options_layout = QVBoxLayout(options)
-        centre_row = QHBoxLayout()
         self.centre_label = QLabel(options)
-        self.centre_label.setWordWrap(True)
-        centre_row.addWidget(self.centre_label, 1)
-        self.centre_button = QPushButton("Use selected site as centre", options)
-        self.centre_button.setToolTip(
-            "Set the host site used for symmetry and radius/shell expansion"
-        )
-        self.centre_button.clicked.connect(self._set_centre)
-        centre_row.addWidget(self.centre_button)
-        options_layout.addLayout(centre_row)
+        self.centre_label.setTextFormat(Qt.TextFormat.RichText)
+        self.centre_label.setWordWrap(False)
+        options_layout.addWidget(self.centre_label)
         opt_row = QHBoxLayout()
         options_layout.addLayout(opt_row)
         opt_row.addWidget(QLabel("Radius (Å):"))
@@ -277,8 +271,17 @@ class BuildEmbeddingDialog(QDialog):
 
         site_group = QGroupBox("Sites in selected cell", details_splitter)
         site_layout = QVBoxLayout(site_group)
+        site_header = QHBoxLayout()
         self.cell_label = QLabel()
-        site_layout.addWidget(self.cell_label)
+        site_header.addWidget(self.cell_label)
+        site_header.addStretch(1)
+        self.centre_button = QPushButton("Use selected site as cluster centre", site_group)
+        self.centre_button.setToolTip(
+            "Set the host site used for symmetry and radius/shell expansion"
+        )
+        self.centre_button.clicked.connect(self._set_centre)
+        site_header.addWidget(self.centre_button)
+        site_layout.addLayout(site_header)
         self.sites = QTableWidget(site_group)
         self.sites.setColumnCount(4)
         self.sites.setHorizontalHeaderLabels(
@@ -1096,7 +1099,8 @@ class BuildEmbeddingDialog(QDialog):
     def _refresh_summary(self):
         center = self.draft.center
         self.centre_label.setText(
-            f"Host site #{center.original_site + 1} in cell {center.cell_index}"
+            f"<b>Cluster centre:</b> Host site #{center.original_site + 1} "
+            f"in cell {center.cell_index}"
         )
         included = len(self.draft.entries)
         changed = sum(self._is_modified(site) for site in self.draft.entries)

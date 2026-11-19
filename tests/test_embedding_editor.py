@@ -1410,9 +1410,15 @@ def test_cell_site_and_editing_columns_keep_actions_below_site_table():
     expansion = dialog.add_radius_button.parentWidget()
     assert expansion.parentWidget() is details_panel
     assert expansion.geometry().bottom() <= details_splitter.geometry().top()
-    assert expansion.title() == "Cluster centre"
+    assert expansion.title() == ""
     assert dialog.centre_label.parentWidget() is expansion
-    assert dialog.centre_button.parentWidget() is expansion
+    assert not dialog.centre_label.wordWrap()
+    assert dialog.centre_label.text().startswith("<b>Cluster centre:</b> Host site")
+    assert dialog.centre_button.parentWidget() is columns[1]
+    site_header = columns[1].layout().itemAt(0).layout()
+    assert site_header.itemAt(0).widget() is dialog.cell_label
+    assert site_header.itemAt(site_header.count() - 1).widget() is dialog.centre_button
+    assert dialog.centre_button.text() == "Use selected site as cluster centre"
     assert dialog.add_radius_button.text() == "Include within radius"
     assert dialog.add_shells_button.text() == "Include shells"
     assert dialog.symmetric.parentWidget() is columns[0]
@@ -1425,6 +1431,9 @@ def test_cell_site_and_editing_columns_keep_actions_below_site_table():
     assert dialog.centre_button.mapTo(dialog, QPoint()).y() < dialog.sites.mapTo(
         dialog, QPoint()
     ).y()
+    assert dialog.centre_button.mapTo(dialog, QPoint()).x() > dialog.cell_label.mapTo(
+        dialog, QPoint()
+    ).x()
 
 
 def test_embedding_footer_equal_buttons_and_compact_scope_labels():
