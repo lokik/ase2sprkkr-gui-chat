@@ -49,6 +49,33 @@ def _commands(window):
     )
 
 
+def test_results_load_button_imports_output_in_guided_and_expert(tmp_path, monkeypatch):
+    QApplication.instance() or QApplication([])
+    gui, guided = _workflow(tmp_path)
+    expert = gui.create_main_window()
+    imports = []
+
+    def import_output(controller, recent_files, parent):
+        imports.append((controller, recent_files, parent))
+
+    monkeypatch.setattr(
+        workflow_module.file_flows, "choose_and_load_output", import_output
+    )
+
+    # The action is available even before any results have been loaded.
+    for window in (guided, expert):
+        widget = window.result_actions_widget
+        assert widget.load_result_button.isEnabled()
+        widget.load_result_button.click()
+
+    assert imports == [
+        (gui.controller, gui.recent_files, guided),
+        (gui.controller, gui.recent_files, expert),
+    ]
+    expert.close()
+    guided.close()
+
+
 def test_workflow_and_expert_share_one_workspace(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     workspace = WorkspaceState()
