@@ -376,13 +376,16 @@ class StructureEditorDialog(ElementAssignmentDialog):
     def _sync_cell_parameter_spins(self) -> None:
         """Keep the six parameter spinboxes in sync with direct vector edits."""
         try:
-            values = lengths_and_angles(self._require_draft().cell)
+            cell = self._require_draft().cell
+            values = lengths_and_angles(cell)
+            if abs(np.linalg.det(cell)) <= 1e-10 * np.prod(values[:3]):
+                raise ValueError("The lattice vectors are coplanar")
             self._cell_parameters_valid = True
         except ValueError:
             self._cell_parameters_valid = False
             self.cell_parameter_group.setEnabled(False)
             self.cell_parameter_error.setText(
-                "Cell lengths/angles require nonzero lattice vectors. "
+                "Cell lengths/angles require a nonsingular lattice. "
                 "Edit Cartesian cell vectors to restore a valid cell."
             )
             return
