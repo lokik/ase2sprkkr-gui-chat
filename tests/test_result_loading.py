@@ -34,6 +34,138 @@ def test_embedded_scf_loads_new_clupot_instead_of_registered_start(tmp_path):
     assert loaded.potential_error is None
 
 
+
+
+def test_embedded_dos_resolves_cluster_potential_not_registered_host(tmp_path):
+    """The DOS FILES potential is the host; the reusable state is CLUPOT."""
+    host = tmp_path / "host.pot"
+    cluster = tmp_path / "cluster.pot"
+    host.touch()
+    cluster.touch()
+    cluster_atoms = Atoms("Fe")
+    result = SimpleNamespace(
+        task_name="dos",
+        is_embedded=True,
+        files={"potential": host.name},
+        directory=str(tmp_path),
+        potential_filename=cluster.name,
+        potential=SimpleNamespace(atoms=cluster_atoms),
+    )
+    result.path_to = lambda key: result.files[key]
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert loaded.potential_path == cluster.resolve()
+    assert loaded.potential_path != host.resolve()
+    assert loaded.atoms is cluster_atoms
+    assert loaded.potential_error is None
+
+
+def test_native_dos_result_selects_control_potfil_clu(tmp_path, monkeypatch):
+    """The real DOS result resolves its CLUPOT despite a host FILES entry."""
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+
+    parameters = InputParameters.create("DOS")
+    parameters.CONTROL.CLUTYPE = "embedded"
+    parameters.CONTROL.POTFIL = "host.pot"
+    parameters.CONTROL.POTFIL_CLU = "cluster.clu"
+    result = DosResult(parameters, None, tmp_path, task_name="dos")
+    result.files.add_file("potential", "host.pot")
+    parsed_atoms = Atoms("Fe")
+    monkeypatch.setattr(
+        result, "_read_potential",
+        lambda path: SimpleNamespace(atoms=parsed_atoms),
+    )
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert result.is_embedded
+    assert loaded.potential_path == (tmp_path / "cluster.clu").resolve()
+    assert loaded.atoms is parsed_atoms
+
+
+def test_embedded_dos_does_not_use_host_when_cluster_reference_is_missing(tmp_path):
+    """A host file must never masquerade as the embedded result's geometry."""
+    host = tmp_path / "host.pot"
+    host.touch()
+    result = SimpleNamespace(
+        task_name="dos",
+        is_embedded=True,
+        files={"potential": host.name},
+        directory=str(tmp_path),
+        potential_filename=None,
+    )
+    result.path_to = lambda key: result.files[key]
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert loaded.potential_path is None
+    assert loaded.atoms is None
+
+
+def test_imported_embedded_dos_restores_cluster_and_offers_edit_not_build(
+    tmp_path, monkeypatch,
+):
+    """Imported DOS history reopens the original cluster, never its periodic host."""
+    from ase.build import bulk
+    from ase2sprkkr import SPRKKRAtoms
+    from ase2sprkkr_gui.ase.embedding import EmbeddingDraft
+    from ase2sprkkr_gui.gui.application import historical_state
+    from ase2sprkkr_gui.gui.workflow.model import BuildEmbedding, WorkflowSection
+    from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
+
+    host_potential = SPRKKRAtoms.promote_ase_atoms(
+        bulk("Fe", "bcc", a=2.87, cubic=True)
+    ).potential
+    host_potential.SCF_INFO.SCFSTATUS = "CONVERGED"
+    draft = EmbeddingDraft(host_potential)
+    draft.include([draft.center])
+    embedded_atoms = draft.to_atoms()
+
+    host_file = tmp_path / "host.pot"
+    cluster_file = tmp_path / "cluster.clu"
+    host_file.touch()
+    cluster_file.touch()
+    result = SimpleNamespace(
+        task_name="dos",
+        produces_potential=False,
+        output_values={},
+        is_embedded=True,
+        files={"potential": host_file.name},
+        directory=str(tmp_path),
+        potential_filename=cluster_file.name,
+        potential=SimpleNamespace(atoms=embedded_atoms),
+        input_parameters=None,
+    )
+    result.path_to = lambda key: result.files[key]
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+    controller = WorkspaceController(WorkspaceState())
+    record = controller.adopt_external_result(loaded).record
+    assert record is not None
+    state = controller.result_store.state_for_result(record)
+    assert state is not None
+    assert state.potential_path == str(cluster_file.resolve())
+
+    def read_state(version, *, embedding_host):
+        assert version.path == cluster_file.resolve()
+        assert embedding_host is host_potential
+        return embedded_atoms
+
+    monkeypatch.setattr(historical_state, "load_potential_version", read_state)
+    controller.use_result_state(record.id)
+
+    assert controller.structure_kind() == "0d"
+    assert controller.atoms.embedding_host is host_potential
+    actions = WorkflowPlanner().for_workspace(controller).group(WorkflowSection.CREATE)
+    assert actions is not None
+    assert next(
+        action.title for action in actions.actions
+        if action.command == BuildEmbedding()
+    ) == "Edit Embedded Cluster"
+
+
 def test_scf_output_without_converged_registration_overrides_input(tmp_path, monkeypatch):
     start = tmp_path / "Fe.pot"
     produced = tmp_path / "Fe.pot_new"
