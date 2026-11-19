@@ -25,6 +25,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AttachHostPotential,
     CreateHostPotential,
     RunTask,
+    CustomTask,
     SaveStructure,
     StartOver,
     UpdateEmptySpheres,
@@ -130,6 +131,7 @@ def test_action_columns_classify_embedded_and_restart_workflows():
     assert column(CreateHostPotential()) == "structure"
     assert column(BuildEmbedding()) == "structure"
     assert column(StartOver()) == "structure"
+    assert column(CustomTask()) == "calculate"
 
 
 def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
@@ -146,8 +148,8 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     assert window.findChild(QLabel, "workflowCalculateTitle").text() == "Calculate"
     assert "Create a 3D Structure" in names(window._structure_actions)
     assert "Load a Structure" in names(window._structure_actions)
-    assert not window._actions.has_actions
-    assert "Load or create" in window._calculate_notice.text()
+    assert window._actions.has_actions
+    assert "Custom input file" in names(window._actions)
 
     window.controller.replace_structure(
         Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
@@ -167,7 +169,8 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     window.controller.reset()
     application.processEvents()
     assert window._structure_title.text() == "Start with..."
-    assert not window._actions.has_actions
+    assert window._actions.has_actions
+    assert "Custom input file" in names(window._actions)
     window.close()
 
 
