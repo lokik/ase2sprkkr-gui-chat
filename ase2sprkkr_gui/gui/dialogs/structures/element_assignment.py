@@ -127,7 +127,11 @@ class ElementAssignmentDialog(QDialog):
 
         # Buttons
         btns = QHBoxLayout()
-        btns.addStretch(1)
+        if self._editor_mode:
+            # Page-specific help lives in the shared footer, left of actions.
+            btns.addWidget(self.footer_hint, 1)
+        else:
+            btns.addStretch(1)
         if self._allow_back:
             self.back_btn = QPushButton("Back")
             self.back_btn.clicked.connect(self._on_back)

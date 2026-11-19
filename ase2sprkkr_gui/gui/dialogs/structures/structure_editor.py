@@ -93,19 +93,15 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.tabs.addTab(sites_panel, "Sites")
 
-        self.site_notice = QLabel(
-            "For embedded structures this page edits the host sites and "
-            "occupations. Cluster substitutions are edited on Embedded.",
-            sites_panel,
-        )
-        self.site_notice.setWordWrap(True)
-        sites_panel.layout().insertWidget(0, self.site_notice)
+        self._sites_page = sites_panel
+        self._site_hint = ""
+        self.footer_hint = QLabel(self)
+        self.footer_hint.setObjectName("structureEditorFooterHint")
+        self.footer_hint.setWordWrap(True)
 
         lattice_page = QWidget(self.tabs)
+        self._lattice_page = lattice_page
         lattice_layout = QVBoxLayout(lattice_page)
-        self.lattice_note = QLabel(lattice_page)
-        self.lattice_note.setWordWrap(True)
-        lattice_layout.addWidget(self.lattice_note)
         self.lattice_group = EditorSection("Lattice vectors (Å)", lattice_page)
         # Reparent the existing vector grid into a frameless section. The
         # previous QGroupBox is an implementation detail of the base editor.
@@ -315,12 +311,11 @@ class StructureEditorDialog(ElementAssignmentDialog):
             super().setup(target, back=back)
             self._invalid_cell_parameters = None
             self._sync_cell_parameter_spins()
-            self.site_notice.setVisible(cluster)
             self.lattice_group.setTitle(
                 "Host potential lattice vectors (Å)" if cluster
                 else "Lattice vectors (Å)"
             )
-            self.lattice_note.setText(
+            self._lattice_hint = (
                 "These controls edit the HOST POTENTIAL lattice. The embedded "
                 "cluster will be remapped to the updated host (including atom "
                 "positions and displacements)."
@@ -339,6 +334,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             self._switching_tabs = previous_guard
         self._last_tab = self.tabs.currentIndex()
         self._update_preview_panel()
+        self._update_footer_hint()
 
     def _embedded_index(self):
         if self._embedded_page is None:
@@ -357,7 +353,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 button.setToolTip(reason)
             supported, message = embedded_host_transform_capability(current, "sites")
             self.scroll.setEnabled(supported)
-            self.site_notice.setText(
+            self._site_hint = (
                 "Editing host sites and occupations; edit cluster substitutions "
                 "on Embedded." if supported else message
             )
@@ -378,6 +374,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
                     and self._invalid_cell_parameters is None):
                 self.ok_btn.setEnabled(True)
         else:
+            self._site_hint = ""
             for action in ("scale", "repeat", "rotate"):
                 button = getattr(self, action + "_button")
                 button.setEnabled(True)
@@ -671,6 +668,19 @@ class StructureEditorDialog(ElementAssignmentDialog):
         finally:
             self._switching_tabs = False
         self._last_tab = index
+        self._update_footer_hint()
+
+    def _update_footer_hint(self) -> None:
+        page = self.tabs.currentWidget()
+        if page is self._sites_page:
+            message = self._site_hint
+        elif page is self._lattice_page:
+            message = self._lattice_hint
+        elif page is self._embedded_page and self._embedded_editor is not None:
+            message = self._embedded_editor.HELP_TEXT
+        else:
+            message = ""
+        self.footer_hint.setText(message)
 
     def _has_unapplied_changes(self) -> bool:
         """Whole-dialog dirty state, including changes confirmed on other tabs."""

@@ -58,6 +58,22 @@ def test_overview_first_and_advanced_removed_with_shared_preview():
     dialog.close()
 
 
+def test_editor_page_hints_live_in_shared_footer():
+    dialog = _dialog(_cluster())
+    action_row = dialog.layout().itemAt(dialog.layout().count() - 1).layout()
+    assert action_row.indexOf(dialog.footer_hint) >= 0
+    dialog.tabs.setCurrentWidget(dialog._sites_page)
+    assert "host sites and occupations" in dialog.footer_hint.text()
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    assert "HOST POTENTIAL lattice" in dialog.footer_hint.text()
+    assert dialog._lattice_page.layout().itemAt(0).widget() is dialog.lattice_group
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    assert "Select a repeated host cell" in dialog.footer_hint.text()
+    dialog.tabs.setCurrentWidget(dialog.overview)
+    assert dialog.footer_hint.text() == ""
+    dialog.close()
+
+
 def test_build_derived_in_transform_not_advanced():
     dialog = _dialog()
     dialog.tabs.setCurrentIndex(3)
