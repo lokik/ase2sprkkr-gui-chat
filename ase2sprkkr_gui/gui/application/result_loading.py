@@ -183,27 +183,43 @@ def _result_files(
         output = getattr(result, "output_file", None)
     output = _resolve_path(output, result, fallback_directory)
 
-    potential = _registered_path(result, "converged")
-    if potential is None:
-        # The FILES entry named "potential" is the *input* POTFIL for SCF.
-        # ScfResult.potential_filename, in contrast, points to the newly
-        # produced POTFIL/CLUPOT (_new). Never adopt the input as SCF output.
+    # For embedded tasks (including DOS), the potential that defines the
+    # calculation structure is POTFIL_CLU, not the periodic host POTFIL. The
+    # latter may be registered as FILES["potential"], but restoring it as a
+    # result state would silently turn the cluster into a bulk structure.
+    embedded = getattr(result, "is_embedded", False)
+    potential = None
+    if embedded:
         try:
-            is_scf = str(getattr(result, "task_name", "")).casefold() == "scf"
+            potential = getattr(result, "potential_filename", None)
         except (AttributeError, KeyError, ValueError):
-            is_scf = False
-        if is_scf:
+            pass
+        if potential is None:
+            potential = _registered_path(result, "converged")
+        # Never fall back to the host's FILES["potential"] for an embedded
+        # result: without CLUPOT the result has no reusable cluster state.
+    else:
+        potential = _registered_path(result, "converged")
+        if potential is None:
+            # The FILES entry named "potential" is the *input* POTFIL for SCF.
+            # ScfResult.potential_filename, in contrast, points to the newly
+            # produced POTFIL (_new). Never adopt the input as SCF output.
+            try:
+                is_scf = str(getattr(result, "task_name", "")).casefold() == "scf"
+            except (AttributeError, KeyError, ValueError):
+                is_scf = False
+            if is_scf:
+                try:
+                    potential = getattr(result, "potential_filename", None)
+                except (AttributeError, KeyError, ValueError):
+                    potential = None
+        if potential is None:
+            potential = _registered_path(result, "potential")
+        if potential is None:
             try:
                 potential = getattr(result, "potential_filename", None)
             except (AttributeError, KeyError, ValueError):
                 potential = None
-    if potential is None:
-        potential = _registered_path(result, "potential")
-    if potential is None:
-        try:
-            potential = getattr(result, "potential_filename", None)
-        except ValueError:
-            potential = None
     potential = _resolve_path(potential, result, fallback_directory)
     return output, potential
 
