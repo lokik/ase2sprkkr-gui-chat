@@ -700,3 +700,29 @@ def test_guided_structure_sidebar_tracks_current_structure(tmp_path):
     assert inspector.isHidden()
     assert window._subtitle.isVisible()
     window.close()
+
+def test_action_cards_are_equal_height_across_both_guided_columns(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.show()
+    application.processEvents()
+
+    def card_heights():
+        cards = (
+            window._structure_actions.findChildren(QAbstractButton)
+            + window._actions.findChildren(QAbstractButton)
+        )
+        assert cards
+        return {card.height() for card in cards}
+
+    assert len(card_heights()) == 1
+    window.controller.replace_structure(
+        Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
+    )
+    application.processEvents()
+    assert len(card_heights()) == 1
+
+    window._layout_splitter.moveSplitter(window._layout_splitter.sizes()[0] - 60, 1)
+    application.processEvents()
+    assert len(card_heights()) == 1
+    window.close()

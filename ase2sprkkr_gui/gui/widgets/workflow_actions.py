@@ -114,6 +114,7 @@ class WorkflowActionsWidget(QWidget):
     """Render a workflow plan and emit its semantic commands unchanged."""
 
     commandRequested = pyqtSignal(object)
+    naturalCardHeightChanged = pyqtSignal()
 
     def __init__(
         self,
@@ -125,6 +126,8 @@ class WorkflowActionsWidget(QWidget):
         self._column = column
         self._plan: WorkflowPlan | None = None
         self._action_buttons: list[QAbstractButton] = []
+        self._natural_card_height = 68
+        self._uniform_card_height: int | None = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(SPACE_LG)
@@ -189,10 +192,24 @@ class WorkflowActionsWidget(QWidget):
             self._layout.addWidget(group_widget)
         self._equalize_action_heights()
 
+    @property
+    def natural_card_height(self) -> int:
+        """Height needed by the longest card at this column's current width."""
+        return self._natural_card_height
+
+    def set_uniform_card_height(self, height: int) -> None:
+        """Allow sibling workflow columns to use the same card height."""
+        self._uniform_card_height = height
+        self._apply_action_height()
+
+    def _apply_action_height(self) -> None:
+        height = max(self._natural_card_height, self._uniform_card_height or 0)
+        for button in self._action_buttons:
+            if button.minimumHeight() != height or button.maximumHeight() != height:
+                button.setFixedHeight(height)
+
     def _equalize_action_heights(self) -> None:
         """Keep all cards equally tall while allowing descriptions to wrap."""
-        if not self._action_buttons:
-            return
         height = 68
         width = self.contentsRect().width()
         for button in self._action_buttons:
@@ -220,9 +237,10 @@ class WorkflowActionsWidget(QWidget):
             height = max(
                 height, 2 * SPACE_SM + 2 + max(icon.height(), text_height)
             )
-        for button in self._action_buttons:
-            if button.minimumHeight() != height or button.maximumHeight() != height:
-                button.setFixedHeight(height)
+        if self._natural_card_height != height:
+            self._natural_card_height = height
+            self.naturalCardHeightChanged.emit()
+        self._apply_action_height()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

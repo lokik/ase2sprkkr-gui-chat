@@ -199,6 +199,8 @@ class WorkflowWindow(QMainWindow):
 
         self._actions = WorkflowActionsWidget(content, column="calculate")
         self._actions.commandRequested.connect(self.execute_workflow_command)
+        for cards in (self._structure_actions, self._actions):
+            cards.naturalCardHeightChanged.connect(self._sync_action_card_heights)
         action_scroll = QScrollArea(content)
         action_scroll.setObjectName("workflowActionScrollArea")
         action_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -315,6 +317,14 @@ class WorkflowWindow(QMainWindow):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([880, 380])
+
+    def _sync_action_card_heights(self) -> None:
+        height = max(
+            self._structure_actions.natural_card_height,
+            self._actions.natural_card_height,
+        )
+        self._structure_actions.set_uniform_card_height(height)
+        self._actions.set_uniform_card_height(height)
 
     def _refresh(self) -> None:
         plan = self._workflow_planner.for_workspace(
