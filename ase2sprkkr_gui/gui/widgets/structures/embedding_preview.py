@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import numpy as np
 from matplotlib.figure import Figure
-from PyQt6.QtCore import pyqtSignal
+from matplotlib.colors import to_rgba_array
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
+    QLabel,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -25,7 +28,8 @@ class EmbeddingPreview(QWidget):
     pointSelected = pyqtSignal(int)
 
     def __init__(self, parent=None, *, selectable=False, controls_on_right=False,
-                 controls_header: QWidget | None = None, compact=False):
+                 controls_header: QWidget | None = None, compact=False,
+                 show_bulk_opacity=False):
         super().__init__(parent)
         self._press = None
         self._positions = np.empty((0, 3))
@@ -35,6 +39,7 @@ class EmbeddingPreview(QWidget):
         self._sizes = []
         self._outlines = []
         self._widths = []
+        self._bulk_mask = np.empty(0, dtype=bool)
         self._labels = ()
         self._angles = (25., -60.)
         self._zoom_factor = 1.
@@ -71,6 +76,18 @@ class EmbeddingPreview(QWidget):
         self.fit_button = QPushButton("Fit")
         self.fit_button.clicked.connect(self._fit)
         controls.addWidget(self.fit_button)
+        self.bulk_opacity_slider = None
+        self.bulk_opacity_label = None
+        if show_bulk_opacity:
+            self.bulk_opacity_label = QLabel("Bulk opacity: 100%")
+            controls.addWidget(self.bulk_opacity_label)
+            self.bulk_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+            self.bulk_opacity_slider.setRange(0, 100)
+            self.bulk_opacity_slider.setValue(100)
+            self.bulk_opacity_slider.setToolTip(
+                "Opacity of the surrounding host (bulk) atoms; cluster and highlighted sites stay opaque"
+            )
+            controls.addWidget(self.bulk_opacity_slider)
 
         # Keep the scope selector, projection selector, and Fit button aligned.
         # Each preview computes its own width from its longest control label.
@@ -80,6 +97,9 @@ class EmbeddingPreview(QWidget):
         control_width = max(control.sizeHint().width() for control in width_controls)
         for control in width_controls:
             control.setFixedWidth(control_width)
+        if self.bulk_opacity_slider is not None:
+            self.bulk_opacity_slider.setFixedWidth(control_width)
+            self.bulk_opacity_label.setFixedWidth(control_width)
 
         self.site_numbers = None
         if selectable:
@@ -95,6 +115,8 @@ class EmbeddingPreview(QWidget):
         self.canvas.setMinimumHeight(120)
         self.axes = self.figure.add_axes((0, 0, 1, 1))
         self.axes.set_axis_off()
+        if self.bulk_opacity_slider is not None:
+            self.bulk_opacity_slider.valueChanged.connect(self._set_bulk_opacity)
         self._change_projection()
         if not controls_on_right:
             layout.addLayout(controls)
@@ -126,12 +148,16 @@ class EmbeddingPreview(QWidget):
         positions = np.asarray(positions, dtype=float).reshape(-1, 3)
         return positions @ np.column_stack((right, up)), positions @ direction
 
+    def _set_bulk_opacity(self, value):
+        self.bulk_opacity_label.setText(f"Bulk opacity: {value}%")
+        self._draw_scene()
+
     def _change_projection(self, *_):
         self._zoom_factor = 1.
         self.set_view(*self.projection.currentData())
 
     def set_points(self, positions, colors, sizes, *, cell_corners, labels=(), label_index=None,
-                   outlines="#515961", widths=.4):
+                   outlines="#515961", widths=.4, bulk_mask=None):
         """Replace geometry; keep the camera when only editing styles/labels."""
         positions = np.asarray(positions, dtype=float).reshape(-1, 3)
         corners = np.asarray(cell_corners, dtype=float)
@@ -143,6 +169,9 @@ class EmbeddingPreview(QWidget):
         self._colors, self._sizes = np.asarray(colors), np.asarray(sizes)
         self._outlines = np.broadcast_to(outlines, (len(positions),))
         self._widths = np.broadcast_to(widths, (len(positions),))
+        self._bulk_mask = np.broadcast_to(
+            False if bulk_mask is None else bulk_mask, (len(positions),)
+        ).copy()
         self._labels, self._label_index = labels, label_index
         self._draw_scene()
 
@@ -162,13 +191,22 @@ class EmbeddingPreview(QWidget):
         if len(points):
             self._point_order = np.argsort(depth, kind="stable")
             order = self._point_order
+            bulk_opacity = (self.bulk_opacity_slider.value() / 100.
+                            if self.bulk_opacity_slider is not None else 1.)
+            alphas = np.where(self._bulk_mask[order], bulk_opacity, 1.)
+            faces = to_rgba_array(self._colors[order])
+            edges = to_rgba_array(self._outlines[order])
+            faces[:, 3] *= alphas
+            edges[:, 3] *= alphas
             self._scatter = ax.scatter(
-                *points[order].T, c=self._colors[order], s=self._sizes[order],
-                edgecolors=self._outlines[order], linewidths=self._widths[order], zorder=2,
+                *points[order].T, c=faces, s=self._sizes[order],
+                edgecolors=edges, linewidths=self._widths[order], zorder=2,
             )
             rings = self._widths > 1
             if np.any(rings):
-                ax.scatter(*points[rings].T, facecolors="none", edgecolors=self._outlines[rings],
+                ring_edges = to_rgba_array(self._outlines[rings])
+                ring_edges[:, 3] *= np.where(self._bulk_mask[rings], bulk_opacity, 1.)
+                ax.scatter(*points[rings].T, facecolors="none", edgecolors=ring_edges,
                            s=self._sizes[rings], linewidths=self._widths[rings], zorder=4)
             for point, label in zip(points, self._labels):
                 self._label_artists.append(ax.annotate(

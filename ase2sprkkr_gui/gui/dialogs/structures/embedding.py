@@ -378,6 +378,7 @@ class BuildEmbeddingDialog(QDialog):
         self.global_scope.setToolTip("Scope of the host structure shown in this preview")
         self.global_preview = EmbeddingPreview(
             controls_on_right=True, controls_header=self.global_scope,
+            show_bulk_opacity=True,
         )
         global_layout.addWidget(self.global_preview, 1)
         preview_splitter.addWidget(global_group)
@@ -1168,12 +1169,21 @@ class BuildEmbeddingDialog(QDialog):
             sizes.append(size * factors[site.original_site])
             outlines.append(outline)
             widths.append(width)
+        # Fade host context, not cluster atoms or editing highlights.
+        bulk_mask = None if detail else [
+            site not in self.draft.entries
+            and site != self._selected_site
+            and site not in self._selected_sites
+            and site not in self._highlighted
+            and site not in self._expansion_sites
+            for site in sites
+        ]
         preview.set_points(
             points, colors, sizes, cell_corners=self._selected_cell_corners(),
             labels=[f"#{site.original_site + 1}" for site in sites] if detail else (),
             label_index=(sites.index(self._selected_site)
                          if detail and self._selected_site in sites else None),
-            outlines=outlines, widths=widths,
+            outlines=outlines, widths=widths, bulk_mask=bulk_mask,
         )
 
     def _host_context_sites(self, *, allowed_only=False):
