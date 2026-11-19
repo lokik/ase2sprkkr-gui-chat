@@ -76,6 +76,13 @@ class ElementAssignmentDraft:
     def set_cell_component(self, row: int, column: int, value: float) -> None:
         self._cell[row, column] = float(value)
 
+    def set_cell(self, cell) -> None:
+        """Set all lattice vectors atomically, preserving fractional positions."""
+        array = np.asarray(cell, dtype=float)
+        if array.shape != (3, 3) or not np.all(np.isfinite(array)):
+            raise ValueError("Cell must be a finite 3 × 3 matrix")
+        self._cell = array.copy()
+
     def split_site(self, site: AssignmentSite) -> tuple[AssignmentSite, ...]:
         """Replace a multi-position site by uniquely labelled single sites."""
         site_index = self._site_index(site)

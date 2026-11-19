@@ -12,7 +12,8 @@ import numpy as np
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
-    QDialog, QGroupBox, QLabel, QMessageBox, QPushButton, QSplitter,
+    QDialog, QDoubleSpinBox, QFrame, QGridLayout, QGroupBox, QLabel,
+    QMessageBox, QPushButton, QSplitter, QStackedWidget,
     QStyle, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -28,7 +29,12 @@ from ase2sprkkr_gui.gui.dialogs.structures.element_assignment import (
 from ase2sprkkr_gui.gui.dialogs.structures.transforms import (
     repeat_atoms, rotate_atoms, scale_atoms, select_repeat_factors,
 )
+from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
 from ase2sprkkr_gui.gui.widgets.structures.editor_overview import EditorOverviewWidget
+from ase2sprkkr_gui.gui.widgets.structures.editor_preview import EditorClusterHostPreviews
+from ase2sprkkr_gui.physics.cell_parameters import (
+    cell_from_lengths_angles, lengths_and_angles,
+)
 from ase2sprkkr_gui.physics.lattice import detect_structure_kind
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 
@@ -55,6 +61,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self._switching_tabs = False
         self._last_tab = 0
         self._editor_ready = False
+        self._invalid_cell_parameters = None
+        self._cell_parameters_valid = True
         super().__init__(parent, editor_mode=True)
         self.setWindowTitle("Structure Editor")
         self.resize(1450, 900)
@@ -74,6 +82,11 @@ class StructureEditorDialog(ElementAssignmentDialog):
         )
         self.overview = EditorOverviewWidget(self.tabs)
         self.tabs.addTab(self.overview, "Overview")
+        self.overview.siteSelectionChanged.connect(self._overview_site_selected)
+
+        # Preserve the per-site dividers; only the surrounding scroll frame
+        # made the Sites page look like a framed inset.
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.tabs.addTab(sites_panel, "Sites")
 
         self.site_notice = QLabel(
@@ -86,17 +99,42 @@ class StructureEditorDialog(ElementAssignmentDialog):
 
         lattice_page = QWidget(self.tabs)
         lattice_layout = QVBoxLayout(lattice_page)
+        self.lattice_note = QLabel(lattice_page)
+        self.lattice_note.setWordWrap(True)
+        lattice_layout.addWidget(self.lattice_note)
         lattice_layout.addWidget(lattice_group)
+        self.lattice_group = lattice_group
+
+        parameter_box = QGroupBox("Cell lengths and angles", lattice_page)
+        parameter_grid = QGridLayout(parameter_box)
+        self.cell_parameter_spins = {}
+        for index, (key, symbol) in enumerate((
+            ("a", "a"), ("b", "b"), ("c", "c"),
+            ("alpha", "α"), ("beta", "β"), ("gamma", "γ"),
+        )):
+            spin = QDoubleSpinBox(parameter_box)
+            spin.setDecimals(6)
+            spin.setSingleStep(0.1)
+            spin.setRange(
+                0.000001 if index < 3 else 0.1,
+                100000.0 if index < 3 else 179.9,
+            )
+            spin.setSuffix(" Å" if index < 3 else "°")
+            spin.setObjectName(f"cellParameter{key.title()}")
+            spin.valueChanged.connect(self._cell_parameters_edited)
+            self.cell_parameter_spins[key] = spin
+            row, column = index % 3, 0 if index < 3 else 2
+            parameter_grid.addWidget(QLabel(symbol, parameter_box), row, column)
+            parameter_grid.addWidget(spin, row, column + 1)
+        lattice_layout.addWidget(parameter_box)
+        self.cell_parameter_group = parameter_box
+        self.cell_parameter_error = QLabel(lattice_page)
+        self.cell_parameter_error.setWordWrap(True)
+        self.cell_parameter_error.setStyleSheet("color: #bb4545;")
+        lattice_layout.addWidget(self.cell_parameter_error)
         self.cell_summary = QLabel(lattice_page)
         self.cell_summary.setWordWrap(True)
         lattice_layout.addWidget(self.cell_summary)
-        self.lattice_note = QLabel(
-            "Lattice vectors of the current structure. For an embedded cluster "
-            "these vectors belong to the host.",
-            lattice_page,
-        )
-        self.lattice_note.setWordWrap(True)
-        lattice_layout.addWidget(self.lattice_note)
         lattice_layout.addStretch(1)
         self.tabs.addTab(lattice_page, "Lattice")
 
@@ -104,12 +142,24 @@ class StructureEditorDialog(ElementAssignmentDialog):
         transform_layout = QVBoxLayout(transformations)
         geometry = QGroupBox("Geometric transformations", transformations)
         geometry_layout = QVBoxLayout(geometry)
-        for label, action in (
-            ("Scale lattice...", "scale"),
-            ("Repeat structure...", "repeat"),
-            ("Rotate structure (Miller indices)...", "rotate"),
+        for label, description, icon, action in (
+            ("Scale lattice", "Change lattice lengths in the current structure",
+             "transform-scale", "scale"),
+            ("Repeat structure", "Create a repeated supercell",
+             "view-grid", "repeat"),
+            ("Rotate structure (Miller indices)",
+             "Change the surface orientation", "object-rotate-right", "rotate"),
         ):
-            button = QPushButton(label, geometry)
+            button = QPushButton(geometry)
+            configure_action_card(
+                button, label, description,
+                QIcon.fromTheme(
+                    icon, self.style().standardIcon(
+                        QStyle.StandardPixmap.SP_ArrowUp,
+                    ),
+                ),
+                category="structure",
+            )
             button.clicked.connect(
                 lambda _checked=False, operation=action: self._transform(operation)
             )
@@ -119,30 +169,62 @@ class StructureEditorDialog(ElementAssignmentDialog):
 
         self.derived_group = QGroupBox("Build derived structure", transformations)
         derived_layout = QVBoxLayout(self.derived_group)
-        self.build_surface_button = QPushButton("Create 2D surface...", self.derived_group)
+        self.build_surface_button = QPushButton(self.derived_group)
+        configure_action_card(
+            self.build_surface_button, "Create 2D surface",
+            "Build a surface from the periodic structure",
+            QIcon.fromTheme(
+                "applications-science",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
+            ),
+            category="structure",
+        )
         self.build_surface_button.clicked.connect(
             lambda _checked=False: self._build_two_d(surface=True)
         )
         derived_layout.addWidget(self.build_surface_button)
-        self.build_2d_button = QPushButton("Create 2D structure...", self.derived_group)
+        self.build_2d_button = QPushButton(self.derived_group)
+        configure_action_card(
+            self.build_2d_button, "Create 2D structure",
+            "Construct a two-dimensional layered structure",
+            QIcon.fromTheme(
+                "applications-science",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
+            ),
+            category="structure",
+        )
         self.build_2d_button.clicked.connect(
             lambda _checked=False: self._build_two_d(surface=False)
         )
         derived_layout.addWidget(self.build_2d_button)
-        self.embedding_button = QPushButton("Build embedded cluster...", self.derived_group)
+        self.embedding_button = QPushButton(self.derived_group)
+        configure_action_card(
+            self.embedding_button, "Build embedded cluster",
+            "Create an embedded cluster from the current host",
+            QIcon.fromTheme(
+                "network-wired",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon),
+            ),
+            category="structure",
+        )
         self.embedding_button.clicked.connect(self._build_embedding)
         derived_layout.addWidget(self.embedding_button)
         transform_layout.addWidget(self.derived_group)
         transform_layout.addStretch(1)
         self.tabs.addTab(transformations, "Transform")
 
-        # One preview is shared between ordinary pages. Embedded needs its own
-        # cell map and two selectable previews, so the shared one is hidden there.
+        # Ordinary pages retain the existing 3D host preview. The Overview
+        # of a cluster instead shows a vertical cluster/host comparison.
+        # Embedded has its own controls and uses the whole editor width.
         self._shared_preview = preview_panel
+        self.preview_stack = QStackedWidget(self)
+        self.preview_stack.addWidget(preview_panel)
+        self._overview_previews = EditorClusterHostPreviews(self.preview_stack)
+        self.preview_stack.addWidget(self._overview_previews)
         self.editor_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self.editor_splitter.setChildrenCollapsible(False)
         self.editor_splitter.addWidget(self.tabs)
-        self.editor_splitter.addWidget(preview_panel)
+        self.editor_splitter.addWidget(self.preview_stack)
         self.editor_splitter.setStretchFactor(0, 3)
         self.editor_splitter.setStretchFactor(1, 2)
         self.editor_splitter.setSizes([850, 550])
@@ -176,7 +258,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         layout.addWidget(embedded, 1)
         self._embedded_page = page
         self._embedded_editor = embedded
-        index = self.tabs.addTab(page, "Embedded")
+        index = self.tabs.insertTab(1, page, "Embedded")
         self.tabs.setTabIcon(
             index, QIcon.fromTheme(
                 "network-wired",
@@ -206,8 +288,23 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self._switching_tabs = True
         try:
             super().setup(target, back=back)
+            self._invalid_cell_parameters = None
             self._refresh_cell_summary()
+            self._sync_cell_parameter_spins()
             self.site_notice.setVisible(cluster)
+            self.lattice_group.setTitle(
+                "Host potential lattice vectors (Å)" if cluster
+                else "Lattice vectors (Å)"
+            )
+            self.lattice_note.setText(
+                "These controls edit the HOST POTENTIAL lattice. The embedded "
+                "cluster will be remapped to the updated host (including atom "
+                "positions and displacements)."
+                if cluster else
+                "Editing cell lengths or angles preserves fractional atomic "
+                "coordinates; Cartesian positions change with the lattice."
+            )
+            self._overview_previews.set_structure(atoms if cluster else None)
             self.overview.set_structure(atoms)
             if cluster:
                 self._create_embedded_page(atoms)
@@ -217,7 +314,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         finally:
             self._switching_tabs = previous_guard
         self._last_tab = self.tabs.currentIndex()
-        self._shared_preview.setVisible(self._last_tab != self._embedded_index())
+        self._update_preview_panel()
 
     def _embedded_index(self):
         if self._embedded_page is None:
@@ -243,6 +340,9 @@ class StructureEditorDialog(ElementAssignmentDialog):
             for row in self.lattice_spinboxes:
                 for spin in row:
                     spin.setEnabled(supported)
+            self.cell_parameter_group.setEnabled(
+                supported and self._cell_parameters_valid
+            )
             for row in self._letter_widgets:
                 row.break_btn.setEnabled(False)
                 row.break_btn.setToolTip(
@@ -250,7 +350,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 )
             # The unchanged host draft must not block cluster editing because
             # of a generic occupation check unrelated to cluster semantics.
-            if self._require_draft().is_unchanged():
+            if (self._require_draft().is_unchanged()
+                    and self._invalid_cell_parameters is None):
                 self.ok_btn.setEnabled(True)
         else:
             for action in ("scale", "repeat", "rotate"):
@@ -261,6 +362,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             for row in self.lattice_spinboxes:
                 for spin in row:
                     spin.setEnabled(True)
+            self.cell_parameter_group.setEnabled(self._cell_parameters_valid)
         build_2d = kind == "3d" and not cluster
         build_embedded = kind in ("3d", "2d") and not cluster
         self.build_surface_button.setVisible(build_2d)
@@ -279,8 +381,65 @@ class StructureEditorDialog(ElementAssignmentDialog):
 
     def _on_lattice_vector_changed(self, value: float) -> None:
         super()._on_lattice_vector_changed(value)
-        if hasattr(self, "cell_summary"):
+        if hasattr(self, "cell_parameter_spins"):
+            self._invalid_cell_parameters = None
+            self.cell_parameter_error.clear()
+            self._sync_cell_parameter_spins()
             self._refresh_cell_summary()
+            self._update_ok_state()
+
+    def _sync_cell_parameter_spins(self) -> None:
+        """Keep the six parameter spinboxes in sync with direct vector edits."""
+        try:
+            cell = self._require_draft().cell
+            values = lengths_and_angles(cell)
+            if abs(np.linalg.det(cell)) <= 1e-10 * np.prod(values[:3]):
+                raise ValueError("The lattice vectors are coplanar")
+            self._cell_parameters_valid = True
+        except ValueError:
+            self._cell_parameters_valid = False
+            self.cell_parameter_group.setEnabled(False)
+            self.cell_parameter_error.setText(
+                "Cell lengths/angles require a nonsingular lattice. "
+                "Edit Cartesian cell vectors to restore a valid cell."
+            )
+            return
+        if self._invalid_cell_parameters is None:
+            self.cell_parameter_error.clear()
+        for spin, value in zip(self.cell_parameter_spins.values(), values):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.cell_parameter_group.setEnabled(True)
+
+    def _cell_parameters_edited(self, _value: float) -> None:
+        """Update the draft as one lattice operation (fractional sites unchanged)."""
+        if self._draft is None:
+            return
+        values = tuple(spin.value() for spin in self.cell_parameter_spins.values())
+        try:
+            cell = cell_from_lengths_angles(self._require_draft().cell, values)
+        except ValueError as error:
+            self._invalid_cell_parameters = str(error)
+            self.cell_parameter_error.setText(str(error))
+            self._update_ok_state()
+            return
+        self._invalid_cell_parameters = None
+        self.cell_parameter_error.clear()
+        self._require_draft().set_cell(cell)
+        for i, row in enumerate(self.lattice_spinboxes):
+            for j, spin in enumerate(row):
+                spin.blockSignals(True)
+                spin.setValue(float(cell[i, j]))
+                spin.blockSignals(False)
+        self._draw_preview()
+        self._refresh_cell_summary()
+        self._update_ok_state()
+
+    def _update_ok_state(self) -> None:
+        super()._update_ok_state()
+        if self._invalid_cell_parameters is not None:
+            self.ok_btn.setEnabled(False)
 
     def _refresh_cell_summary(self) -> None:
         cell = self._require_draft().cell
@@ -290,8 +449,27 @@ class StructureEditorDialog(ElementAssignmentDialog):
             "   ".join(f"{axis} = {length:.5g}" for axis, length in zip("abc", lengths))
         )
 
+    def _overview_site_selected(self, scope: str, row: int) -> None:
+        self._overview_previews.update_selection(scope, row)
+
+    def _update_preview_panel(self) -> None:
+        cluster = _is_cluster(self._working_atoms)
+        embedded = (
+            self._embedded_page is not None
+            and self.tabs.currentWidget() is self._embedded_page
+        )
+        self.preview_stack.setVisible(not embedded)
+        if not embedded:
+            self.preview_stack.setCurrentWidget(
+                self._overview_previews
+                if cluster and self.tabs.currentWidget() is self.overview
+                else self._shared_preview
+            )
+
     def _candidate(self) -> Any:
         draft = self._require_draft()
+        if self._invalid_cell_parameters is not None:
+            raise ValueError(self._invalid_cell_parameters)
         if draft.is_unchanged():
             return self._working_atoms
         if not draft.is_valid():
@@ -313,7 +491,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
             finally:
                 self._switching_tabs = False
             self._last_tab = self.tabs.currentIndex()
-            self._shared_preview.hide()
+            self._update_preview_panel()
         return True
 
     def _flush_embedded(self) -> bool:
@@ -352,10 +530,14 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 index = old
             elif index == 0:
                 try:
-                    self.overview.set_structure(self._candidate())
+                    overview_atoms = self._candidate()
                 except (ValueError, TypeError):
-                    self.overview.set_structure(self._working_atoms)
-            self._shared_preview.setVisible(index != self._embedded_index())
+                    overview_atoms = self._working_atoms
+                self._overview_previews.set_structure(
+                    overview_atoms if _is_cluster(overview_atoms) else None
+                )
+                self.overview.set_structure(overview_atoms)
+            self._update_preview_panel()
         finally:
             self._switching_tabs = False
         self._last_tab = index
