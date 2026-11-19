@@ -297,6 +297,100 @@ def test_final_apply_blocks_incomplete_embedded_values(monkeypatch):
     editor_module.QDialog.reject(dialog)
 
 
+def test_embedded_host_preview_tracks_lattice_and_preserves_undo():
+    cluster = _cluster()
+    dialog = _dialog(cluster)
+    widget = dialog._embedded_editor
+    initial_host = widget.draft.host
+    saved_undo = widget.undo_stack
+    saved_center = widget.draft.center
+    site = next(iter(widget.draft.entries))
+    assert saved_undo.apply(
+        lambda: widget.draft.set_occupation([site], {"Fe": 1.0}),
+        "Edit occupation",
+    )
+    index = saved_undo.index()
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    dialog.lattice_spinboxes[0][0].setValue(4.0)
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    assert dialog._embedded_editor is widget
+    assert widget.undo_stack is saved_undo
+    assert saved_undo.index() == index
+    assert widget.draft.center == saved_center
+    assert widget.draft.host is initial_host
+    assert widget.draft.geometry_host is not initial_host
+    np.testing.assert_allclose(widget.draft.geometry_host.cell[0, 0], 4)
+    np.testing.assert_allclose(cluster.embedding_host.cell[0, 0], 2)
+    assert widget.draft.entries[site].occupation == {"Fe": 1.0}
+    saved_undo.undo()
+    assert widget.draft.is_unchanged()
+    saved_undo.redo()
+    assert widget.draft.entries[site].occupation == {"Fe": 1.0}
+    editor_module.QDialog.reject(dialog)
+
+
+def test_embedded_live_displacements_match_final_host_rebase():
+    cluster = _cluster()
+    dialog = _dialog(cluster)
+    widget = dialog._embedded_editor
+    site = next(iter(widget.draft.entries))
+    original = widget.draft.entries[site].displacement.copy()
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    dialog.lattice_spinboxes[0][0].setValue(4.0)
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    expected = original @ np.diag([2.0, 1.0, 1.0])
+    np.testing.assert_allclose(widget.draft.display_displacement(original), expected)
+    widget._render_local()
+    index = widget._local_sites.index(site)
+    np.testing.assert_allclose(
+        widget.local_preview._positions[index],
+        site.position(widget.draft.geometry_host) + expected,
+    )
+    new_displayed = expected + [0.02, 0.0, 0.0]
+    widget.draft.set_displacement([site], new_displayed)
+    np.testing.assert_allclose(
+        widget.draft.display_displacement(widget.draft.entries[site].displacement),
+        new_displayed,
+    )
+    dialog._on_ok()
+    np.testing.assert_allclose(
+        dialog._result.sites[0].embedding.displacement, new_displayed,
+    )
+    np.testing.assert_allclose(cluster.sites[0].embedding.displacement, original)
+    dialog.close()
+
+
+def test_embedded_geometry_returns_to_original_when_host_edit_is_reverted():
+    dialog = _dialog(_cluster())
+    widget = dialog._embedded_editor
+    old_host = widget.draft.host
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    dialog.lattice_spinboxes[0][0].setValue(4.0)
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    assert widget.draft.geometry_host is not old_host
+    dialog.tabs.setCurrentWidget(dialog._lattice_page)
+    dialog.lattice_spinboxes[0][0].setValue(2.0)
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    assert widget.draft.geometry_host is old_host
+    assert not dialog._has_unapplied_changes()
+    editor_module.QDialog.reject(dialog)
+
+
+def test_embedded_preview_uses_uncommitted_host_occupations():
+    cluster = _cluster()
+    dialog = _dialog(cluster)
+    widget = dialog._embedded_editor
+    host = widget.draft.host
+    first = dialog._require_draft().sites[0]
+    first.occupancies[0].symbol = "Ni"
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    assert widget.draft.geometry_host is not host
+    site = next(s for s in widget._site_rows if s.original_site == 0)
+    assert "Ni" in widget.sites.item(widget._site_rows.index(site), 1).text()
+    assert host[0].symbol == "Fe"
+    editor_module.QDialog.reject(dialog)
+
+
 def test_host_and_embedded_changes_are_composed_at_final_apply():
     cluster = _cluster()
     original_positions = cluster.positions.copy()

@@ -249,7 +249,10 @@ class EmbeddingDraft:
     """Editor-only state: host, centre and explicit included cluster sites."""
 
     def __init__(self, host, cluster: SPRKKRAtoms | None = None):
+        # The source host anchors stored displacements and final materialization.
+        # A detached geometry view may reflect uncommitted host edits.
         self.host = host
+        self._geometry_host = host
         self.dimension = host_dimension(host)
         allowed = embedding_host_indices(host)
         if not allowed:
@@ -292,6 +295,47 @@ class EmbeddingDraft:
         """Whether the physical sites and selected GUI centre are unchanged."""
         return self._physical_data_unchanged() and self.center == self._original_center
 
+    @property
+    def geometry_host(self):
+        """Live geometry and chemistry, distinct from the source cluster host."""
+        return self._geometry_host
+
+    def set_geometry_host(self, host) -> None:
+        """Refresh the view without replacing cluster data or Undo snapshots."""
+        original = host_atoms(self.host)
+        updated = host_atoms(host)
+        if host_dimension(host) != self.dimension:
+            raise ValueError("The embedded host dimensionality cannot change")
+        if len(original) != len(updated) or not np.array_equal(original.pbc, updated.pbc):
+            raise ValueError("The embedded host site mapping or periodicity changed")
+        if frozenset(embedding_host_indices(host)) != self.allowed:
+            raise ValueError("The set of editable embedded host sites changed")
+        if not np.array_equal(original.cell, updated.cell):
+            try:
+                np.linalg.solve(np.asarray(original.cell), np.asarray(updated.cell))
+                np.linalg.solve(np.asarray(updated.cell), np.asarray(original.cell))
+            except np.linalg.LinAlgError as exc:
+                raise ValueError("Embedded host preview requires a nonsingular cell") from exc
+        self._geometry_host = host
+
+    def display_displacement(self, value):
+        """Convert a source-reference vector into the current host coordinates."""
+        vector = np.asarray(value, dtype=float)
+        if self._geometry_host is self.host:
+            return vector.copy()
+        source = np.asarray(host_atoms(self.host).cell, dtype=float)
+        target = np.asarray(host_atoms(self._geometry_host).cell, dtype=float)
+        return vector @ np.linalg.solve(source, target)
+
+    def source_displacement(self, value):
+        """Convert a displayed vector back before recording an Undoable edit."""
+        vector = np.asarray(value, dtype=float)
+        if self._geometry_host is self.host:
+            return vector.copy()
+        source = np.asarray(host_atoms(self.host).cell, dtype=float)
+        target = np.asarray(host_atoms(self._geometry_host).cell, dtype=float)
+        return vector @ np.linalg.solve(target, source)
+
     def would_discard_radial_data(self) -> bool:
         """A centre-only GUI edit cannot invalidate native radial results."""
         if self.original_cluster is None or self._physical_data_unchanged():
@@ -305,10 +349,10 @@ class EmbeddingDraft:
         )
 
     def canonical(self, site: HostSite) -> HostSite:
-        result = site.canonical(self.host)
+        result = site.canonical(self.geometry_host)
         if result.original_site not in self.allowed:
             raise ValueError("This site is not in the embeddable part of the host")
-        result.position(self.host)
+        result.position(self.geometry_host)
         return result
 
     def cell_sites(self, cell_index) -> tuple[HostSite, ...]:
@@ -316,7 +360,7 @@ class EmbeddingDraft:
         index = tuple(cell_index)
         if len(index) != self.dimension:
             raise ValueError(f"Expected {self.dimension} displayed cell indices")
-        regular = {HostSite(i, index).canonical(self.host) for i in self.allowed}
+        regular = {HostSite(i, index).canonical(self.geometry_host) for i in self.allowed}
         # The UI has 2D/3D navigation, but may reopen native files with five
         # independent translation coefficients. Keep those sites accessible.
         extras = {
@@ -332,7 +376,7 @@ class EmbeddingDraft:
         originals = [self.canonical(site) for site in sites]
         if not originals:
             return ()
-        symmetry = EmbeddingSymmetry(self.host, self.center)
+        symmetry = EmbeddingSymmetry(self.geometry_host, self.center)
         # Only sites for which CLUPOT can represent an embedding are eligible.
         return tuple(sorted({s for original in originals
                              for s in symmetry.equivalent_sites(original)
@@ -346,7 +390,7 @@ class EmbeddingDraft:
     def _entry(self, site: HostSite) -> EmbeddedSiteDraft:
         site = self.canonical(site)
         if site not in self.entries:
-            self.entries[site] = EmbeddedSiteDraft(occupation=site.occupation(self.host))
+            self.entries[site] = EmbeddedSiteDraft(occupation=site.occupation(self.geometry_host))
         return self.entries[site]
 
     def include(self, sites) -> int:
@@ -369,7 +413,7 @@ class EmbeddingDraft:
     def reset_occupation(self, sites) -> None:
         for site in sites:
             site = self.canonical(site)
-            self._entry(site).occupation = site.occupation(self.host)
+            self._entry(site).occupation = site.occupation(self.geometry_host)
 
     def set_displacement(self, sites, value, *, symmetric=False) -> None:
         """Set a common Cartesian vector, rotating it onto symmetry targets.
@@ -380,7 +424,7 @@ class EmbeddingDraft:
         vector = np.asarray(value, dtype=float)
         if vector.shape != (3,) or not np.all(np.isfinite(vector)):
             raise ValueError("Displacement must be a finite Cartesian three-vector")
-        symmetry = EmbeddingSymmetry(self.host, self.center) if symmetric else None
+        symmetry = EmbeddingSymmetry(self.geometry_host, self.center) if symmetric else None
         changes = {}
         for original in sites:
             site = self.canonical(original)
@@ -398,15 +442,17 @@ class EmbeddingDraft:
                     raise ValueError("Displacement conflicts with the selected site symmetry")
                 changes[mapped] = displacement
         for mapped, displacement in changes.items():
-            self._entry(mapped).displacement = np.array(displacement, copy=True)
+            # Symmetry is evaluated in the displayed geometry, while history
+            # stores the original-coordinate displacement.
+            self._entry(mapped).displacement = self.source_displacement(displacement)
 
     def sites_within_radius(self, radius: float) -> tuple[HostSite, ...]:
         """Read-only expansion selection, shared by preview and inclusion."""
-        return embedding_sites_within_radius(self.host, self.center, radius)
+        return embedding_sites_within_radius(self.geometry_host, self.center, radius)
 
     def sites_within_shells(self, shells: int) -> tuple[HostSite, ...]:
         """Read-only coordination-shell selection, including the centre."""
-        return embedding_sites_within_shells(self.host, self.center, shells)
+        return embedding_sites_within_shells(self.geometry_host, self.center, shells)
 
     def add_radius(self, radius: float) -> int:
         return self.include(self.sites_within_radius(radius))

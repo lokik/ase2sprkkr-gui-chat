@@ -123,6 +123,32 @@ class BuildEmbeddingDialog(QDialog):
         QApplication.instance().focusChanged.connect(self._editing_focus_changed)
         QApplication.instance().installEventFilter(self)
 
+    def update_host_geometry(self, host) -> None:
+        """Refresh live host coordinates without replacing the Embedded draft."""
+        if host is self.draft.geometry_host:
+            return
+        if self._pending_displacement is not None:
+            if self._unfinished_numbers():
+                raise ValueError("Finish the pending displacement before updating the host")
+            self._commit_pending_displacement()
+        self.draft.set_geometry_host(host)
+        self.undo_stack.end_edit()
+        self._expansion_key = None  # Geometry-dependent radius/shell previews.
+        self._expansion_sites.clear()
+        self._global_timer.stop()
+        self._local_timer.stop()
+        self._refresh_cells()
+        if self._unfinished_numbers() or self._has_occupation_buffer():
+            # Never overwrite invalid, unfinished text in live input controls.
+            self._update_symmetry_preview()
+            self._refresh_summary()
+        else:
+            self._refresh_sites()
+        self._update_history_actions()
+        self._schedule_global_render()
+        self._schedule_local_render()
+        self._schedule_expansion_preview()
+
     def _build_ui(self):
         root = QVBoxLayout(self)
         body = QSplitter(Qt.Orientation.Vertical, self)
@@ -615,7 +641,7 @@ class BuildEmbeddingDialog(QDialog):
         return tuple(cell)
 
     def _cell_offsets(self):
-        atoms = getattr(self.draft.host, "atoms", self.draft.host)
+        atoms = getattr(self.draft.geometry_host, "atoms", self.draft.geometry_host)
         return cell_ring_offsets(np.asarray(atoms.cell)[list(self._plane_axes())],
                                  self.cell_rings.value())
 
@@ -630,7 +656,7 @@ class BuildEmbeddingDialog(QDialog):
         return cells
 
     def _refresh_cells(self, *_):
-        origin, cell = embedding_cell(self.draft.host)
+        origin, cell = embedding_cell(self.draft.geometry_host)
         axes = self._plane_axes()
         if self.draft.dimension == 2:
             first = cell[0] / np.linalg.norm(cell[0])
@@ -658,7 +684,7 @@ class BuildEmbeddingDialog(QDialog):
         entry = self.draft.entries.get(site)
         if entry is None:
             return False
-        return (entry.occupation != site.occupation(self.draft.host)
+        return (entry.occupation != site.occupation(self.draft.geometry_host)
                 or np.linalg.norm(entry.displacement) > 1e-8)
 
     def _cell_changed(self, cell):
@@ -692,7 +718,7 @@ class BuildEmbeddingDialog(QDialog):
                 name += f" · N5={site.cell_index}"
             labels = (
                 name,
-                occupation_label(site.occupation(self.draft.host)),
+                occupation_label(site.occupation(self.draft.geometry_host)),
                 occupation_label(entry.occupation) if entry else "—",
                 "Yes" if entry else "No",
             )
@@ -783,9 +809,13 @@ class BuildEmbeddingDialog(QDialog):
             self.displacement_info.setText("Select one or more sites")
             return
         occupations = [self.draft.entries[s].occupation if s in self.draft.entries
-                       else s.occupation(self.draft.host) for s in self._selected_sites]
-        displacements = [self.draft.entries[s].displacement if s in self.draft.entries
-                         else np.zeros(3) for s in self._selected_sites]
+                       else s.occupation(self.draft.geometry_host) for s in self._selected_sites]
+        displacements = [
+            self.draft.display_displacement(
+                self.draft.entries[s].displacement if s in self.draft.entries
+                else np.zeros(3)
+            ) for s in self._selected_sites
+        ]
         count = len(self._selected_sites)
         common = all(value == occupations[0] for value in occupations)
         self.occupation_info.setVisible(not common)
@@ -803,13 +833,15 @@ class BuildEmbeddingDialog(QDialog):
         if not preserve_occupation:
             self._occupation_edit_key = None
             self.occupation.set_occupation(
-                entry.occupation if entry else site.occupation(self.draft.host)
+                entry.occupation if entry else site.occupation(self.draft.geometry_host)
             )
             # The host occupation is the original value even when starting
             # a brand-new embedded cluster. Restore handles every target's
             # own host occupation when several sites are selected.
-            self.occupation.set_initial_occupation(site.occupation(self.draft.host))
-        values = entry.displacement if entry else (0, 0, 0)
+            self.occupation.set_initial_occupation(site.occupation(self.draft.geometry_host))
+        values = self.draft.display_displacement(
+            entry.displacement if entry else (0, 0, 0)
+        )
         for spin, value in zip(self.deltas, values):
             spin.blockSignals(True)
             spin.setValue(float(value))
@@ -934,7 +966,7 @@ class BuildEmbeddingDialog(QDialog):
         self._apply_pending_displacement()
         def action():
             targets = self._targets()
-            occupations = {site: site.occupation(self.draft.host) for site in targets}
+            occupations = {site: site.occupation(self.draft.geometry_host) for site in targets}
             if not self._confirm_occupation_overwrite(occupations):
                 return
             self._record_edit("Restore occupations", lambda: self.draft.reset_occupation(targets))
@@ -963,8 +995,13 @@ class BuildEmbeddingDialog(QDialog):
         pending, self._pending_displacement = self._pending_displacement, None
         if pending is not None:
             if not pending.symmetric and all(
-                np.array_equal(self.draft.entries[site].displacement
-                               if site in self.draft.entries else np.zeros(3), pending.vector)
+                np.allclose(
+                    self.draft.display_displacement(
+                        self.draft.entries[site].displacement
+                        if site in self.draft.entries else np.zeros(3)
+                    ),
+                    pending.vector, atol=1e-10, rtol=0,
+                )
                 for site in pending.sites
             ):
                 self._update_history_actions()
@@ -1103,8 +1140,8 @@ class BuildEmbeddingDialog(QDialog):
 
     def _selected_cell_corners(self):
         """Reference cell outline, with no leads or vacuum in the 2D detail."""
-        origin, cell = embedding_cell(self.draft.host)
-        atoms = getattr(self.draft.host, "atoms", self.draft.host)
+        origin, cell = embedding_cell(self.draft.geometry_host)
+        atoms = getattr(self.draft.geometry_host, "atoms", self.draft.geometry_host)
         shift = np.asarray(self._selected_cell) @ np.asarray(atoms.cell)[:self.draft.dimension]
         return corner_indices.T @ cell + origin + shift
 
@@ -1112,8 +1149,11 @@ class BuildEmbeddingDialog(QDialog):
         points, colors, sizes, outlines, widths = [], [], [], [], []
         for site in sites:
             entry = self.draft.entries.get(site)
-            displacement = entry.displacement if entry is not None else 0
-            points.append(site.position(self.draft.host) + displacement)
+            displacement = (
+                self.draft.display_displacement(entry.displacement)
+                if entry is not None else 0
+            )
+            points.append(site.position(self.draft.geometry_host) + displacement)
             color, size, outline, width = self._site_style(site, local=detail)
             colors.append(color)
             sizes.append(size)
@@ -1135,7 +1175,7 @@ class BuildEmbeddingDialog(QDialog):
         Native 2D lead sites are visible in the whole-structure view but are
         excluded from the transition-region view and the editable cell.
         """
-        host_atoms = getattr(self.draft.host, "atoms", self.draft.host)
+        host_atoms = getattr(self.draft.geometry_host, "atoms", self.draft.geometry_host)
         indices = (
             sorted(self.draft.allowed) if allowed_only
             else range(len(host_atoms))
@@ -1191,7 +1231,7 @@ class BuildEmbeddingDialog(QDialog):
                 neighbour[axes[0]] += x
                 neighbour[axes[1]] += y
                 extra_cells.add(tuple(neighbour))
-        atoms = getattr(self.draft.host, "atoms", self.draft.host)
+        atoms = getattr(self.draft.geometry_host, "atoms", self.draft.geometry_host)
         indices = (sorted(self.draft.allowed)
                    if self.draft.dimension == 2 and self.global_scope.currentData() == "layer"
                    else range(len(atoms)))

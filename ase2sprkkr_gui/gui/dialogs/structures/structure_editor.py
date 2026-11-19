@@ -61,6 +61,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self._allow_build_embedding = allow_build_embedding
         self._embedded_editor = None
         self._embedded_page = None
+        self._embedded_preview_error = None
         self._discarded_host_atoms = None
         self._discarded_host_potential = None
         self._discarded_host_modified = False
@@ -331,6 +332,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self._discarded_host_atoms = None
         self._discarded_host_potential = None
         self._discarded_host_modified = False
+        self._embedded_preview_error = None
         self._working_atoms = atoms
         cluster = _is_cluster(atoms)
         target = host_atoms(atoms.embedding_host) if cluster else atoms
@@ -671,11 +673,34 @@ class StructureEditorDialog(ElementAssignmentDialog):
         finally:
             self._switching_tabs = previous_guard
 
+    def _refresh_embedded_host_geometry(self) -> None:
+        """Supply the detached host draft to the existing Embedded page."""
+        embedded = self._embedded_editor
+        if embedded is None:
+            return
+        draft = self._require_draft()
+        try:
+            if self._invalid_cell_parameters is not None:
+                raise ValueError(self._invalid_cell_parameters)
+            if not draft.is_valid():
+                raise ValueError("Correct incomplete host occupations")
+            host = (
+                self._working_atoms.embedding_host if draft.is_unchanged()
+                else draft.apply()
+            )
+            embedded.update_host_geometry(host)
+        except (ValueError, TypeError, IndexError, np.linalg.LinAlgError) as exc:
+            self._embedded_preview_error = str(exc)
+        else:
+            self._embedded_preview_error = None
+
     def _tab_changed(self, index: int) -> None:
         """Navigation never applies, discards or reconstructs a page draft."""
         if self._switching_tabs or not getattr(self, "_editor_ready", False):
             return
         self._last_tab = index
+        if index == self._embedded_index():
+            self._refresh_embedded_host_geometry()
         if index == self.tabs.indexOf(self.overview):
             try:
                 overview_atoms = self._candidate()
@@ -697,11 +722,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
             message = self._lattice_hint
         elif page is self._embedded_page and self._embedded_editor is not None:
             message = self._embedded_editor.HELP_TEXT
-            if not self._require_draft().is_unchanged():
-                message += (
-                    " Host changes from Sites/Lattice will be combined at Apply "
-                    "Structure; this site's preview still uses the original host."
-                )
+            if self._embedded_preview_error:
+                message += " Host preview could not be updated: " + self._embedded_preview_error
         else:
             message = ""
         self.footer_hint.setText(message)
