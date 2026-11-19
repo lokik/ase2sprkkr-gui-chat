@@ -42,7 +42,7 @@ def _names(table):
 
 
 def test_default_sort_then_column_primary_keeps_other_tie_breakers():
-    assert [row.name for row in order_choices(_rows())] == ["Z", "A", "B", "C"]
+    assert [row.name for row in order_choices(_rows())] == ["A", "Z", "B", "C"]
     assert [row.name for row in order_choices(_rows(), primary="name")] == [
         "A", "B", "C", "Z"
     ]
@@ -51,7 +51,7 @@ def test_default_sort_then_column_primary_keeps_other_tie_breakers():
     )] == ["Z", "C", "B", "A"]
     assert [row.name for row in order_choices(
         _rows(), has_structure=False
-    )] == ["B", "Z", "A", "C"]
+    )] == ["A", "C", "B", "Z"]
 
 
 def test_applicability_is_not_conflated_with_execution_readiness():
@@ -75,7 +75,7 @@ def test_task_chooser_filters_sorts_and_keeps_unsupported_selectable(monkeypatch
             for i in range(chooser.table.columnCount())] == [
         "Name", "Experimental", "Applicable to structure", "Info"
     ]
-    assert _names(chooser.table) == ["Z", "A", "B", "C"]
+    assert _names(chooser.table) == ["A", "Z", "B", "C"]
 
     chooser._sort_by_column(0)
     assert _names(chooser.table) == ["A", "B", "C", "Z"]
@@ -104,7 +104,7 @@ def test_task_chooser_without_structure_has_no_applicability_column(monkeypatch)
         "Name", "Experimental", "Info"
     ]
     assert chooser.applicability_filter is None
-    assert _names(chooser.table) == ["B", "Z", "A", "C"]
+    assert _names(chooser.table) == ["A", "C", "B", "Z"]
     chooser.reject()
 
 

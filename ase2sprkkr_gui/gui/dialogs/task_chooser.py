@@ -95,7 +95,7 @@ def order_choices(
         if key == "applicable":
             return {"Yes": 0, "No": 1, "Unknown": 2}.get(row.applicable, 3)
         if key == "experimental":
-            return 0 if row.experimental else 1
+            return 1 if row.experimental else 0
         return getattr(row, key).casefold()
 
     ordered = list(rows)
