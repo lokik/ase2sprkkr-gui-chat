@@ -234,6 +234,7 @@ class WorkflowWindow(QMainWindow):
             lambda value, action: execute_value_action(value, action, self),
             show_values_without_actions=False,
             show_history_button=False,
+            empty_text="",  # The Results heading and Load Result button suffice.
             parent=self._result_actions,
         )
         result_actions_layout.addWidget(self._result_actions_widget, 1)
