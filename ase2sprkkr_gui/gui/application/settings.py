@@ -6,7 +6,9 @@ from pathlib import Path
 
 from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
 from ase2sprkkr_gui.gui.application.config import config_home
-from ase2sprkkr_gui.gui.plots.atom_sizes import set_atom_appearance
+from ase2sprkkr_gui.gui.plots.atom_sizes import (
+    MAX_ATOM_SIZE_PERCENT, MIN_ATOM_SIZE_PERCENT, set_atom_appearance,
+)
 
 
 DATASET_DEFAULT_MODES = ("empty", "datetime", "uuid")
@@ -59,7 +61,7 @@ class ApplicationSettings:
         if isinstance(enabled, bool):
             self.share_python_shell_history = enabled
         size = data.get("atom_size_percent")
-        if type(size) is int and 10 <= size <= 1000:
+        if type(size) is int and MIN_ATOM_SIZE_PERCENT <= size <= MAX_ATOM_SIZE_PERCENT:
             self.atom_size_percent = size
         relative = data.get("atom_relative_sizes")
         if isinstance(relative, bool):
