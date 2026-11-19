@@ -1300,11 +1300,12 @@ class BuildEmbeddingDialog(QDialog):
             if radial_reset:
                 choice = QMessageBox.warning(
                     self, "Existing Radial Data",
-                    "The edited cluster differs from its original calculation. "
-                    "Rebuilding the structure will discard the existing radial "
-                    "potential, charge and moment data and produce a new START "
-                    "structure. The original cluster will not be modified. "
-                    "Continue?",
+                    "The edited cluster cannot reuse a complete set of "
+                    "compatible radial potentials, charges and moments as its "
+                    "initial density. Native CLUPOT requires all radial data "
+                    "for an ITERATING restart; this edit will instead create "
+                    "a START structure without the incomplete data. "
+                    "The original cluster will not be modified. Continue?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                     QMessageBox.StandardButton.Cancel,
                 )

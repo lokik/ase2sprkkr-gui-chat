@@ -2403,3 +2403,77 @@ def test_expansion_preview_uses_only_the_gete_transition_region(gete_host):
     assert all(site.original_site in dialog.draft.allowed for site in dialog._expansion_sites)
     assert dialog._expansion_sites <= set(dialog._rendered_sites)
     assert not dialog.draft.entries
+
+
+def test_calculated_cluster_edit_keeps_radial_starting_density_and_embedded_tab(tmp_path):
+    """An edited cluster can restart from its old radial data without convergence."""
+    from pathlib import Path
+    import ase2sprkkr
+    from ase2sprkkr import Potential
+    from ase2sprkkr_gui.gui.dialogs.structures.structure_editor import (
+        StructureEditorDialog,
+    )
+
+    examples = Path(ase2sprkkr.__file__).resolve().parent / "potentials" / "examples"
+    cluster_file = examples / "Fe3CoFe3.clu.iterating.pot"
+    host_file = examples / "Fe3CoFe3.host.pot"
+    if not cluster_file.is_file() or not host_file.is_file():
+        pytest.skip("Native calculated cluster fixtures are not installed")
+
+    parent = Potential.from_file(host_file)
+    original = Potential.from_file(cluster_file, host=parent).atoms
+    draft = EmbeddingDraft(parent, original)
+    key = next(iter(draft.entries))
+    old_displacement = draft.entries[key].displacement.copy()
+    draft.set_displacement([key], old_displacement + [0.02, 0.0, 0.0])
+
+    assert not draft.would_discard_radial_data()
+    edited = draft.to_atoms()
+    assert edited is not original
+    assert edited.embedding_host is parent
+    assert "sprkkr_embedding" in edited.arrays
+    assert edited.info["sprkkr_embedding_scf_status"] == "ITERATING"
+    for before, after in zip(original.sites, edited.sites):
+        for atom_type in before.occupation:
+            copied = next(a for a in after.occupation if a.symbol == atom_type.symbol)
+            assert copied is not atom_type
+            np.testing.assert_array_equal(copied.potential.raw_value,
+                                          atom_type.potential.raw_value)
+            np.testing.assert_array_equal(copied.charge.raw_value,
+                                          atom_type.charge.raw_value)
+
+    output = tmp_path / "edited.clupot"
+    Potential.from_atoms(edited).save_to_file(output)
+    reopened = Potential.from_file(output, host=parent).atoms
+    assert "sprkkr_embedding" in reopened.arrays
+    assert reopened.info["sprkkr_embedding_scf_status"] == "ITERATING"
+    dialog = StructureEditorDialog(reopened)
+    try:
+        assert dialog._embedded_index() >= 0
+        assert dialog.tabs.tabText(dialog._embedded_index()) == "Embedded"
+    finally:
+        dialog.close()
+
+
+def test_unavailable_new_element_requires_radial_reset():
+    """An unrelated element's potential is never relabeled as a starting guess."""
+    from pathlib import Path
+    import ase2sprkkr
+    from ase2sprkkr import Potential
+
+    examples = Path(ase2sprkkr.__file__).resolve().parent / "potentials" / "examples"
+    cluster_file = examples / "Fe3CoFe3.clu.iterating.pot"
+    host_file = examples / "Fe3CoFe3.host.pot"
+    if not cluster_file.is_file() or not host_file.is_file():
+        pytest.skip("Native calculated cluster fixtures are not installed")
+    parent = Potential.from_file(host_file)
+    source = Potential.from_file(cluster_file, host=parent).atoms
+    draft = EmbeddingDraft(parent, source)
+    key = next(iter(draft.entries))
+    draft.set_occupation([key], {"Au": 1.0})
+    assert draft.would_discard_radial_data()
+    with pytest.raises(ValueError, match="allow_radial_reset"):
+        draft.to_atoms()
+    edited = draft.to_atoms(allow_radial_reset=True)
+    assert edited.info["sprkkr_embedding_scf_status"] == "START"
+    assert "sprkkr_embedding" in edited.arrays
