@@ -142,6 +142,23 @@ def test_settings_has_independent_frame_tabs(tmp_path):
     dialog.close()
 
 
+def test_about_is_available_from_settings_without_accepting_changes(tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from ase2sprkkr_gui.gui.dialogs.settings import SettingsDialog
+
+    calls = []
+    monkeypatch.setattr(QMessageBox, "about", lambda *args: calls.append(args))
+    dialog = SettingsDialog(
+        ApplicationSettings(tmp_path / "settings.json"),
+        profile_store=_FakeProfileStore(),
+    )
+    dialog.about_button.click()
+    assert len(calls) == 1
+    assert calls[0][1] == "About Ase2sprkkr"
+    assert dialog.result() == 0  # About is informational, not Apply or Cancel.
+    dialog.reject()
+
+
 def test_settings_accept_commits_run_profiles_and_application_defaults(tmp_path):
     from PyQt6.QtWidgets import QDialog
 

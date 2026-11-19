@@ -133,6 +133,52 @@ def test_load_result_control_is_independent_of_assignment_controls():
     widget.close()
 
 
+def test_result_directory_import_is_independent_of_result_selection():
+    application = QApplication.instance() or QApplication([])
+    widget = _widget(show_values_without_actions=False)
+    requested = []
+    widget.importDirectoryRequested.connect(lambda: requested.append("directory"))
+    widget.resize(375, 360)
+    widget.show()
+    application.processEvents()
+
+    assert widget.import_directory_button.text() == "Import Directory…"
+    assert widget.import_directory_button.isEnabled()
+    assert widget.import_directory_button.isVisible()
+    assert not widget.import_directory_button.icon().isNull()
+    assert widget.import_directory_button.shortcut().toString() == "Ctrl+Shift+I"
+    assert widget.load_result_button.shortcut().toString() == "Ctrl+Shift+O"
+    widget.import_directory_button.click()
+    assert requested == ["directory"]
+    widget.close()
+
+
+def test_show_all_values_toggle_preserves_result_and_restores_summary_filter():
+    _application = QApplication.instance() or QApplication([])
+    widget = _widget(show_values_without_actions=False)
+    summary = _Value()
+    summary.show_in_summary = True
+    result = _Result({"ordinary": _Value(), "summary": summary})
+    widget.set_result(result)
+    assert not widget.show_all_values_checkbox.isChecked()
+    assert widget._row_count == 1
+    initial_presentation = widget._current_presentation
+
+    widget.show_all_values_checkbox.setChecked(True)
+    assert widget._row_count == 2
+    assert widget._current_presentation is initial_presentation
+
+    widget.show_all_values_checkbox.setChecked(False)
+    assert widget._row_count == 1
+    assert widget._current_presentation is initial_presentation
+
+    widget.set_status("Parsing a different output…")
+    widget.show_all_values_checkbox.setChecked(True)
+    assert widget._empty_label.text() == "Parsing a different output…"
+    assert widget._row_count == 0
+    widget.close()
+
+
 def test_result_actions_render_task_result():
     _application = QApplication.instance() or QApplication([])
     widget = _widget()

@@ -77,6 +77,32 @@ def test_results_load_button_imports_output_in_guided_and_expert(tmp_path, monke
     guided.close()
 
 
+def test_result_import_directory_is_wired_in_guided(tmp_path, monkeypatch):
+    _application = QApplication.instance() or QApplication([])
+    gui, guided = _workflow(tmp_path)
+    imports = []
+    monkeypatch.setattr(
+        workflow_module.file_flows,
+        "choose_and_load_output_directory",
+        lambda controller, history, parent: imports.append((controller, history, parent)),
+    )
+
+    assert guided.result_actions_widget.import_directory_button.isEnabled()
+    guided.result_actions_widget.import_directory_button.click()
+    assert imports == [(gui.controller, gui.recent_files, guided)]
+    guided.close()
+
+
+def test_navigation_shortcuts_are_exposed_in_tooltips(tmp_path):
+    _application = QApplication.instance() or QApplication([])
+    _gui, guided = _workflow(tmp_path)
+    assert guided._settings_button.shortcut().toString() == "Ctrl+,"
+    assert guided._close_button.shortcut().toString() == "Ctrl+Q"
+    assert "Ctrl+," in guided._settings_button.toolTip()
+    assert "Ctrl+Q" in guided._close_button.toolTip()
+    guided.close()
+
+
 def test_workflow_and_expert_share_one_workspace(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     workspace = WorkspaceState()

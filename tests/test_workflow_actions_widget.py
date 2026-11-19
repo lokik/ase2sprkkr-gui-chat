@@ -88,6 +88,47 @@ def test_renderer_preserves_plan_group_order_and_presentation():
     widget.close()
 
 
+def test_action_shortcuts_follow_typed_commands_and_hide_on_narrow_cards():
+    app = _app()
+    from ase2sprkkr_gui.gui.workflow.model import (
+        CreateStructure, CreateStructureKind, EditStructure, Load, LoadKind,
+        SaveStructure,
+    )
+    widget = WorkflowActionsWidget()
+    commands = (
+        (CreateStructure(CreateStructureKind.THREE_D), "New crystal", "Ctrl+N"),
+        (Load(LoadKind.STRUCTURE), "Load structure", "Ctrl+O"),
+        (EditStructure(), "Edit structure", "Ctrl+E"),
+        (SaveStructure(), "Save structure", "Ctrl+S"),
+    )
+    widget.set_plan(WorkflowPlan(
+        "subtitle",
+        (
+            AvailableActionGroup(
+                WorkflowSection.OTHER, "Actions", tuple(
+                    AvailableAction(command, title, "Description", "structure", ActionIcon.EDIT)
+                    for command, title, _shortcut in commands
+                )
+            ),
+        ),
+    ))
+    buttons = widget.findChildren(QPushButton)
+    assert len(buttons) == len(commands)
+    for button, (_command, title, shortcut) in zip(buttons, commands):
+        assert button.accessibleName() == title
+        assert button.shortcut().toString() == shortcut
+        hint = button.findChild(QLabel, "workflowShortcutHint")
+        assert hint is not None and hint.text() == shortcut
+        assert "Shortcut: " + shortcut in button.toolTip()
+        button.resize(600, 80)
+        app.processEvents()
+        assert not hint.isHidden()
+        button.resize(180, 80)
+        app.processEvents()
+        assert hint.isHidden()
+    widget.close()
+
+
 def test_renderer_emits_typed_command_instead_of_interpreting_title():
     _app()
     widget = WorkflowActionsWidget()
