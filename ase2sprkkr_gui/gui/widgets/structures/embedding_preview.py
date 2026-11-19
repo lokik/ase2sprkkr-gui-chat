@@ -112,6 +112,7 @@ class EmbeddingPreview(QWidget):
         self.figure = Figure(figsize=(4.5, 3))
         self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
         self.canvas = FigureCanvas(self.figure)
+        self.canvas.fullscreen_factory = self._fullscreen_copy
         self.canvas.setMinimumHeight(120)
         self.axes = self.figure.add_axes((0, 0, 1, 1))
         self.axes.set_axis_off()
@@ -128,6 +129,33 @@ class EmbeddingPreview(QWidget):
         self.canvas.mpl_connect("button_press_event", self._mouse_press)
         self.canvas.mpl_connect("motion_notify_event", self._mouse_move)
         self.canvas.mpl_connect("button_release_event", self._mouse_release)
+
+    def _fullscreen_copy(self):
+        """Give fullscreen its own live mouse handlers and independent camera.
+
+        Copying a Matplotlib Figure alone drops the EmbeddingPreview rotation,
+        drag-pan and wheel-zoom callbacks, which live on this widget.
+        """
+        preview = EmbeddingPreview(
+            selectable=self._selectable, controls_on_right=True,
+        )
+        preview.set_points(
+            self._positions, self._colors, self._sizes,
+            cell_corners=self._corners, labels=self._labels,
+            label_index=self._label_index,
+            outlines=self._outlines, widths=self._widths,
+        )
+        preview.projection.blockSignals(True)
+        preview.projection.setCurrentIndex(self.projection.currentIndex())
+        preview.projection.blockSignals(False)
+        preview._angles = self._angles
+        preview._zoom_factor = self._zoom_factor
+        preview._pan[:] = self._pan
+        if self.site_numbers is not None:
+            preview.site_numbers.setChecked(self.site_numbers.isChecked())
+        preview._draw_scene()
+        preview.canvas.set_fullscreen_enabled(False)
+        return preview
 
     @property
     def view_angles(self):
