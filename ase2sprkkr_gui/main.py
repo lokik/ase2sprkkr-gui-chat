@@ -27,12 +27,12 @@ from ase2sprkkr_gui.gui.application.workspace_controller import (
     WorkspaceController,
 )
 from ase2sprkkr_gui.gui.controllers.persistent_jobs import PersistentJobsController
-from ase2sprkkr_gui.gui.dialogs.main_window import MainWindow
 from ase2sprkkr_gui.gui.dialogs.project_browser import ProjectBrowserDialog
 from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
 from ase2sprkkr_gui.gui.dialogs.workflow_window import WorkflowWindow
 from ase2sprkkr_gui.gui.misc.icons import application_icon
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
+from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
 from ase2sprkkr_gui.gui.flows import files as file_flows
 from ase2sprkkr_gui.gui.presenters.result_actions import ResultActionsPresenter
 
@@ -83,7 +83,6 @@ class GuiApplication(QObject):
             parent=self,
         )
         self._workflow_window: WorkflowWindow | None = None
-        self._main_window: MainWindow | None = None
         self._project_browser: ProjectBrowserDialog | None = None
         self.persistent_jobs_controller.resultOpened.connect(self._show_loaded_result)
         self._exit_in_progress = False
@@ -124,7 +123,6 @@ class GuiApplication(QObject):
             self._workflow_window = WorkflowWindow(
                 self.controller,
                 self.recent_files,
-                open_expert=self.show_main_window,
                 settings=self.settings,
                 track_launch_monitor=self._track_launch_monitor,
                 project_repository=self.projects,
@@ -132,32 +130,13 @@ class GuiApplication(QObject):
             self._wire_window(self._workflow_window)
         return self._workflow_window
 
-    def create_main_window(self) -> MainWindow:
-        """Return the session's expert view, creating it lazily."""
-        if self._main_window is None:
-            self._main_window = MainWindow(
-                self.controller,
-                self.recent_files,
-                self.settings,
-                track_launch_monitor=self._track_launch_monitor,
-                project_repository=self.projects,
-            )
-            self._wire_window(self._main_window)
-        return self._main_window
-
-    def _wire_window(self, window: WorkflowWindow | MainWindow) -> None:
+    def _wire_window(self, window: WorkflowWindow) -> None:
         """Connect application-owned actions exposed by a top-level window."""
         self._wire_result_actions(window)
         window.installEventFilter(self)
-        if isinstance(window, WorkflowWindow):
-            window.projectBrowserRequested.connect(self.show_project_browser)
-        else:
-            window.browser_panel.projectBrowserRequested.connect(
-                self.show_project_browser
-            )
-            window.exitRequested.connect(self.request_exit)
+        window.projectBrowserRequested.connect(self.show_project_browser)
 
-    def _wire_result_actions(self, window: WorkflowWindow | MainWindow) -> None:
+    def _wire_result_actions(self, window: WorkflowWindow) -> None:
         """Compose result presentation and route its top-level mutation intents."""
         widget = window.result_actions_widget
         if widget is None:
@@ -348,9 +327,14 @@ class GuiApplication(QObject):
             )
             return False
 
+        if kind == "input":
+            return custom_flow.load_custom_input(
+                self.controller, self.recent_files, parent, path,
+                track_launch_monitor=self._track_launch_monitor,
+                project_repository=self.projects,
+            )
         loaders = {
             "structure": file_flows.load_structure,
-            "input": file_flows.load_input_parameters,
             "output": file_flows.load_output,
         }
         return loaders[kind](self.controller, self.recent_files, path, parent)
@@ -359,16 +343,9 @@ class GuiApplication(QObject):
         """Show and activate the workflow view."""
         self._show_window(self.create_workflow_window())
 
-    def show_main_window(self) -> None:
-        """Show and activate the expert view, creating it lazily."""
-        self._show_window(self.create_main_window())
-
     def _show_loaded_result(self, _job_id: str) -> None:
         """Bring the selected result into the primary workspace view."""
-        if self._main_window is not None and self._main_window.isVisible():
-            self._show_window(self._main_window)
-        else:
-            self.show_workflow_window()
+        self.show_workflow_window()
 
     def show_project_browser(self) -> None:
         """Show and activate the application-owned project browser."""
@@ -395,16 +372,7 @@ class GuiApplication(QObject):
             and not self._exit_approved
             and isinstance(watched, QWidget)
             and watched.isVisible()
-            and (
-                watched is self._workflow_window
-                or (
-                    watched is self._main_window
-                    and (
-                        self._workflow_window is None
-                        or not self._workflow_window.isVisible()
-                    )
-                )
-            )
+            and watched is self._workflow_window
         ):
             # Reject the original close only when shutdown is cancelled.
             # On approval, let Qt finish this close event: QWidget.close()
@@ -430,9 +398,8 @@ class GuiApplication(QObject):
                 return False
             self._exit_approved = True
             self._close_project_browser()
-            for window in (self._main_window, self._workflow_window):
-                if window is not None:
-                    window.close()
+            if self._workflow_window is not None:
+                self._workflow_window.close()
             app = QApplication.instance()
             if app is not None:
                 app.quit()
@@ -467,7 +434,7 @@ class GuiApplication(QObject):
         if answer != QMessageBox.StandardButton.Save:
             return False
 
-        parent = QApplication.activeWindow() or self._workflow_window or self._main_window
+        parent = QApplication.activeWindow() or self._workflow_window
         if structure and not file_flows.save_structure(
             self.controller, self.recent_files, parent
         ):
