@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ase2sprkkr.sprkkr.projects import default_project_repository
-from ase2sprkkr.input_parameters.identifiers import dataset_error, adsi_error
+from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_error, adsi_error
 
 from dataclasses import dataclass
 from pathlib import Path

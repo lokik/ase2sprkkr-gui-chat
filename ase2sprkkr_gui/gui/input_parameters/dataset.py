@@ -7,6 +7,16 @@ from typing import Any
 from uuid import uuid4
 
 
+def dataset_error(value: str) -> bool:
+    """Whether a requested output prefix violates SPR-KKR naming rules."""
+    return re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", value) is None
+
+
+def adsi_error(value: str) -> bool:
+    """Whether a calculation suffix contains unsafe filename characters."""
+    return re.fullmatch(r"[A-Za-z0-9_.-]*", value) is None
+
+
 DATASET_PATH = ("CONTROL", "DATASET")
 _FILENAME_COMPONENT = re.compile(r"[^A-Za-z0-9_.-]+")
 
