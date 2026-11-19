@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -25,6 +26,7 @@ from PyQt6.QtWidgets import (
 
 from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometry
 from ase2sprkkr_gui.gui.dialogs.expert_input import edit_input_parameters_session
+from ase2sprkkr_gui.gui.flows import presets as preset_flows
 from ase2sprkkr_gui.gui.flows.input_parameters import (
     choose_and_load_input_parameters,
     choose_and_save_input_parameters,
@@ -215,6 +217,14 @@ class GuidedInputParametersDialog(QDialog):
         self.save_input_button.setToolTip("Save the edited SPR-KKR input file without starting a calculation")
         self.save_input_button.clicked.connect(self._save_input)
         footer.addWidget(self.save_input_button)
+        self.presets_btn = QPushButton("Presets…", self)
+        self.presets_btn.setStyleSheet(button_stylesheet(self.palette()))
+        self.presets_menu = QMenu(self.presets_btn)
+        self.presets_menu.addAction("Replace with preset…", self._replace_preset)
+        self.presets_menu.addAction("Merge preset…", self._merge_preset)
+        self.presets_menu.addAction("Save as preset…", self._save_preset)
+        self.presets_btn.setMenu(self.presets_menu)
+        footer.addWidget(self.presets_btn)
         self.edit_input_button = QPushButton("Edit input file…", self)
         self.edit_input_button.setStyleSheet(button_stylesheet(self.palette()))
         self.edit_input_button.clicked.connect(self._edit_input_file)
@@ -465,6 +475,24 @@ class GuidedInputParametersDialog(QDialog):
         if not self._commit_pending():
             return
         edit_input_parameters_file(self.session, self)
+
+    def _replace_preset(self) -> None:
+        if self._commit_pending():
+            preset_flows.load_preset(
+                self.session, self, clear_first=True,
+                compatible_tasks=self._compatible_backend_tasks,
+            )
+
+    def _merge_preset(self) -> None:
+        if self._commit_pending():
+            preset_flows.load_preset(
+                self.session, self, clear_first=False,
+                compatible_tasks=self._compatible_backend_tasks,
+            )
+
+    def _save_preset(self) -> None:
+        if self._commit_pending():
+            preset_flows.save_preset(self.session, self)
 
     def _save_input(self) -> None:
         """Save the current isolated draft without accepting the calculation."""
