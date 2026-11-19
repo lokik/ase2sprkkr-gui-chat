@@ -12,7 +12,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
-    QDialog, QDoubleSpinBox, QFrame, QGridLayout, QGroupBox, QLabel,
+    QDialog, QDoubleSpinBox, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
     QMessageBox, QPushButton, QSplitter, QStackedWidget,
     QStyle, QTabWidget, QVBoxLayout, QWidget,
 )
@@ -58,6 +58,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self._allow_build_embedding = allow_build_embedding
         self._embedded_editor = None
         self._embedded_page = None
+        self._discarded_host_atoms = None
+        self._discarded_host_potential = None
         self._switching_tabs = False
         self._last_tab = 0
         self._editor_ready = False
@@ -256,6 +258,21 @@ class StructureEditorDialog(ElementAssignmentDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         embedded = BuildEmbeddingDialog(cluster, page, embedded=True)
         layout.addWidget(embedded, 1)
+        footer = QHBoxLayout()
+        self.discard_cluster_button = QPushButton("Discard cluster…", page)
+        self.discard_cluster_button.setToolTip(
+            "Return to the periodic host while preserving its potential and SCF state"
+        )
+        self.discard_cluster_button.setIcon(
+            QIcon.fromTheme(
+                "edit-delete",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon),
+            )
+        )
+        self.discard_cluster_button.clicked.connect(self._discard_cluster)
+        footer.addWidget(self.discard_cluster_button)
+        footer.addStretch(1)
+        layout.addLayout(footer)
         self._embedded_page = page
         self._embedded_editor = embedded
         index = self.tabs.insertTab(1, page, "Embedded")
@@ -281,6 +298,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
     def setup(self, atoms: Any, back: bool = False) -> None:
         # Called after a transform, on construction, or when publishing the
         # embedded draft to the surrounding editing session.
+        self._discarded_host_atoms = None
+        self._discarded_host_potential = None
         self._working_atoms = atoms
         cluster = _is_cluster(atoms)
         target = host_atoms(atoms.embedding_host) if cluster else atoms
@@ -505,21 +524,107 @@ class StructureEditorDialog(ElementAssignmentDialog):
             self.setup(result)
         return True
 
+    def _confirm_pending_changes(self, *, closing: bool) -> str:
+        """Use the same decision vocabulary for navigation and closing."""
+        question = QMessageBox(self)
+        question.setIcon(QMessageBox.Icon.Warning)
+        question.setWindowTitle("Unapplied Structure Changes")
+        if closing:
+            question.setText("The structure editor has unapplied changes.")
+            question.setInformativeText(
+                "Confirm applies the structure and closes the editor. "
+                "Discard closes without saving anything. "
+                "Continue editing keeps the editor open."
+            )
+        else:
+            question.setText("The Embedded page has unapplied changes.")
+            question.setInformativeText(
+                "Confirm keeps these cluster edits and opens the selected page. "
+                "Discard restores the cluster to its previous state. "
+                "Continue editing stays on Embedded. "
+                "Changes reach the workspace only through Apply Structure."
+            )
+        confirm = question.addButton("Confirm", QMessageBox.ButtonRole.AcceptRole)
+        discard = question.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+        keep = question.addButton(
+            "Continue editing", QMessageBox.ButtonRole.RejectRole
+        )
+        question.setDefaultButton(keep)
+        question.exec()
+        selected = question.clickedButton()
+        if selected is confirm:
+            return "confirm"
+        if selected is discard:
+            return "discard"
+        return "continue"
+
+    def _leave_embedded_page(self) -> bool:
+        embedded = self._embedded_editor
+        if embedded is None or not embedded.has_unapplied_changes():
+            return True
+        choice = self._confirm_pending_changes(closing=False)
+        if choice == "confirm":
+            return self._flush_embedded()
+        if choice == "discard":
+            # Retain already accepted host edits, but discard the unconfirmed
+            # cluster-specific draft (including unfinished edit controls).
+            self.setup(self._working_atoms)
+            return True
+        return False
+
+    def _discard_cluster(self) -> None:
+        """Replace the staged cluster with the original host, not its START copy."""
+        if self._embedded_editor is None:
+            return
+        host = self._working_atoms.embedding_host
+        if host is None:
+            QMessageBox.warning(
+                self, "Missing Host", "This embedded cluster has no host structure."
+            )
+            return
+        answer = QMessageBox.question(
+            self, "Discard Embedded Cluster?",
+            "Discard the entire embedded cluster and return to its host structure?\\n\\n"
+            "The host potential and its electronic state will be retained. "
+            "The workspace will change only after Apply Structure.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        from ase2sprkkr.potentials.potential_base import Potential
+        result = host_atoms(host)
+        # Keep the original Potential, even when its Atoms object currently
+        # has no attached _potential. Attach it only on final acceptance.
+        previous_guard = self._switching_tabs
+        self._switching_tabs = True
+        try:
+            self.setup(result)
+            self._discarded_host_atoms = result
+            self._discarded_host_potential = (
+                host if isinstance(host, Potential) else None
+            )
+            self.tabs.setCurrentIndex(0)
+            self._last_tab = 0
+            self._update_preview_panel()
+        finally:
+            self._switching_tabs = previous_guard
+
     def _tab_changed(self, index: int) -> None:
         if self._switching_tabs or not getattr(self, "_editor_ready", False):
             return
         old = self._last_tab
+        destination = self.tabs.widget(index)
         self._switching_tabs = True
         valid = True
         try:
             if old == self._embedded_index() and index != old:
-                valid = self._flush_embedded()
+                valid = self._leave_embedded_page()
             if valid and index == self._embedded_index():
                 try:
                     candidate = self._candidate()
                     if self._accept_operation_result(candidate, self._working_atoms):
                         # Replacing the embedded editor removes its current tab.
-                        # Restore the user's target after constructing the new page.
                         self.tabs.setCurrentIndex(self._embedded_index())
                         index = self.tabs.currentIndex()
                 except (ValueError, TypeError, NotImplementedError) as error:
@@ -528,7 +633,13 @@ class StructureEditorDialog(ElementAssignmentDialog):
             if not valid:
                 self.tabs.setCurrentIndex(old)
                 index = old
-            elif index == 0:
+            else:
+                # Reconstructing Embedded may reset the selected tab. Restore
+                # the actual destination widget rather than an obsolete index.
+                if self.tabs.indexOf(destination) >= 0:
+                    self.tabs.setCurrentWidget(destination)
+                index = self.tabs.currentIndex()
+            if valid and index == 0:
                 try:
                     overview_atoms = self._candidate()
                 except (ValueError, TypeError):
@@ -541,6 +652,43 @@ class StructureEditorDialog(ElementAssignmentDialog):
         finally:
             self._switching_tabs = False
         self._last_tab = index
+
+    def _has_unapplied_changes(self) -> bool:
+        """Whole-dialog dirty state, including changes confirmed on other tabs."""
+        return (
+            self._working_atoms is not self._original_atoms
+            or not self._require_draft().is_unchanged()
+            or self._invalid_cell_parameters is not None
+            or (
+                self._embedded_editor is not None
+                and self._embedded_editor.has_unapplied_changes()
+            )
+        )
+
+    def _request_close(self) -> bool:
+        """Handle Cancel, Escape and window-manager close uniformly."""
+        if not self._editor_ready or not self._has_unapplied_changes():
+            QDialog.reject(self)
+            return True
+        choice = self._confirm_pending_changes(closing=True)
+        if choice == "confirm":
+            # Uses the same validation and potential-state handling as the
+            # existing Apply Structure button.
+            self._on_ok()
+            return self.result() == QDialog.DialogCode.Accepted
+        if choice == "discard":
+            QDialog.reject(self)
+            return True
+        return False
+
+    def reject(self) -> None:
+        self._request_close()
+
+    def closeEvent(self, event) -> None:
+        if self._request_close():
+            event.accept()
+        else:
+            event.ignore()
 
     def _run_operation(self, operation, label: str) -> None:
         try:
@@ -605,7 +753,14 @@ class StructureEditorDialog(ElementAssignmentDialog):
         )
 
         def build(atoms):
-            prepared = prepare_embedding_source(atoms)
+            # Building again immediately after discarding a cluster must
+            # reuse the same native host Potential, including its SCF state.
+            prepared = (
+                self._discarded_host_potential
+                if (atoms is self._discarded_host_atoms
+                    and self._discarded_host_potential is not None)
+                else prepare_embedding_source(atoms)
+            )
             result = select_build_embedding_structure(prepared, parent=self)
             return None if result is prepared else result
 
@@ -650,6 +805,11 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 )
                 if answer != QMessageBox.StandardButton.Yes:
                     return
+        if (result is self._discarded_host_atoms
+                and self._discarded_host_potential is not None):
+            # Do not change the source's potential while the dialog is open.
+            # A discarded cluster must not create a fresh START potential.
+            result._potential = self._discarded_host_potential
         self._result = None if result is self._original_atoms else result
         self.accept()
 

@@ -150,6 +150,159 @@ def test_embedded_page_edits_host_and_hides_shared_preview():
     dialog.close()
 
 
+def test_embedded_discard_cluster_returns_host_without_publishing(monkeypatch):
+    cluster = _cluster()
+    host = cluster.embedding_host
+    dialog = _dialog(cluster)
+    assert dialog.discard_cluster_button.text().startswith("Discard cluster")
+    monkeypatch.setattr(
+        editor_module.QMessageBox, "question",
+        lambda *_args, **_kwargs: editor_module.QMessageBox.StandardButton.Yes,
+    )
+    dialog.discard_cluster_button.click()
+    assert dialog._working_atoms is host
+    assert dialog.tabs.currentIndex() == 0
+    assert [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())] == [
+        "Overview", "Sites", "Lattice", "Transform"
+    ]
+    assert dialog._result is None
+    assert "sprkkr_embedding" in cluster.arrays
+    dialog.close()
+
+
+def test_discard_cluster_retains_native_host_potential(monkeypatch):
+    from ase2sprkkr.potentials.potential_base import Potential
+
+    cluster = _cluster()
+    host = Potential.from_atoms(cluster.embedding_host)
+    host.SCF_INFO.SCFSTATUS = "CONVERGED"
+    cluster.embedding_host = host
+    dialog = _dialog(cluster)
+    monkeypatch.setattr(
+        editor_module.QMessageBox, "question",
+        lambda *_args, **_kwargs: editor_module.QMessageBox.StandardButton.Yes,
+    )
+    dialog.discard_cluster_button.click()
+    assert host.SCF_INFO.SCFSTATUS() == "CONVERGED"
+    assert cluster.embedding_host is host
+    dialog._on_ok()
+    assert dialog._result is host.atoms
+    assert dialog._result.potential is host
+    assert host.SCF_INFO.SCFSTATUS() == "CONVERGED"
+    dialog.close()
+
+
+def test_embedded_navigation_prompts_to_confirm_discard_or_continue(monkeypatch):
+    def edited_dialog():
+        dialog = _dialog(_cluster())
+        dialog.tabs.setCurrentIndex(1)
+        embedded = dialog._embedded_editor
+        site = next(iter(embedded.draft.entries))
+        embedded.draft.set_occupation([site], {"Fe": 1.0})
+        assert embedded.has_unapplied_changes()
+        return dialog, embedded
+
+    dialog, embedded = edited_dialog()
+    monkeypatch.setattr(dialog, "_confirm_pending_changes",
+                        lambda *, closing: "continue")
+    dialog.tabs.setCurrentIndex(2)
+    assert dialog.tabs.currentIndex() == 1
+    assert dialog._embedded_editor is embedded
+    assert embedded.has_unapplied_changes()
+    dialog._result = None
+    # Rejected close should not throw a second prompt in cleanup.
+    monkeypatch.setattr(dialog, "_confirm_pending_changes",
+                        lambda *, closing: "discard")
+    dialog.reject()
+
+    dialog, embedded = edited_dialog()
+    monkeypatch.setattr(dialog, "_confirm_pending_changes",
+                        lambda *, closing: "discard")
+    dialog.tabs.setCurrentIndex(2)
+    assert dialog.tabs.currentIndex() == 2
+    assert dialog._embedded_editor.draft.is_unchanged()
+    assert dialog._working_atoms is dialog._original_atoms
+    dialog.reject()
+
+    dialog, embedded = edited_dialog()
+    monkeypatch.setattr(dialog, "_confirm_pending_changes",
+                        lambda *, closing: "confirm")
+    dialog.tabs.setCurrentIndex(2)
+    assert dialog.tabs.currentIndex() == 2
+    assert dialog._working_atoms is not dialog._original_atoms
+    assert not dialog._embedded_editor.has_unapplied_changes()
+    assert dialog._result is None
+    dialog.reject()
+
+
+def test_cancel_with_unsaved_embedded_edits_has_three_choices(monkeypatch):
+    dialog = _dialog(_cluster())
+    dialog.tabs.setCurrentIndex(1)
+    site = next(iter(dialog._embedded_editor.draft.entries))
+    dialog._embedded_editor.draft.set_occupation([site], {"Fe": 1.0})
+    choices = []
+    def choice(*, closing):
+        choices.append(closing)
+        return "continue"
+    monkeypatch.setattr(dialog, "_confirm_pending_changes", choice)
+    dialog.reject()
+    assert choices == [True]
+    assert dialog.result() == editor_module.QDialog.DialogCode.Rejected
+    assert dialog._embedded_editor.has_unapplied_changes()
+
+    monkeypatch.setattr(dialog, "_confirm_pending_changes",
+                        lambda *, closing: "confirm")
+    dialog.reject()
+    assert dialog.result() == editor_module.QDialog.DialogCode.Accepted
+    assert dialog._result is not None
+    dialog.close()
+
+    dialog = _dialog(_cluster())
+    dialog.tabs.setCurrentIndex(1)
+    site = next(iter(dialog._embedded_editor.draft.entries))
+    dialog._embedded_editor.draft.set_occupation([site], {"Fe": 1.0})
+    monkeypatch.setattr(dialog, "_confirm_pending_changes",
+                        lambda *, closing: "discard")
+    dialog.reject()
+    assert dialog.result() == editor_module.QDialog.DialogCode.Rejected
+    assert dialog._result is None
+
+
+def test_close_button_stays_open_when_user_continues_editing(monkeypatch):
+    dialog = _dialog(_cluster())
+    dialog.tabs.setCurrentIndex(1)
+    site = next(iter(dialog._embedded_editor.draft.entries))
+    dialog._embedded_editor.draft.set_occupation([site], {"Fe": 1.0})
+    monkeypatch.setattr(dialog, "_confirm_pending_changes",
+                        lambda *, closing: "continue")
+    dialog.show()
+    dialog.close()
+    assert dialog.isVisible()
+    assert dialog._embedded_editor.has_unapplied_changes()
+    monkeypatch.setattr(dialog, "_confirm_pending_changes",
+                        lambda *, closing: "discard")
+    dialog.close()
+    assert not dialog.isVisible()
+
+
+def test_closing_after_switch_confirm_still_warns_about_editor_changes(monkeypatch):
+    dialog = _dialog(_cluster())
+    dialog.tabs.setCurrentIndex(1)
+    site = next(iter(dialog._embedded_editor.draft.entries))
+    dialog._embedded_editor.draft.set_occupation([site], {"Fe": 1.0})
+    decisions = iter(["confirm", "discard"])
+    events = []
+    def choose(*, closing):
+        events.append(closing)
+        return next(decisions)
+    monkeypatch.setattr(dialog, "_confirm_pending_changes", choose)
+    dialog.tabs.setCurrentIndex(0)
+    assert dialog._working_atoms is not dialog._original_atoms
+    dialog.reject()
+    assert events == [False, True]
+    assert dialog._result is None
+
+
 def test_editing_host_lattice_rebases_cluster_displacement_without_touching_original():
     atoms = _cluster()
     original = atoms.positions.copy()

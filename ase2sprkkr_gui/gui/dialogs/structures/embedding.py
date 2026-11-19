@@ -1255,6 +1255,15 @@ class BuildEmbeddingDialog(QDialog):
                 self.accept()
         self._guard(action)
 
+    def has_unapplied_changes(self) -> bool:
+        """Include both changed cluster data and unfinished input controls."""
+        return (
+            not self.draft.is_unchanged()
+            or self._pending_displacement is not None
+            or bool(self._unfinished_numbers())
+            or (self._selected_site is not None and self._has_occupation_buffer())
+        )
+
     def finalize_embedded(self) -> bool:
         """Validate and export one staged embedded draft without closing a tab."""
         if not self._embedded:
