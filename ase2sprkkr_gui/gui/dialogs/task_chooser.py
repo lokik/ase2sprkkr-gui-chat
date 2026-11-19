@@ -26,31 +26,43 @@ class TaskChoice:
     details: str = ""
 
 
-def applicability(task: Any, structure_kind: str | None) -> tuple[str, str]:
-    """Task/geometry support only, not potential readiness or convergence."""
+def applicability(task: Any, structure_kind: str | None, *, atoms: Any = None) -> tuple[str, str]:
+    """Declare geometry support; potential/readiness checks happen separately."""
     if structure_kind is None:
         return "Unknown", "No structure is loaded."
+
+    # Native 0D atoms can represent either a free cluster or an embedding.
     if structure_kind == "0d":
+        structure_kind = (
+            "embedded" if getattr(atoms, "embedding_host", None) is not None
+            else "cluster"
+        )
+
+    if structure_kind == "embedded":
+        if "embedded" not in task.supports:
+            return "No", "This task does not support embedded-cluster calculations."
         executable = executables.get(task.executable) if hasattr(executables, "get") else (
             executables[task.executable] if task.executable in executables else None
         )
-        if not task.supports_embedded_cluster:
-            return "No", "This task is not enabled for embedded-cluster calculations."
         if executable is None or executable.cluster_variant is None:
             return "No", "No embedded-cluster executable is available for this task."
-        return "Yes", "The task explicitly supports embedded clusters."
+        return "Yes", "The task supports embedded-cluster calculations."
+
+    if structure_kind == "cluster":
+        if "cluster" not in task.supports:
+            return "No", "This task does not support free clusters without a host potential."
+        return "Yes", "The task supports free-cluster calculations."
+
     if structure_kind == "2d":
-        supported = getattr(task, "supports_2d", None)
-        if supported is None:
-            return "Unknown", "Two-dimensional support has not been declared for this task."
-        return ("Yes", "2D geometry is supported.") if supported else (
-            "No", "This task does not support 2D calculations."
-        )
+        if "2d" not in task.supports:
+            return "No", "This task does not support native 2D calculations."
+        return "Yes", "The task supports native 2D calculations."
+
     if structure_kind == "3d":
-        supported = getattr(task, "supports_3d", None)
-        if supported is False:
-            return "No", "This task does not support 3D calculations."
+        if "3d" not in task.supports:
+            return "No", "This task does not support periodic 3D calculations."
         return "Yes", "The task supports periodic 3D calculations."
+
     return "Unknown", f"Unknown structure type: {structure_kind}."
 
 
@@ -60,7 +72,7 @@ def task_choices(atoms: Any = None) -> tuple[TaskChoice, ...]:
     rows = []
     for name in InputParameters.task_registry.names():
         task = InputParameters.task_registry[name]
-        status, reason = applicability(task, kind)
+        status, reason = applicability(task, kind, atoms=atoms)
         try:
             definition = InputParameters.input_parameters_registry.definition_for_task(task)
             # Backend info is the short summary; description is detailed help.
@@ -130,7 +142,7 @@ class TaskChooserDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel(
-            "Choose a native task. Unsupported or unverified tasks can still be edited "
+            "Choose a native task. Unsupported tasks can still be edited "
             "and saved; calculation availability is checked separately.", self
         ))
         toolbar = QHBoxLayout()
@@ -143,7 +155,7 @@ class TaskChooserDialog(QDialog):
         self.applicability_filter = None
         if self._has_structure:
             self.applicability_filter = QComboBox(self)
-            self.applicability_filter.addItems(("Any applicability", "Yes", "No", "Unknown"))
+            self.applicability_filter.addItems(("Any applicability", "Yes", "No"))
             toolbar.addWidget(self.applicability_filter)
         root.addLayout(toolbar)
 

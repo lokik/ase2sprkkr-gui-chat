@@ -29,7 +29,7 @@ def calculation_unavailable_reason(
     task = parameters.task_definition
     if task is None:
         return "The input does not resolve to a registered SPR-KKR task."
-    status, reason = applicability(task, controller.structure_kind())
+    status, reason = applicability(task, controller.structure_kind(), atoms=controller.atoms)
     if status == "No":
         return reason
     if controller.structure_kind() == "0d":

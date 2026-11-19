@@ -126,7 +126,7 @@ def _cluster_task_supported(definition):
     """Require explicit task support, not merely a shared cluster executable."""
     try:
         task = InputParameters.task_registry[definition.backend_task.upper()]
-        return (task.supports_embedded_cluster
+        return ("embedded" in task.supports
                 and executables[task.executable].cluster_variant is not None)
     except (AttributeError, KeyError):
         return False

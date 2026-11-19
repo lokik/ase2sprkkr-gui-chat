@@ -58,7 +58,7 @@ def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatc
     _app()
     task = SimpleNamespace(
         name="TEST", experimental=False, executable="kkrgen",
-        supports_embedded_cluster=False,
+        supports={"3d"},
     )
 
     class Registry(dict):
@@ -89,7 +89,7 @@ def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatc
 def test_info_falls_back_to_first_sentence_when_short_summary_is_missing(monkeypatch):
     task = SimpleNamespace(
         name="TEST", experimental=False, executable="kkrgen",
-        supports_embedded_cluster=False,
+        supports={"3d"},
     )
 
     class Registry(dict):
@@ -111,16 +111,25 @@ def test_info_falls_back_to_first_sentence_when_short_summary_is_missing(monkeyp
 
 
 def test_applicability_is_not_conflated_with_execution_readiness():
-    task = SimpleNamespace(
-        name="TEST", executable="kkrgen", supports_embedded_cluster=False,
-    )
+    task = SimpleNamespace(name="TEST", executable="kkrgen", supports={"3d"})
     assert applicability(task, "0d")[0] == "No"
-    assert applicability(task, "2d")[0] == "Unknown"
-    task.supports_2d = True
-    assert applicability(task, "2d")[0] == "Yes"
-    task.supports_2d = False
+    assert "free clusters" in applicability(task, "0d")[1]
     assert applicability(task, "2d")[0] == "No"
     assert applicability(task, "3d")[0] == "Yes"
+
+    task.supports = {"3d", "2d"}
+    assert applicability(task, "2d")[0] == "Yes"
+    task.supports = {"2d"}
+    assert applicability(task, "3d")[0] == "No"
+
+    # Only 0D atoms with a host are an embedded cluster.
+    task.supports = {"3d", "embedded"}
+    embedded = SimpleNamespace(embedding_host=object())
+    assert applicability(task, "0d", atoms=embedded)[0] == "Yes"
+    assert applicability(task, "0d")[0] == "No"
+    task.supports = {"3d", "cluster"}
+    assert applicability(task, "0d")[0] == "Yes"
+    assert applicability(task, "0d", atoms=embedded)[0] == "No"
 
 
 def test_task_chooser_filters_sorts_and_keeps_unsupported_selectable(monkeypatch):
@@ -261,3 +270,20 @@ def test_expert_schema_load_accepts_task_switch_but_guided_restricts_it(
     )
     assert guided_session.working_parameters.task_name == "BSFEK"
     assert "Expected BSFEK" in errors[0]
+
+
+def test_native_2d_applicability_uses_registered_task_metadata():
+    from ase import Atoms
+
+    layer = Atoms("Fe", cell=[2.8, 2.8, 12], pbc=[True, True, False])
+    surface_choices = {row.name: row for row in task_chooser.task_choices(layer)}
+    for name in ("SCF", "DOS", "JXC", "BSFEK", "ARPES"):
+        assert surface_choices[name].applicable == "Yes"
+    for name in ("CHILANDAU", "POSANI", "POSANIPREP", "POSANITAU",
+                 "BONDING", "PLOT2DRHO"):
+        assert surface_choices[name].applicable == "No"
+
+    bulk = Atoms("Fe", cell=[2.8, 2.8, 2.8], pbc=True)
+    bulk_choices = {row.name: row for row in task_chooser.task_choices(bulk)}
+    assert bulk_choices["CHILANDAU"].applicable == "Yes"
+    assert bulk_choices["BONDING"].applicable == "No"

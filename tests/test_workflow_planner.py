@@ -445,12 +445,12 @@ def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
     from ase2sprkkr_gui.gui.workflow import planner as planning
 
     fake_registry = {
-        "SCF": SimpleNamespace(executable="kkrscf", supports_embedded_cluster=True),
-        "DOS": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=True),
-        "XAS": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
-        "ARPES": SimpleNamespace(executable="kkrspec", supports_embedded_cluster=False),
-        "BSFEK": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
-        "JXC": SimpleNamespace(executable="kkrgen", supports_embedded_cluster=False),
+        "SCF": SimpleNamespace(executable="kkrscf", supports={"3d", "2d", "embedded"}),
+        "DOS": SimpleNamespace(executable="kkrgen", supports={"3d", "2d", "embedded"}),
+        "XAS": SimpleNamespace(executable="kkrgen", supports={"3d", "2d"}),
+        "ARPES": SimpleNamespace(executable="kkrspec", supports={"3d", "2d"}),
+        "BSFEK": SimpleNamespace(executable="kkrgen", supports={"3d", "2d"}),
+        "JXC": SimpleNamespace(executable="kkrgen", supports={"3d", "2d"}),
     }
     monkeypatch.setattr(planning.InputParameters, "task_registry", fake_registry)
     for stage, expected in ((WorkflowStage.SCF, ("scf",)),
