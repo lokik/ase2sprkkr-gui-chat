@@ -138,7 +138,15 @@ class EditorOverviewWidget(QWidget):
         self.siteSelectionChanged.emit(self.site_scope_name, int(row))
 
     def _populate_sites(self):
-        atoms = self._host_atoms if self.site_scope_name == "host" else self._atoms
+        scope = self.site_scope_name
+        atoms = self._host_atoms if scope == "host" else self._atoms
+        # Preserve a selected atom when only the underlying structure draft
+        # changes, but begin at the first site when switching table scope.
+        previous_row = (
+            self.site_table.currentRow()
+            if getattr(self, "_populated_scope", None) == scope else 0
+        )
+        self._populated_scope = scope
         self.site_table.blockSignals(True)
         self.site_table.setUpdatesEnabled(False)
         try:
@@ -166,7 +174,9 @@ class EditorOverviewWidget(QWidget):
                         )
                     self.site_table.setItem(i, column, item)
             if len(atoms):
-                self.site_table.setCurrentCell(0, 0)
+                self.site_table.setCurrentCell(
+                    min(max(previous_row, 0), len(atoms) - 1), 0,
+                )
         finally:
             self.site_table.setUpdatesEnabled(True)
             self.site_table.blockSignals(False)
