@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QFormLayout, QGroupBox, QHeaderView, QHBoxLayout, QLabel, QRadioButton,
+    QFormLayout, QHeaderView, QHBoxLayout, QLabel, QRadioButton,
     QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
 from ase2sprkkr_gui.gui.widgets.structures.overview import structure_facts
 from ase2sprkkr_gui.physics.composition import site_composition
 
@@ -28,13 +29,6 @@ def _symmetry_description(atoms):
         f"Space group: {international} (No. {number})\n"
         f"Hall symbol: {hall} (No. {hall_number})"
     )
-
-
-def _section(title, parent):
-    """Use identical bold section titles without bolding their contents."""
-    box = QGroupBox(title, parent)
-    box.setStyleSheet("QGroupBox::title { font-weight: 700; }")
-    return box
 
 
 class EditorOverviewWidget(QWidget):
@@ -59,8 +53,8 @@ class EditorOverviewWidget(QWidget):
         self.scroll.setWidget(content)
         layout = QVBoxLayout(content)
 
-        self.info_box = _section("Structure information", content)
-        info_layout = QVBoxLayout(self.info_box)
+        self.info_box = EditorSection("Structure information", content)
+        info_layout = self.info_box.content_layout
         self.main = QLabel(self.info_box)
         self.main.setWordWrap(True)
         self.main.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -71,8 +65,10 @@ class EditorOverviewWidget(QWidget):
         info_layout.addWidget(self.symmetry)
         layout.addWidget(self.info_box)
 
-        self.host_box = _section("Host structure", content)
-        host_layout = QFormLayout(self.host_box)
+        self.host_box = EditorSection(
+            "Host structure", content, layout_type=QFormLayout,
+        )
+        host_layout = self.host_box.content_layout
         self.host_facts = QLabel(self.host_box)
         self.host_facts.setWordWrap(True)
         self.host_facts.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -81,8 +77,10 @@ class EditorOverviewWidget(QWidget):
 
         self.bulk_boxes = {}
         for side in ("left", "right"):
-            box = _section(f"{side.title()} bulk", content)
-            section = QFormLayout(box)
+            box = EditorSection(
+                f"{side.title()} bulk", content, layout_type=QFormLayout,
+            )
+            section = box.content_layout
             summary = QLabel(box)
             summary.setWordWrap(True)
             summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -90,22 +88,8 @@ class EditorOverviewWidget(QWidget):
             layout.addWidget(box)
             self.bulk_boxes[side] = (box, summary)
 
-        self.table_box = _section("Atomic sites", content)
-        table_layout = QVBoxLayout(self.table_box)
-        table_header = QHBoxLayout()
-        table_header.addStretch(1)
-        self.site_scope = QWidget(self.table_box)
-        scope_layout = QHBoxLayout(self.site_scope)
-        scope_layout.setContentsMargins(0, 0, 0, 0)
-        self.cluster_radio = QRadioButton("Cluster", self.site_scope)
-        self.host_radio = QRadioButton("Host", self.site_scope)
-        self.cluster_radio.setChecked(True)
-        self.cluster_radio.toggled.connect(self._scope_changed)
-        self.host_radio.toggled.connect(self._scope_changed)
-        scope_layout.addWidget(self.cluster_radio)
-        scope_layout.addWidget(self.host_radio)
-        table_header.addWidget(self.site_scope)
-        table_layout.addLayout(table_header)
+        self.table_box = EditorSection("Atomic sites", content)
+        table_layout = self.table_box.content_layout
 
         self.site_table = QTableWidget(0, 8, self.table_box)
         self.site_table.setHorizontalHeaderLabels([
@@ -120,7 +104,27 @@ class EditorOverviewWidget(QWidget):
             QHeaderView.ResizeMode.ResizeToContents
         )
         self.site_table.currentCellChanged.connect(self._selection_changed)
-        table_layout.addWidget(self.site_table)
+
+        # Radio buttons are to the right of the table in two rows; the table
+        # keeps its own grid and column headers.
+        self.site_scope = QWidget(self.table_box)
+        scope_layout = QVBoxLayout(self.site_scope)
+        scope_layout.setContentsMargins(0, 0, 0, 0)
+        scope_layout.setSpacing(5)
+        self.cluster_radio = QRadioButton("Cluster", self.site_scope)
+        self.host_radio = QRadioButton("Host", self.site_scope)
+        self.cluster_radio.setChecked(True)
+        self.cluster_radio.toggled.connect(self._scope_changed)
+        self.host_radio.toggled.connect(self._scope_changed)
+        scope_layout.addWidget(self.cluster_radio)
+        scope_layout.addWidget(self.host_radio)
+
+        self.table_row = QHBoxLayout()
+        self.table_row.addWidget(self.site_table, 1)
+        self.table_row.addWidget(
+            self.site_scope, 0, Qt.AlignmentFlag.AlignTop,
+        )
+        table_layout.addLayout(self.table_row)
         layout.addWidget(self.table_box, 1)
         layout.addStretch(1)
 

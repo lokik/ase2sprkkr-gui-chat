@@ -397,9 +397,29 @@ def test_info_headings_and_unframed_sites():
     dialog = _dialog()
     assert dialog.overview.info_box.title() == "Structure information"
     assert dialog.overview.table_box.title() == "Atomic sites"
-    assert "font-weight: 700" in dialog.overview.info_box.styleSheet()
-    assert "font-weight: 700" in dialog.overview.table_box.styleSheet()
+    from PyQt6.QtWidgets import QGroupBox
+    from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
+
+    sections = (
+        dialog.overview.info_box,
+        dialog.overview.host_box,
+        dialog.overview.table_box,
+        *(box for box, _label in dialog.overview.bulk_boxes.values()),
+        dialog.lattice_group,
+        dialog.cell_parameter_group,
+        dialog.geometry_group,
+        dialog.derived_group,
+    )
+    assert all(isinstance(section, EditorSection) for section in sections)
+    assert all(not isinstance(section, QGroupBox) for section in sections)
+    assert all(section.heading.font().bold() for section in sections)
+    assert all(
+        section.heading.font().pointSizeF() > dialog.font().pointSizeF()
+        for section in sections
+    )
     assert dialog.scroll.frameShape() == QFrame.Shape.NoFrame
+    assert dialog.overview.site_table.horizontalHeader().count() == 8
+    assert not hasattr(dialog, "cell_summary")
     dialog.close()
 
 
@@ -497,4 +517,42 @@ def test_host_table_highlights_all_matching_cluster_atoms():
     dialog.overview.site_table.setCurrentCell(1, 0)
     assert tuple(np.flatnonzero(previews.cluster_preview._widths > 1)) == (1,)
     assert not np.any(previews.host_preview._widths > 1)
+    dialog.close()
+
+
+def test_site_scope_radios_are_stacked_beside_table():
+    from PyQt6.QtWidgets import QVBoxLayout
+
+    dialog = _dialog(_cluster())
+    overview = dialog.overview
+    assert isinstance(overview.site_scope.layout(), QVBoxLayout)
+    assert overview.site_scope.layout().itemAt(0).widget() is overview.cluster_radio
+    assert overview.site_scope.layout().itemAt(1).widget() is overview.host_radio
+    assert overview.table_row.itemAt(0).widget() is overview.site_table
+    assert overview.table_row.itemAt(1).widget() is overview.site_scope
+    assert overview.table_box.title() == "Atomic sites"
+    dialog.close()
+
+
+def test_cannot_make_lattice_vector_zero():
+    dialog = _dialog()
+    before = dialog._require_draft().cell.copy()
+    # Initially the a vector is (1, 0, 0). The first component may not
+    # be changed to zero, because that would make the entire vector zero.
+    dialog.lattice_spinboxes[0][0].setValue(0.0)
+    np.testing.assert_array_equal(dialog._require_draft().cell, before)
+    assert dialog.lattice_spinboxes[0][0].value() == 1.0
+    assert "zero length" in dialog.cell_parameter_error.text()
+    dialog.close()
+
+
+def test_loaded_zero_vector_can_be_repaired_without_crashing():
+    atoms = _atoms()
+    atoms.set_cell([[1, 0, 0], [0, 1, 0], [0, 0, 0]])
+    atoms.set_pbc((True, True, False))
+    dialog = _dialog(atoms)
+    assert not dialog.cell_parameter_group.isEnabled()
+    dialog.lattice_spinboxes[2][2].setValue(2.0)
+    assert dialog.cell_parameter_group.isEnabled()
+    assert not np.isclose(np.linalg.norm(dialog._require_draft().cell[2]), 0)
     dialog.close()

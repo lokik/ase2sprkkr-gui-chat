@@ -32,6 +32,7 @@ from ase2sprkkr_gui.gui.dialogs.structures.transforms import (
 from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
 from ase2sprkkr_gui.gui.widgets.structures.editor_overview import EditorOverviewWidget
 from ase2sprkkr_gui.gui.widgets.structures.editor_preview import EditorClusterHostPreviews
+from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
 from ase2sprkkr_gui.physics.cell_parameters import (
     cell_from_lengths_angles, lengths_and_angles,
 )
@@ -104,11 +105,17 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.lattice_note = QLabel(lattice_page)
         self.lattice_note.setWordWrap(True)
         lattice_layout.addWidget(self.lattice_note)
-        lattice_layout.addWidget(lattice_group)
-        self.lattice_group = lattice_group
+        self.lattice_group = EditorSection("Lattice vectors (Å)", lattice_page)
+        # Reparent the existing vector grid into a frameless section. The
+        # previous QGroupBox is an implementation detail of the base editor.
+        self.lattice_group.content_layout.addWidget(self.lattice_vectors_table)
+        lattice_layout.addWidget(self.lattice_group)
+        lattice_group.deleteLater()
 
-        parameter_box = QGroupBox("Cell lengths and angles", lattice_page)
-        parameter_grid = QGridLayout(parameter_box)
+        parameter_box = EditorSection(
+            "Cell lengths and angles", lattice_page, layout_type=QGridLayout,
+        )
+        parameter_grid = parameter_box.content_layout
         self.cell_parameter_spins = {}
         for index, (key, symbol) in enumerate((
             ("a", "a"), ("b", "b"), ("c", "c"),
@@ -134,16 +141,14 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.cell_parameter_error.setWordWrap(True)
         self.cell_parameter_error.setStyleSheet("color: #bb4545;")
         lattice_layout.addWidget(self.cell_parameter_error)
-        self.cell_summary = QLabel(lattice_page)
-        self.cell_summary.setWordWrap(True)
-        lattice_layout.addWidget(self.cell_summary)
         lattice_layout.addStretch(1)
         self.tabs.addTab(lattice_page, "Lattice")
 
         transformations = QWidget(self.tabs)
         transform_layout = QVBoxLayout(transformations)
-        geometry = QGroupBox("Geometric transformations", transformations)
-        geometry_layout = QVBoxLayout(geometry)
+        geometry = EditorSection("Geometric transformations", transformations)
+        self.geometry_group = geometry
+        geometry_layout = geometry.content_layout
         for label, description, icon, action in (
             ("Scale lattice", "Change lattice lengths in the current structure",
              "transform-scale", "scale"),
@@ -169,8 +174,8 @@ class StructureEditorDialog(ElementAssignmentDialog):
             setattr(self, action + "_button", button)
         transform_layout.addWidget(geometry)
 
-        self.derived_group = QGroupBox("Build derived structure", transformations)
-        derived_layout = QVBoxLayout(self.derived_group)
+        self.derived_group = EditorSection("Build derived structure", transformations)
+        derived_layout = self.derived_group.content_layout
         self.build_surface_button = QPushButton(self.derived_group)
         configure_action_card(
             self.build_surface_button, "Create 2D surface",
@@ -308,7 +313,6 @@ class StructureEditorDialog(ElementAssignmentDialog):
         try:
             super().setup(target, back=back)
             self._invalid_cell_parameters = None
-            self._refresh_cell_summary()
             self._sync_cell_parameter_spins()
             self.site_notice.setVisible(cluster)
             self.lattice_group.setTitle(
@@ -399,12 +403,35 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.derived_group.setVisible(build_2d or build_embedded)
 
     def _on_lattice_vector_changed(self, value: float) -> None:
+        # A zero-length lattice vector has no physical meaning. Revert just
+        # the newly invalid row, without blocking repairs of an already
+        # malformed structure that was loaded with a zero vector.
+        draft = self._require_draft()
+        before = draft.cell
+        proposed = np.array([
+            [spin.value() for spin in row] for row in self.lattice_spinboxes
+        ], dtype=float)
+        was_nonzero = np.linalg.norm(before, axis=1) > 1e-10
+        now_zero = np.linalg.norm(proposed, axis=1) <= 1e-10
+        invalid = np.flatnonzero(was_nonzero & now_zero)
+        if len(invalid):
+            for row in invalid:
+                for col, spin in enumerate(self.lattice_spinboxes[int(row)]):
+                    spin.blockSignals(True)
+                    spin.setValue(float(before[row, col]))
+                    spin.blockSignals(False)
+            if hasattr(self, "cell_parameter_error"):
+                names = ", ".join("abc"[i] for i in invalid)
+                self.cell_parameter_error.setText(
+                    f"Lattice vector {names} must not have zero length."
+                )
+            return
+
         super()._on_lattice_vector_changed(value)
         if hasattr(self, "cell_parameter_spins"):
             self._invalid_cell_parameters = None
             self.cell_parameter_error.clear()
             self._sync_cell_parameter_spins()
-            self._refresh_cell_summary()
             self._update_ok_state()
 
     def _sync_cell_parameter_spins(self) -> None:
@@ -452,21 +479,12 @@ class StructureEditorDialog(ElementAssignmentDialog):
                 spin.setValue(float(cell[i, j]))
                 spin.blockSignals(False)
         self._draw_preview()
-        self._refresh_cell_summary()
         self._update_ok_state()
 
     def _update_ok_state(self) -> None:
         super()._update_ok_state()
         if self._invalid_cell_parameters is not None:
             self.ok_btn.setEnabled(False)
-
-    def _refresh_cell_summary(self) -> None:
-        cell = self._require_draft().cell
-        lengths = np.linalg.norm(cell, axis=1)
-        self.cell_summary.setText(
-            "Cell lengths (Å): " +
-            "   ".join(f"{axis} = {length:.5g}" for axis, length in zip("abc", lengths))
-        )
 
     def _overview_site_selected(self, scope: str, row: int) -> None:
         self._overview_previews.update_selection(scope, row)
