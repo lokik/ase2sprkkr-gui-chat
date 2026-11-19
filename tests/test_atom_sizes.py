@@ -5,7 +5,8 @@ import numpy as np
 from ase import Atoms
 
 from ase2sprkkr_gui.gui.plots.atom_sizes import (
-    AtomAppearance, marker_areas, set_atom_appearance,
+    AtomAppearance, marker_areas, marker_area_factors_for_occupations,
+    marker_area_scale, set_atom_appearance,
 )
 
 
@@ -73,3 +74,42 @@ def test_shared_preference_does_not_modify_structure():
         assert np.allclose(marker_areas(atoms, 40), [22.5, 22.5])
     finally:
         set_atom_appearance()
+
+
+def test_geometry_only_plot_respects_global_size_and_no_double_scaling():
+    from ase2sprkkr_gui.gui.plots.lattice import plot_sites_in_lattice
+
+    class Axes:
+        def __init__(self):
+            self.sizes = []
+
+        def scatter(self, *_points, **kwargs):
+            self.sizes.append(np.asarray(kwargs["s"], dtype=float))
+
+    axes = Axes()
+    points = np.zeros((2, 3))
+    try:
+        set_atom_appearance(150, True)
+        assert np.isclose(marker_area_scale(), 2.25)
+        plot_sites_in_lattice(axes, False, points, role="inactive")
+        assert np.allclose(axes.sizes[-1], 42 * 2.25)
+        already_scaled = np.array([25.0, 49.0])
+        plot_sites_in_lattice(
+            axes, False, points, marker_sizes_scaled=True, s=already_scaled
+        )
+        assert np.allclose(axes.sizes[-1], already_scaled)
+    finally:
+        set_atom_appearance()
+
+
+def test_element_assignment_relative_radii_keep_a_global_reference():
+    occupations = [[("C", 1.0)], [("Au", 1.0)], [("C", .5), ("Au", .5)]]
+    sizes = marker_area_factors_for_occupations(occupations)
+    assert np.isclose(sizes[1] / sizes[0], (2.98 / 1.66) ** 2)
+    assert sizes[0] < sizes[2] < sizes[1]
+    assert np.allclose(
+        marker_area_factors_for_occupations(
+            occupations, appearance=AtomAppearance(relative_sizes=False)
+        ),
+        np.ones(3),
+    )

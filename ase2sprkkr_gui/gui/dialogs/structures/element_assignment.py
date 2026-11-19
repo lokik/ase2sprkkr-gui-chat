@@ -27,6 +27,7 @@ from ase2sprkkr_gui.gui.widgets.matplotlib_preview import PreviewFigureCanvas as
 from ase2sprkkr_gui.ase.element_assignment import AssignmentSite, ElementAssignmentDraft
 from ase2sprkkr_gui.gui.dialogs.structures.element_selector import select_element
 from ase2sprkkr_gui.gui.plots.lattice import plot_lattice, plot_sites_in_lattice
+from ase2sprkkr_gui.gui.plots.atom_sizes import marker_area_factors_for_occupations
 from ase2sprkkr_gui.gui.widgets.structures.element_assignment import QLetterRow
 
 
@@ -284,26 +285,36 @@ class ElementAssignmentDialog(QDialog):
         lattice = draft.cell
         plot_lattice(self.ax, lattice)
 
-        # collect other vs active positions
-        others = []
-        active = []
+        # Compute ratios over all sites first; selecting an atom must not
+        # change the relative sizes of other atoms or the plot's zoom.
+        positions, occupations, active_indices = [], [], []
         label, index = self._active_letter
-
         for site in draft.sites:
-            if label == site.label:
-                if index is not None:
-                    active.append(site.positions[index:index + 1])
-                    others.append(site.positions[:index])
-                    others.append(site.positions[index + 1:])
-                    continue
-                to = active
-            else:
-                to = others
-            to.append(site.positions)
-        if others:
-            plot_sites_in_lattice(self.ax, lattice, np.vstack(others), role='inactive')
-        if active:
-            plot_sites_in_lattice(self.ax, lattice, np.vstack(active), role='active')
+            occupation = [
+                (entry.symbol, entry.value)
+                for entry in site.occupancies if entry.symbol
+            ]
+            for site_index, position in enumerate(site.positions):
+                positions.append(position)
+                occupations.append(occupation)
+                active_indices.append(
+                    site.label == label and
+                    (index is None or index == site_index)
+                )
+        if positions:
+            points = np.asarray(positions)
+            active_mask = np.asarray(active_indices, dtype=bool)
+            factors = marker_area_factors_for_occupations(occupations)
+            if np.any(~active_mask):
+                plot_sites_in_lattice(
+                    self.ax, lattice, points[~active_mask], role='inactive',
+                    relative_area_factors=factors[~active_mask],
+                )
+            if np.any(active_mask):
+                plot_sites_in_lattice(
+                    self.ax, lattice, points[active_mask], role='active',
+                    relative_area_factors=factors[active_mask],
+                )
         self.canvas.draw()
 
     # ---- error aggregation helpers ----

@@ -140,6 +140,14 @@ def test_settings_has_independent_frame_tabs(tmp_path):
     assert isinstance(dialog.ase2sprkkr_page, Ase2sprkkrSettingsPage)
     assert "not GUI-specific" in dialog.ase2sprkkr_page.scope_notice.text()
     assert dialog.general_page.visualization_group.title() == "Visualization"
+    assert dialog.general_page.atom_appearance_group.title() == "Atom appearance"
+    from PyQt6.QtWidgets import QLabel, QSlider
+    assert any(
+        item.text() == "External structure viewer:"
+        for item in dialog.general_page.visualization_group.findChildren(QLabel)
+    )
+    assert not dialog.general_page.visualization_group.findChildren(QSlider)
+    assert dialog.general_page.atom_appearance_group.findChildren(QSlider)
     assert dialog.general_page.sprkkr_group.title() == "SPR-KKR"
     assert dialog.general_page.python_shell_group.title() == "Python shell"
     assert dialog.share_python_shell_history is (

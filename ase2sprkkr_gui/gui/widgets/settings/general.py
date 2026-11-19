@@ -93,7 +93,7 @@ class GeneralSettingsPage(QFrame):
         if settings.viewer not in viewers:
             self.viewer.addItem(settings.viewer)
         self.viewer.setCurrentText(settings.viewer)
-        self.viewer.setToolTip("ASE viewer used for atomic structures")
+        self.viewer.setToolTip("Viewer launched by the external visualization action")
         for index in range(self.viewer.count()):
             name = self.viewer.itemText(index)
             reason = viewer_unavailability(name)
@@ -104,13 +104,18 @@ class GeneralSettingsPage(QFrame):
                 self.viewer.setItemData(
                     index, reason, Qt.ItemDataRole.ToolTipRole
                 )
-        visualization_form.addRow("Structure viewer:", self.viewer)
+        visualization_form.addRow("External structure viewer:", self.viewer)
         self.viewer_warning = QLabel(self.visualization_group)
         self.viewer_warning.setWordWrap(True)
         self.viewer_warning.setStyleSheet("color: #cc3333;")
         visualization_form.addRow("", self.viewer_warning)
+        self.viewer.currentTextChanged.connect(self._update_viewer_warning)
+        self._update_viewer_warning()
+        layout.addWidget(self.visualization_group)
 
-        size_row = QWidget(self.visualization_group)
+        self.atom_appearance_group = QGroupBox("Atom appearance", self)
+        atom_form = QFormLayout(self.atom_appearance_group)
+        size_row = QWidget(self.atom_appearance_group)
         size_layout = QHBoxLayout(size_row)
         size_layout.setContentsMargins(0, 0, 0, 0)
         self.atom_size_slider = QSlider(Qt.Orientation.Horizontal, size_row)
@@ -121,14 +126,14 @@ class GeneralSettingsPage(QFrame):
         self.atom_size_label.setMinimumWidth(48)
         size_layout.addWidget(self.atom_size_slider, 1)
         size_layout.addWidget(self.atom_size_label)
-        visualization_form.addRow("Atom size:", size_row)
+        atom_form.addRow("Atom size:", size_row)
         self.atom_relative_sizes = QCheckBox(
-            "Use element-dependent Wigner–Seitz radii", self.visualization_group
+            "Use element-dependent Wigner–Seitz radii", self.atom_appearance_group
         )
         self.atom_relative_sizes.setChecked(settings.atom_relative_sizes)
-        visualization_form.addRow(self.atom_relative_sizes)
+        atom_form.addRow(self.atom_relative_sizes)
         self.atom_potential_radii = QCheckBox(
-            "Use potential radii when available", self.visualization_group
+            "Use potential radii when available", self.atom_appearance_group
         )
         self.atom_potential_radii.setToolTip(
             "Only use RWS from an ITERATING or CONVERGED potential. "
@@ -136,25 +141,23 @@ class GeneralSettingsPage(QFrame):
         )
         self.atom_potential_radii.setChecked(settings.atom_potential_radii)
         self.atom_potential_radii.setEnabled(self.atom_relative_sizes.isChecked())
-        visualization_form.addRow(self.atom_potential_radii)
+        atom_form.addRow(self.atom_potential_radii)
         self.atom_relative_sizes.toggled.connect(
             self.atom_potential_radii.setEnabled
         )
-        self.atom_size_example = _AtomSizeExample(self.visualization_group)
-        visualization_form.addRow("Example (C / Au):", self.atom_size_example)
+        self.atom_size_example = _AtomSizeExample(self.atom_appearance_group)
+        atom_form.addRow("Example (C / Au):", self.atom_size_example)
         note = QLabel(
             "Preview uses static WSR. Potential radii are site-dependent "
             "and used only for eligible loaded potentials.",
-            self.visualization_group,
+            self.atom_appearance_group,
         )
         note.setWordWrap(True)
-        visualization_form.addRow("", note)
+        atom_form.addRow("", note)
         self.atom_size_slider.valueChanged.connect(self._update_atom_preview)
         self.atom_relative_sizes.toggled.connect(self._update_atom_preview)
         self._update_atom_preview()
-        self.viewer.currentTextChanged.connect(self._update_viewer_warning)
-        self._update_viewer_warning()
-        layout.addWidget(self.visualization_group)
+        layout.addWidget(self.atom_appearance_group)
 
         self.sprkkr_group = QGroupBox("SPR-KKR", self)
         sprkkr_form = QFormLayout(self.sprkkr_group)

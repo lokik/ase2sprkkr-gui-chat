@@ -23,6 +23,11 @@ class AtomAppearance:
 _appearance = AtomAppearance()
 
 
+def marker_area_scale() -> float:
+    """Shared multiplier for geometry-only markers without element identities."""
+    return (_appearance.size_percent / 100.0) ** 2
+
+
 def set_atom_appearance(
     size_percent: int = 100,
     relative_sizes: bool = True,
@@ -50,34 +55,64 @@ def _sites(atoms):
     return sites if sites is not None and len(sites) == len(atoms) else None
 
 
+def _occupation_radius(occupation):
+    """Return concentration-weighted static WSR, or None for unknown species."""
+    if isinstance(occupation, Mapping):
+        occupation = occupation.items()
+    if occupation is None:
+        return None
+    total = weighted = 0.0
+    for symbol, concentration in occupation:
+        radius = _valid_radius(winger_seitz_radii.get(str(symbol)))
+        weight = _valid_radius(concentration)
+        if radius is not None and weight is not None:
+            weighted += weight * radius
+            total += weight
+    return weighted / total if total > 0 else None
+
+
 def _static_radius(atoms, index, sites, symbols):
     occupation = None
     if sites is not None:
         try:
-            occupation = {
-                atomic_type.symbol: concentration
+            occupation = (
+                (atomic_type.symbol, concentration)
                 for atomic_type, concentration in
                 sites[index].site_type.occupation.items()
-            }
+            )
+            radius = _occupation_radius(occupation)
+            if radius is not None:
+                return radius
         except (AttributeError, TypeError, ValueError):
-            occupation = None
-    if occupation is None:
-        kinds = getattr(atoms, "arrays", {}).get("spacegroup_kinds")
-        key = kinds[index] if kinds is not None else index
-        values = getattr(atoms, "info", {}).get("occupancy", {})
-        if isinstance(values, Mapping):
-            occupation = values.get(key, values.get(str(key)))
-    if isinstance(occupation, Mapping):
-        total = weighted = 0.0
-        for symbol, concentration in occupation.items():
-            radius = _valid_radius(winger_seitz_radii.get(str(symbol)))
-            weight = _valid_radius(concentration)
-            if radius is not None and weight is not None:
-                weighted += weight * radius
-                total += weight
-        if total > 0:
-            return weighted / total
-    return _valid_radius(winger_seitz_radii.get(symbols[index])) or 2.8
+            pass
+    kinds = getattr(atoms, "arrays", {}).get("spacegroup_kinds")
+    key = kinds[index] if kinds is not None else index
+    values = getattr(atoms, "info", {}).get("occupancy", {})
+    if isinstance(values, Mapping):
+        occupation = values.get(key, values.get(str(key)))
+    return (
+        _occupation_radius(occupation)
+        or _valid_radius(winger_seitz_radii.get(symbols[index]))
+        or 2.8
+    )
+
+
+def marker_area_factors_for_occupations(occupations, *, appearance=None):
+    """Relative scatter *area* factors for a collection of draft site occupations.
+
+    Each item is an iterable of (symbol, concentration) pairs. The collection
+    must include all displayed sites before filtering highlights, so a change
+    of selection cannot resize otherwise unchanged atoms.
+    """
+    appearance = _appearance if appearance is None else appearance
+    radii = np.asarray([
+        _occupation_radius(occupation) or 2.8 for occupation in occupations
+    ], dtype=float)
+    if not len(radii):
+        return radii
+    if not appearance.relative_sizes:
+        return np.ones(len(radii), dtype=float)
+    return (radii / np.mean(radii)) ** 2
 
 
 def _post_start(potential):
