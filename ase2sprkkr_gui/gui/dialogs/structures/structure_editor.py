@@ -274,6 +274,13 @@ class StructureEditorDialog(ElementAssignmentDialog):
         self.discard_cluster_button.clicked.connect(self._discard_cluster)
         footer.addWidget(self.discard_cluster_button)
         footer.addStretch(1)
+        self.apply_cluster_button = QPushButton("Apply cluster edits", page)
+        self.apply_cluster_button.setToolTip(
+            "Keep the current cluster-site edits in this editor; the workspace "
+            "changes only after Apply Structure"
+        )
+        self.apply_cluster_button.clicked.connect(self._apply_cluster_edits)
+        footer.addWidget(self.apply_cluster_button)
         layout.addLayout(footer)
         self._embedded_page = page
         self._embedded_editor = embedded
@@ -539,6 +546,20 @@ class StructureEditorDialog(ElementAssignmentDialog):
         if result is not None and result is not self._working_atoms:
             self.setup(result)
         return True
+
+    def _apply_cluster_edits(self) -> None:
+        """Accept the Embedded draft locally, without publishing to the workspace."""
+        if self._embedded_editor is None:
+            return
+        previous_guard = self._switching_tabs
+        self._switching_tabs = True
+        try:
+            if self._flush_embedded():
+                self.tabs.setCurrentIndex(self._embedded_index())
+                self._last_tab = self.tabs.currentIndex()
+                self._update_preview_panel()
+        finally:
+            self._switching_tabs = previous_guard
 
     def _confirm_pending_changes(self, *, closing: bool) -> str:
         """Use the same decision vocabulary for navigation and closing."""

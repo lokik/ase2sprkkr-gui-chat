@@ -209,6 +209,36 @@ def test_discard_cluster_retains_native_host_potential(monkeypatch):
     dialog.close()
 
 
+def test_apply_cluster_edits_stages_change_without_publishing(monkeypatch):
+    atoms = _cluster()
+    dialog = _dialog(atoms)
+    dialog.tabs.setCurrentWidget(dialog._embedded_page)
+    site = next(iter(dialog._embedded_editor.draft.entries))
+    dialog._embedded_editor.draft.set_occupation([site], {"Fe": 1.0})
+    assert dialog._embedded_editor.has_unapplied_changes()
+    assert dialog.apply_cluster_button.text() == "Apply cluster edits"
+
+    dialog.apply_cluster_button.click()
+    assert dialog.tabs.currentWidget() is dialog._embedded_page
+    assert dialog._working_atoms is not atoms
+    assert not dialog._embedded_editor.has_unapplied_changes()
+    assert dialog._result is None
+    assert (
+        atoms.sites[0].occupation.to_dict(True)
+        != dialog._working_atoms.sites[0].occupation.to_dict(True)
+    )
+
+    def unexpected_confirmation(*, closing):
+        raise AssertionError("Already applied cluster edits should not be pending")
+
+    monkeypatch.setattr(dialog, "_confirm_pending_changes", unexpected_confirmation)
+    dialog.tabs.setCurrentIndex(0)
+    assert dialog.tabs.currentIndex() == 0
+    # The whole editor remains dirty, but the original atoms are untouched.
+    assert dialog._has_unapplied_changes()
+    editor_module.QDialog.reject(dialog)
+
+
 def test_embedded_navigation_prompts_to_confirm_discard_or_continue(monkeypatch):
     def edited_dialog():
         dialog = _dialog(_cluster())
