@@ -70,10 +70,9 @@ class CalculationRequest:
     ``state_id``. A state-producing output may advance the workspace only while
     that exact input state is still active.
 
-    ``atoms`` identifies the authoritative launch input and is the sole physical
-    authority for its potential; potential paths are provenance/artifact metadata
-    only. Storage and execution retain this exact structure and its attached
-    native potential. Explicit edits produce independent structures.
+    An ordinary launch uses the attached potential of its workspace atoms.
+    A file-backed launch retains the native paths in the input parameters and
+    captures the parsed atoms for result provenance.
 
     ``restart_scf`` snapshots the pending workspace execution intent. It asks
     ASE2SPRKKR to serialize ``SCFSTATUS START`` for this run without mutating the
@@ -83,13 +82,15 @@ class CalculationRequest:
     atoms: Atoms
     input_parameters: Any
     directory: str
-    structure_id: int
-    state_id: int
+    structure_id: int | None
+    state_id: int | None
     restart_scf: bool = False
     clear_cache: bool = False
     # An explicit host Potential can be used without rebuilding it from a copy
     # of its atoms (which would lose its native SCFSTATUS).
+    # False selects the backend's existing-POTFIL mode.
     potential: Any | None = None
+    # Parsed and versioned source from an input file, not part of the workspace.
     file_source: Any | None = None
 
 
@@ -807,6 +808,7 @@ class WorkspaceController(QObject):
             output_path=loaded.output_path,
             potential_path=loaded.potential_path,
             persistent_ref=loaded.persistent_ref,
+            source_versions=loaded.source_versions,
         )
         self.resultChanged.emit(loaded.result)
         if select_result:
@@ -820,10 +822,22 @@ class WorkspaceController(QObject):
         request: CalculationRequest,
     ) -> ResultAdoption:
         """Record a launched result against its exact captured provenance."""
+        structure_id, state_id = request.structure_id, request.state_id
+        if request.potential is False:
+            source = loaded.file_backed_input
+            if source is None:
+                raise ValueError("File-backed results require a captured launch input.")
+            version = source.potential_version
+            structure_id, state_id = self._results.new_structure_state(
+                source.atoms,
+                potential_path=str(version.path),
+                potential_version=version,
+                source_versions=source.input_versions,
+            )
         record = self._results.add_result(
             loaded.result,
-            structure_id=request.structure_id,
-            input_state_id=request.state_id,
+            structure_id=structure_id,
+            input_state_id=state_id,
             input_parameters=request.input_parameters,
             directory=request.directory,
             persistent_ref=loaded.persistent_ref,
@@ -836,6 +850,7 @@ class WorkspaceController(QObject):
                 if loaded.potential_path is not None
                 else None
             ),
+            output_potential_version=loaded.output_potential_version,
         )
 
         workspace_updated = False
@@ -843,8 +858,8 @@ class WorkspaceController(QObject):
         if (
             loaded.atoms is not None
             and record.output_state_id is not None
-            and request.structure_id == current.structure_id
-            and request.state_id == current.state_id
+            and structure_id == current.structure_id
+            and state_id == current.state_id
         ):
             state = self._results.state(record.output_state_id)
             self._workspace.structure.force_change(

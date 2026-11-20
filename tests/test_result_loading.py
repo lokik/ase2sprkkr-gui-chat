@@ -70,6 +70,9 @@ def test_native_dos_result_selects_control_potfil_clu(tmp_path, monkeypatch):
     parameters.CONTROL.CLUTYPE = "embedded"
     parameters.CONTROL.POTFIL = "host.pot"
     parameters.CONTROL.POTFIL_CLU = "cluster.clu"
+    # The native result requires a concrete host file for provenance,
+    # even when this test stubs out potential parsing itself.
+    (tmp_path / "host.pot").write_text("host placeholder")
     result = DosResult(parameters, None, tmp_path, task_name="dos")
     result.files.add_file("potential", "host.pot")
     parsed_atoms = Atoms("Fe")
@@ -447,3 +450,90 @@ def test_native_pot_extension_cluster_is_detected_by_header(tmp_path):
     assert not Potential.is_cluster_file(periodic)
     assert Potential.is_cluster_file(embedded)
     assert not Potential.is_cluster_file(tmp_path / "missing.pot")
+
+
+def test_imported_native_embedded_dos_preserves_host_version(tmp_path, native_embedded_potentials):
+    """The reusable imported CLUPOT must retain its specific periodic host."""
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+    from ase2sprkkr_gui.gui.application.historical_state import _restore_state_atoms
+    from ase2sprkkr_gui.gui.application.result_loading import PotentialVersionChanged
+
+    host, cluster = native_embedded_potentials
+
+    parameters = InputParameters.for_task("DOS")
+    parameters.CONTROL.CLUTYPE = "embedded"
+    parameters.CONTROL.POTFIL = host.name
+    parameters.CONTROL.POTFIL_CLU = cluster.name
+    result = DosResult(parameters, None, tmp_path, task_name="dos")
+    loaded = load_result(result, fallback_directory=tmp_path)
+    assert loaded.potential_error is None
+    assert loaded.atoms is not None
+    assert len(loaded.source_versions) == 1
+    assert loaded.source_versions[0].path == host
+    assert loaded.source_versions[0].is_current()
+
+    controller = WorkspaceController(WorkspaceState())
+    record = controller.adopt_external_result(loaded).record
+    state = controller.result_store.state_for_result(record)
+    assert state.potential_path == str(cluster)
+    assert state.source_dependencies == loaded.source_versions
+    assert state.potential_version.path == cluster
+
+    host.write_text("changed host potential")
+    with pytest.raises(PotentialVersionChanged, match="changed"):
+        _restore_state_atoms(state)
+
+
+def test_imported_embedded_result_rejects_host_changed_during_loading(tmp_path, native_embedded_potentials, monkeypatch):
+    """Do not attach a host version captured after the native potential was read."""
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+
+    host, cluster = native_embedded_potentials
+
+    parameters = InputParameters.for_task("DOS")
+    parameters.CONTROL.CLUTYPE = "embedded"
+    parameters.CONTROL.POTFIL = host.name
+    parameters.CONTROL.POTFIL_CLU = cluster.name
+    result = DosResult(parameters, None, tmp_path, task_name="dos")
+
+    class ChangingPotential:
+        @property
+        def atoms(self):
+            host.write_text("changed during import")
+            return Atoms("Fe")
+
+    monkeypatch.setattr(result, "_read_potential", lambda _: ChangingPotential())
+    loaded = load_result(result, fallback_directory=tmp_path)
+    assert loaded.atoms is None
+    assert loaded.source_versions == ()
+    assert "changed while" in str(loaded.potential_error)
+
+
+
+def test_imported_embedded_result_uses_recorded_host_version(tmp_path, native_embedded_potentials):
+    """Do not replace historical host evidence with a new disk snapshot."""
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+    from kkrunner.files import FileEntry, FileManifest, FileVersion
+
+    host, cluster = native_embedded_potentials
+
+    params = InputParameters.for_task("DOS")
+    params.CONTROL.CLUTYPE = "embedded"
+    params.CONTROL.POTFIL = host.name
+    params.CONTROL.POTFIL_CLU = cluster.name
+    result = DosResult(params, None, tmp_path, task_name="dos")
+    host_version = FileVersion.capture(host, require_digest=True)
+    cluster_version = FileVersion.capture(cluster, require_digest=True)
+    result.file_manifest = FileManifest(
+        inputs=(FileEntry(local_path=str(host)), FileEntry(local_path=str(cluster))),
+        input_versions=(host_version, cluster_version),
+        captured_at="2026-11-20T00:00:00+00:00",
+    )
+
+    loaded = load_result(result, fallback_directory=tmp_path)
+    assert loaded.potential_error is None
+    assert loaded.source_versions == (host_version,)
+    assert loaded.source_versions[0] is host_version

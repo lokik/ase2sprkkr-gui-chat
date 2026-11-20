@@ -50,9 +50,15 @@ def _state_for_result(store: ResultStore, result_id: int) -> CalculationStateRec
     return store.state(state_id)
 
 
+def _require_source_versions(state: CalculationStateRecord) -> None:
+    for version in state.source_versions:
+        require_potential_version_current(version)
+
+
 def _load_state_version(
     version: PotentialFileVersion, state: CalculationStateRecord
 ) -> Any:
+    _require_source_versions(state)
     snapshot = state.structure_snapshot
     host = (
         snapshot.info.get("sprkkr_embedding_host")
@@ -64,6 +70,7 @@ def _load_state_version(
 
 
 def _restore_state_atoms(state: CalculationStateRecord) -> Any:
+    _require_source_versions(state)
     version = state.potential_version
     if version is not None and version.available:
         return _load_state_version(version, state)
@@ -105,8 +112,10 @@ def resolve_historical_state(
         if (
             active.structure_id == state.structure_id
             and active.potential_version == expected_potential
+            and active.source_dependencies == state.source_dependencies
         ):
             require_potential_version_current(expected_potential)
+            _require_source_versions(active)
             return HistoricalStateAlreadyActive()
 
     if state.potential_version == expected_potential:
@@ -115,6 +124,7 @@ def resolve_historical_state(
         target_state = store.state_for_potential_version(
             expected_potential,
             structure_id=state.structure_id,
+            source_dependencies=state.source_dependencies,
         )
 
     atoms = _load_state_version(expected_potential, target_state or state)

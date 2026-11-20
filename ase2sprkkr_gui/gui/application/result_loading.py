@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ase2sprkkr import Potential, TaskResult
+from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
@@ -17,13 +18,14 @@ class PotentialVersionChanged(RuntimeError):
 
 @dataclass(frozen=True)
 class FileBackedInput:
-    """A parsed native input and every source version verified at launch."""
+    """Parsed structure and all potential input versions verified at launch."""
 
     atoms: Any
     input_versions: tuple[PotentialFileVersion, ...]
 
     @property
     def potential_version(self) -> PotentialFileVersion:
+        # The cluster potential is the primary structural state for embedding.
         return self.input_versions[-1]
 
 
@@ -52,6 +54,7 @@ class LoadedResult:
     persistent_ref: str | None = None
     file_backed_input: FileBackedInput | None = None
     output_potential_version: PotentialFileVersion | None = None
+    source_versions: tuple[PotentialFileVersion, ...] = ()
 
 
 def load_potential_atoms(file_path: str | Path, *, embedding_host=None) -> Any:
@@ -124,10 +127,36 @@ def load_result(
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
     output, potential = _result_files(result, fallback_directory)
+    manifest = result_file_manifest(result)
     if output is None and output_fallback is not None:
         output = Path(output_fallback).resolve()
+
+    # Native embedded output identifies its host through CONTROL.POTFIL.
+    # Capture that file before parsing the CLUPOT, then verify the very same
+    # version afterwards. Do not guess a host from neighboring filenames.
+    host_version = None
+    host_version_error = None
+    if potential is not None and getattr(result, "is_embedded", False):
+        try:
+            host_path = result.host_potential_filename
+        except (AttributeError, KeyError, ValueError):
+            pass  # Without native input settings, host provenance is unknown.
+        else:
+            host_path = _resolve_path(host_path, result, fallback_directory)
+            if manifest is not None:
+                # A historical manifest is authoritative; never attribute
+                # today's host bytes to a previous run.
+                host_version = manifest.input_version(host_path)
+            else:
+                try:
+                    host_version = PotentialFileVersion.capture(
+                        host_path, require_digest=True,
+                    )
+                except OSError as exc:
+                    host_version_error = exc
+
     try:
-        if potential is not None and getattr(result, "run_record", None) is not None:
+        if potential is not None and manifest is not None:
             result.require_current_file(potential)
     except OSError as exc:
         atoms, potential_error = None, exc
@@ -143,6 +172,20 @@ def load_result(
             atoms, potential_error = _load_potential(
                 potential, embedding_host=embedding_host
             )
+        if atoms is not None and manifest is not None:
+            try:
+                result.require_current_file(potential)
+            except OSError as exc:
+                atoms, potential_error = None, exc
+    if atoms is not None and host_version_error is not None:
+        atoms, potential_error = None, host_version_error
+    if atoms is not None and host_version is not None and not host_version.is_current():
+        atoms, potential_error = None, PotentialVersionChanged(
+            f"Host potential changed while the embedded result was loaded: {host_version.path}"
+        )
+    source_versions = (
+        (host_version,) if atoms is not None and host_version is not None else ()
+    )
     input_parameters, input_parameters_error = _load_input_parameters(result)
     directory = str(output.parent.resolve()) if output is not None else None
     return LoadedResult(
@@ -155,6 +198,11 @@ def load_result(
         input_parameters=input_parameters,
         input_parameters_error=input_parameters_error,
         persistent_ref=persistent_ref,
+        output_potential_version=(
+            result_file_version(result, potential)
+            if potential is not None and manifest is not None else None
+        ),
+        source_versions=source_versions,
     )
 
 
