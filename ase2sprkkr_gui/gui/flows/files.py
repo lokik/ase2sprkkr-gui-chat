@@ -23,7 +23,7 @@ from ase2sprkkr_gui.gui.application.result_loading import (
     load_result_file,
     load_companion_scf_result,
 )
-from ase2sprkkr_gui.gui.application.workspace_controller import ResultAdoption, WorkspaceController
+from ase2sprkkr_gui.gui.application.workspace_controller import DocumentChange, ResultAdoption, WorkspaceController
 from ase2sprkkr_gui.gui.flows.input_parameters import save_input_parameters_to_path
 from ase2sprkkr_gui.gui.flows.structure_candidates import (
     load_structure_candidate,
@@ -275,20 +275,26 @@ def load_input_parameters(
     input_generation = controller.input_parameters_generation
     directory_generation = controller.directory_generation
     path = Path(file_path).resolve()
+    def apply_loaded_parameters(parameters):
+        change = controller.replace_input_parameters(
+            parameters,
+            directory=str(path.parent),
+            expected_input_parameters_generation=input_generation,
+            expected_directory_generation=directory_generation,
+        )
+        if change is DocumentChange.APPLIED:
+            controller.mark_input_parameters_saved(controller.input_parameters_generation)
+            # RecentFiles.changed rebuilds workflow actions synchronously.
+            recent_files.remember("input", path)
+        return change
+
     try:
-        # Replacing the input emits signals that can rebuild expensive GUI
-        # widgets. Finish that work before dismissing the existing wait dialog.
         change = run_modal_task(
             parent,
             lambda: InputParameters.from_file(path),
             title="Loading Input",
             label="Loading input parameters…",
-            on_success=lambda parameters: controller.replace_input_parameters(
-                parameters,
-                directory=str(path.parent),
-                expected_input_parameters_generation=input_generation,
-                expected_directory_generation=directory_generation,
-            ),
+            on_success=apply_loaded_parameters,
         )
     except Exception as exc:  # noqa: BLE001 - parser errors are presented
         QMessageBox.critical(
@@ -298,11 +304,7 @@ def load_input_parameters(
         )
         return False
 
-    if not document_change_applied(parent, change):
-        return False
-    controller.mark_input_parameters_saved(controller.input_parameters_generation)
-    recent_files.remember("input", file_path)
-    return True
+    return document_change_applied(parent, change)
 
 
 def choose_and_load_output(
