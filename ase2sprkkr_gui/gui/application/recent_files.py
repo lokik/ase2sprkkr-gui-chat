@@ -132,19 +132,45 @@ class RecentFiles(QObject):
 
     def remember(self, kind: RecentKind, file_path: str | Path) -> None:
         """Move a canonical path to the front and persist the bounded history."""
-        normalized = _canonical_path(file_path)
-        recent = self._files[kind]
-        previous = tuple(recent)
-        previous_last_kind = self.last_kind
-        recent[:] = [item for item in recent if item != normalized]
-        recent.insert(0, normalized)
-        del recent[self.limit :]
-        if kind in {"structure", "output"}:
-            self.last_kind = kind
-        if tuple(recent) == previous and self.last_kind == previous_last_kind:
-            return
-        self.save()
-        self.changed.emit()
+        self.remember_many(((kind, file_path),))
+
+    def remember_many(
+        self,
+        entries: Iterable[tuple[RecentKind, str | Path]],
+        *,
+        preserve_last_kind: bool = False,
+    ) -> None:
+        """Register related files with one persistence write and change signal."""
+        previous = self.read_snapshot()
+        for kind, file_path in entries:
+            normalized = _canonical_path(file_path)
+            recent = self._files[kind]
+            recent[:] = [item for item in recent if item != normalized]
+            recent.insert(0, normalized)
+            del recent[self.limit :]
+            if not preserve_last_kind and kind in {"structure", "output"}:
+                self.last_kind = kind
+        if self.read_snapshot() != previous:
+            self.save()
+            self.changed.emit()
+
+    def remember_result(
+        self,
+        output_path: str | Path | None,
+        *,
+        potential_path: str | Path | None = None,
+    ) -> None:
+        """Record a result and its successfully loaded potential as one update.
+
+        The output is registered last so Continue still defaults to the result,
+        rather than the associated structure.
+        """
+        entries: list[tuple[RecentKind, str | Path]] = []
+        if potential_path is not None:
+            entries.append(("structure", potential_path))
+        if output_path is not None:
+            entries.append(("output", output_path))
+        self.remember_many(entries)
 
     def forget(self, kind: RecentKind, file_path: str | Path) -> None:
         """Remove one canonical path and persist only if the history changed."""
