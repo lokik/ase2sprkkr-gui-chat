@@ -9,7 +9,9 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox
 
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
-from ase2sprkkr_gui.gui.dialogs.task_chooser import TaskChoice, order_choices
+from ase2sprkkr_gui.gui.dialogs.task_chooser import (
+    TaskChoice, TaskChooserDialog, order_choices,
+)
 from ase2sprkkr_gui.gui.input_parameters import task_preferences as prefs
 from ase2sprkkr_gui.gui.misc import resources
 from ase2sprkkr_gui.gui.misc.icons import task_icon
@@ -19,7 +21,8 @@ from ase2sprkkr_gui.gui.widgets.settings.preferred_tasks import PreferredTasksPa
 def test_settings_do_not_persist_default_preferred_tasks(tmp_path):
     path = tmp_path / "settings.json"
     settings = ApplicationSettings(path)
-    expected = prefs.supported_task_names()
+    expected = prefs.default_preferred_task_names()
+    assert "SCF" not in expected
     assert settings.effective_preferred_tasks() == expected
     assert settings.save()
     stored = json.loads(path.read_text())
@@ -30,19 +33,19 @@ def test_settings_do_not_persist_default_preferred_tasks(tmp_path):
     settings.preferred_supported_snapshot = expected
     assert settings.save()
     stored = json.loads(path.read_text())
-    assert stored["preferred_tasks"] == ["DOS", "SCF"]
+    assert stored["preferred_tasks"] == ["DOS"]
     assert stored["preferred_supported_tasks"] == list(expected)
 
     loaded = ApplicationSettings(path)
     loaded.load()
-    assert loaded.effective_preferred_tasks() == ("DOS", "SCF")
+    assert loaded.effective_preferred_tasks() == ("DOS",)
     loaded.preferred_tasks = None
     loaded.preferred_supported_snapshot = None
     assert loaded.save()
     assert "preferred_tasks" not in json.loads(path.read_text())
 
 
-def test_new_supported_tasks_require_confirmation_and_removed_scf_stays_removed(
+def test_scf_is_not_an_optional_preference(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -51,9 +54,9 @@ def test_new_supported_tasks_require_confirmation_and_removed_scf_stays_removed(
     monkeypatch.setattr(
         prefs, "all_task_names", lambda: ("DOS", "SCF", "XAS", "ARPES"),
     )
-    assert prefs.effective_preferred(None) == ("DOS", "SCF", "XAS")
+    assert prefs.effective_preferred(None) == ("DOS", "XAS")
     assert prefs.effective_preferred(
-        ("DOS", "ARPES"), ("DOS", "SCF"),
+        ("DOS", "SCF", "ARPES"), ("DOS", "SCF"),
     ) == ("DOS", "ARPES")
 
 
@@ -107,33 +110,37 @@ def test_task_ordering_prioritizes_possible_preferred_supported_and_nonexperimen
     ]
 
 
-def test_preferred_editor_confirms_scf_removal_and_restores_defaults(
-    tmp_path, monkeypatch,
-):
-    settings = ApplicationSettings(tmp_path / "settings.json")
-    page = PreferredTasksPage(settings)
-    defaults = prefs.supported_task_names()
-    assert page.selection() == defaults
-    assert page.preference_override() is None
-    index = defaults.index("SCF")
-    page.preferred.setCurrentRow(index)
-    monkeypatch.setattr(
-        QMessageBox, "question",
-        lambda *_args: QMessageBox.StandardButton.No,
-    )
-    page.remove_button.click()
-    assert "SCF" in page.selection()
+def test_preferred_editor_omits_scf_and_restore_removes_saved_override(tmp_path):
+    path = tmp_path / "settings.json"
+    settings = ApplicationSettings(path)
+    settings.preferred_tasks = ("DOS",)
+    settings.preferred_supported_snapshot = prefs.default_preferred_task_names()
+    assert settings.save()
 
-    monkeypatch.setattr(
-        QMessageBox, "question",
-        lambda *_args: QMessageBox.StandardButton.Yes,
-    )
-    page.remove_button.click()
+    page = PreferredTasksPage(settings)
+    defaults = prefs.default_preferred_task_names()
+    assert page.selection() == ("DOS",)
     assert "SCF" not in page.selection()
-    assert page.preference_override() is not None
+    assert "SCF" not in {
+        page.available.item(row, 1).text()
+        for row in range(page.available.rowCount())
+    }
+    assert page.preference_override() == ("DOS",)
+
     page.restore_button.click()
     assert page.selection() == defaults
     assert page.preference_override() is None
+    settings.preferred_tasks = page.preference_override()
+    settings.preferred_supported_snapshot = (
+        defaults if settings.preferred_tasks is not None else None
+    )
+    assert settings.save()
+    stored = json.loads(path.read_text())
+    assert "preferred_tasks" not in stored
+    assert "preferred_supported_tasks" not in stored
+    loaded = ApplicationSettings(path)
+    loaded.load()
+    assert loaded.newly_supported_tasks() == ()
     page.close()
 
 
@@ -171,7 +178,7 @@ def test_newly_supported_tasks_are_confirmed_once_on_open(
     assert initial.save()
 
     monkeypatch.setattr(settings_module, "supported_task_names",
-                        lambda: ("DOS", "SCF"))
+                        lambda: ("DOS", "SCF", "XAS"))
     gui = GuiApplication(
         settings_path=settings_path,
         recent_files_path=tmp_path / "recent.json",
@@ -195,14 +202,15 @@ def test_newly_supported_tasks_are_confirmed_once_on_open(
     gui.show_workflow_window()
 
     assert len(messages) == 1
-    assert "SCF" in messages[0][0]
+    assert "XAS" in messages[0][0]
+    assert "SCF" not in messages[0][0]
     assert messages[0][1] is False
     assert opened == ([True] if open_settings else [])
     saved = ApplicationSettings(settings_path)
     saved.load()
-    assert saved.preferred_supported_snapshot == ("DOS", "SCF")
+    assert saved.preferred_supported_snapshot == ("DOS", "XAS")
     assert saved.preferred_tasks == (
-        ("DOS", "SCF") if answer == QMessageBox.StandardButton.Yes
+        ("DOS", "XAS") if answer == QMessageBox.StandardButton.Yes
         else ("DOS",)
     )
     assert saved.newly_supported_tasks() == ()
@@ -273,11 +281,12 @@ def test_legacy_bsf_variant_preferences_collapse_to_one_bsf_without_new_task_pop
     }))
     settings = ApplicationSettings(path)
     settings.load()
-    assert settings.effective_preferred_tasks() == ("DOS", "BSF", "SCF")
+    assert settings.effective_preferred_tasks() == ("DOS", "BSF")
     assert settings.newly_supported_tasks() == ()
     assert settings.save()
     saved = json.loads(path.read_text())
-    assert saved["preferred_tasks"] == ["DOS", "BSF", "SCF"]
+    assert saved["preferred_tasks"] == ["DOS", "BSF"]
+    assert "SCF" not in saved["preferred_supported_tasks"]
     assert "BSFEK" not in saved["preferred_supported_tasks"]
     assert "BSFKK" not in saved["preferred_supported_tasks"]
     assert "BSF" in saved["preferred_supported_tasks"]
@@ -311,10 +320,84 @@ def test_preferred_task_editor_shows_only_one_bsf(tmp_path):
     assert "BSFEK" not in page.selection()
     assert "BSFKK" not in page.selection()
     row_names = [
-        page.available.item(i, 0).text()
+        page.available.item(i, 1).text()
         for i in range(page.available.rowCount())
     ]
     assert row_names.count("BSF") == 1
     assert "BSFEK" not in row_names
     assert "BSFKK" not in row_names
     page.close()
+
+
+
+def test_task_icons_use_separate_unlabelled_columns_on_both_task_lists(
+    tmp_path, monkeypatch,
+):
+    assets = tmp_path / "assets"
+    icon_directory = assets / "task-icons"
+    icon_directory.mkdir(parents=True)
+    (icon_directory / "dos.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">'
+        '<circle cx="12" cy="12" r="8"/></svg>',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(resources, "_ASSETS", assets)
+
+    chooser = TaskChooserDialog()
+    assert chooser.table.horizontalHeaderItem(0).text() == ""
+    assert chooser.table.horizontalHeaderItem(1).text() == "Name"
+    assert chooser._fields[:2] == ["icon", "name"]
+    names = [
+        chooser.table.item(row, 1).text()
+        for row in range(chooser.table.rowCount())
+    ]
+    assert "SCF" in names
+    row = names.index("DOS")
+    assert chooser.table.item(row, 0).text() == ""
+    assert not chooser.table.item(row, 0).icon().isNull()
+    assert chooser.table.item(row, 1).icon().isNull()
+    chooser._sort_by_column(0)
+    assert chooser._primary is None
+    chooser.close()
+
+    page = PreferredTasksPage(ApplicationSettings(tmp_path / "settings.json"))
+    assert page.available.horizontalHeaderItem(0).text() == ""
+    assert page.available.horizontalHeaderItem(1).text() == "Name"
+    available_names = [
+        page.available.item(row, 1).text()
+        for row in range(page.available.rowCount())
+    ]
+    assert "SCF" not in available_names
+    row = available_names.index("DOS")
+    assert page.available.item(row, 0).text() == ""
+    assert not page.available.item(row, 0).icon().isNull()
+    assert page.available.item(row, 1).icon().isNull()
+
+    assert page.preferred.horizontalHeader().isHidden()
+    right_names = [
+        page.preferred.item(row, 1).text()
+        for row in range(page.preferred.rowCount())
+    ]
+    row = right_names.index("DOS")
+    assert page.preferred.item(row, 0).text() == ""
+    assert not page.preferred.item(row, 0).icon().isNull()
+    assert page.preferred.item(row, 1).icon().isNull()
+    page.preferred.setCurrentCell(row, 1)
+    page.remove_button.click()
+    assert "DOS" not in page.selection()
+    page.close()
+
+
+def test_scf_alone_is_not_treated_as_a_new_preferred_task(tmp_path, monkeypatch):
+    from ase2sprkkr_gui.gui.application import settings as settings_module
+    path = tmp_path / "prefs.json"
+    settings = ApplicationSettings(path)
+    settings.preferred_tasks = ("DOS",)
+    settings.preferred_supported_snapshot = ("DOS",)
+    assert settings.save()
+    monkeypatch.setattr(
+        settings_module, "default_preferred_task_names", lambda: ("DOS",),
+    )
+    loaded = ApplicationSettings(path)
+    loaded.load()
+    assert loaded.newly_supported_tasks() == ()

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 
 from ase2sprkkr_gui.gui.application.execution_profiles import ExecutionProfileStore
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
-from ase2sprkkr_gui.gui.input_parameters.task_preferences import supported_task_names
+from ase2sprkkr_gui.gui.input_parameters.task_preferences import default_preferred_task_names
 from ase2sprkkr_gui.gui.widgets.settings.preferred_tasks import PreferredTasksPage
 from ase2sprkkr_gui.gui.widgets.settings.run_configurations import RunConfigurationsPage
 from ase2sprkkr_gui.gui.widgets.settings.general import GeneralSettingsPage
@@ -146,7 +146,7 @@ class SettingsDialog(QDialog):
         selection = self.preferred_tasks_page.preference_override()
         self._settings.preferred_tasks = selection
         self._settings.preferred_supported_snapshot = (
-            supported_task_names() if selection is not None else None
+            default_preferred_task_names() if selection is not None else None
         )
         if not self._settings.save():
             self._settings.viewer = previous_viewer

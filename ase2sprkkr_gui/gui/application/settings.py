@@ -7,7 +7,7 @@ from pathlib import Path
 from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
 from ase2sprkkr_gui.gui.application.config import config_home
 from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
-    effective_preferred, supported_task_names, task_ui_name,
+    default_preferred_task_names, effective_preferred, task_ui_name,
 )
 from ase2sprkkr_gui.gui.plots.atom_sizes import (
     MAX_ATOM_SIZE_PERCENT, MIN_ATOM_SIZE_PERCENT, set_atom_appearance,
@@ -51,7 +51,7 @@ class ApplicationSettings:
             return ()
         previous = {task_ui_name(name) for name in self.preferred_supported_snapshot}
         return tuple(
-            name for name in supported_task_names() if name not in previous
+            name for name in default_preferred_task_names() if name not in previous
         )
 
     def acknowledge_supported_tasks(self, *, add: bool) -> None:
@@ -61,9 +61,9 @@ class ApplicationSettings:
         new = self.newly_supported_tasks()
         if add:
             self.preferred_tasks = tuple(dict.fromkeys(
-                (*map(task_ui_name, self.preferred_tasks), *new)
+                (*effective_preferred(self.preferred_tasks), *new)
             ))
-        self.preferred_supported_snapshot = supported_task_names()
+        self.preferred_supported_snapshot = default_preferred_task_names()
 
     def load(self) -> None:
         """Load settings; corrupt or unreadable files keep defaults."""
@@ -121,8 +121,10 @@ class ApplicationSettings:
         # A customized list must have its supported-task baseline. The
         # application never writes one without the other.
         if selected is not None and baseline is not None:
-            self.preferred_tasks = selected
-            self.preferred_supported_snapshot = baseline
+            self.preferred_tasks = tuple(name for name in selected if name != "SCF")
+            self.preferred_supported_snapshot = tuple(
+                name for name in baseline if name != "SCF"
+            )
         self._apply_atom_appearance()
 
     def _apply_atom_appearance(self) -> None:
@@ -143,15 +145,14 @@ class ApplicationSettings:
             "show_embedded_cluster_hint": self.show_embedded_cluster_hint,
         }
         if self.preferred_tasks is not None:
-            data["preferred_tasks"] = list(dict.fromkeys(
-                task_ui_name(name) for name in self.preferred_tasks
-            ))
+            data["preferred_tasks"] = list(effective_preferred(self.preferred_tasks))
             data["preferred_supported_tasks"] = list(dict.fromkeys(
                 task_ui_name(name) for name in (
                     self.preferred_supported_snapshot
                     if self.preferred_supported_snapshot is not None
-                    else supported_task_names()
+                    else default_preferred_task_names()
                 )
+                if task_ui_name(name) != "SCF"
             ))
         try:
             atomic_write_json(self.path, data)

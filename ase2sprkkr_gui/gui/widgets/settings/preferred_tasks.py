@@ -6,7 +6,7 @@ from dataclasses import replace
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
+    QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -14,7 +14,7 @@ from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
 from ase2sprkkr_gui.gui.dialogs.task_chooser import (
     TaskChoice, order_choices, task_choices,
 )
-from ase2sprkkr_gui.gui.input_parameters.task_preferences import supported_task_names
+from ase2sprkkr_gui.gui.input_parameters.task_preferences import default_preferred_task_names
 from ase2sprkkr_gui.gui.misc.icons import task_icon
 
 
@@ -24,11 +24,15 @@ class PreferredTasksPage(QFrame):
     def __init__(self, settings: ApplicationSettings, parent: QWidget | None = None):
         super().__init__(parent)
         self._preferred = list(settings.effective_preferred_tasks())
-        self._records = task_choices(preferred=tuple(self._preferred))
+        self._records = tuple(
+            row for row in task_choices(preferred=tuple(self._preferred))
+            if row.name != "SCF"
+        )
         root = QVBoxLayout(self)
         explanation = QLabel(
             "Choose task shortcuts for the Calculate column. Tasks with a "
-            "dedicated editor are marked Supported; other tasks open the custom editor.",
+            "dedicated editor are marked Supported; other tasks open the custom editor. "
+            "SCF is handled automatically according to convergence state.",
             self,
         )
         explanation.setWordWrap(True)
@@ -40,10 +44,10 @@ class PreferredTasksPage(QFrame):
         self.search = QLineEdit(self)
         self.search.setPlaceholderText("Filter tasks…")
         left.addWidget(self.search)
-        self.available = QTableWidget(0, 5, self)
+        self.available = QTableWidget(0, 6, self)
         self.available.setObjectName("availablePreferredTasks")
         self.available.setHorizontalHeaderLabels(
-            ("Name", "Preferred", "Supported", "Experimental", "Info")
+            ("", "Name", "Preferred", "Supported", "Experimental", "Info")
         )
         self.available.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.available.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -53,7 +57,11 @@ class PreferredTasksPage(QFrame):
             QHeaderView.ResizeMode.ResizeToContents
         )
         self.available.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.Stretch
+            0, QHeaderView.ResizeMode.Fixed
+        )
+        self.available.setColumnWidth(0, 32)
+        self.available.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeMode.Stretch
         )
         left.addWidget(self.available, 1)
         columns.addLayout(left, 3)
@@ -71,8 +79,20 @@ class PreferredTasksPage(QFrame):
 
         right = QVBoxLayout()
         right.addWidget(QLabel("Preferred tasks (in Guided order)", self))
-        self.preferred = QListWidget(self)
+        self.preferred = QTableWidget(0, 2, self)
         self.preferred.setObjectName("orderedPreferredTasks")
+        self.preferred.horizontalHeader().hide()
+        self.preferred.verticalHeader().hide()
+        self.preferred.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.preferred.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.preferred.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.preferred.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Fixed
+        )
+        self.preferred.setColumnWidth(0, 32)
+        self.preferred.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
         right.addWidget(self.preferred, 1)
         arrows = QHBoxLayout()
         self.up_button = QPushButton("↑ Up", self)
@@ -85,7 +105,7 @@ class PreferredTasksPage(QFrame):
 
         self.restore_button = QPushButton("Restore defaults", self)
         self.restore_button.setToolTip(
-            "Use all GUI-supported tasks, ordered alphabetically. "
+            "Use all supported post-SCF tasks, ordered alphabetically. "
             "The stored preference override will be cleared."
         )
         root.addWidget(self.restore_button, alignment=Qt.AlignmentFlag.AlignRight)
@@ -97,7 +117,7 @@ class PreferredTasksPage(QFrame):
         self.down_button.clicked.connect(lambda: self._move(1))
         self.restore_button.clicked.connect(self._restore)
         self.available.cellDoubleClicked.connect(lambda *_: self._add())
-        self.preferred.itemDoubleClicked.connect(lambda *_: self._remove())
+        self.preferred.cellDoubleClicked.connect(lambda *_: self._remove())
         self.available.itemSelectionChanged.connect(self._update_buttons)
         self.preferred.itemSelectionChanged.connect(self._update_buttons)
         self._refresh_all()
@@ -106,16 +126,17 @@ class PreferredTasksPage(QFrame):
         return tuple(self._preferred)
 
     def preference_override(self) -> tuple[str, ...] | None:
-        defaults = supported_task_names()
+        defaults = default_preferred_task_names()
         return None if tuple(self._preferred) == defaults else tuple(self._preferred)
 
     def _selected_available(self) -> str | None:
         row = self.available.currentRow()
-        item = self.available.item(row, 0) if row >= 0 else None
+        item = self.available.item(row, 1) if row >= 0 else None
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     def _selected_preferred(self) -> str | None:
-        item = self.preferred.currentItem()
+        row = self.preferred.currentRow()
+        item = self.preferred.item(row, 1) if row >= 0 else None
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     def _refresh_available(self, *_args):
@@ -129,6 +150,7 @@ class PreferredTasksPage(QFrame):
         self.available.setRowCount(len(rows))
         for i, row in enumerate(rows):
             for col, value in enumerate((
+                "",
                 row.name,
                 "Yes" if row.preferred else "No",
                 "Yes" if row.supported else "No",
@@ -150,16 +172,20 @@ class PreferredTasksPage(QFrame):
         self._update_buttons()
 
     def _refresh_preferred(self, selected: str | None = None):
-        self.preferred.clear()
-        for name in self._preferred:
-            item = QListWidgetItem(name)
-            item.setData(Qt.ItemDataRole.UserRole, name)
+        self.preferred.setRowCount(0)
+        self.preferred.setRowCount(len(self._preferred))
+        for row, name in enumerate(self._preferred):
+            icon_item = QTableWidgetItem()
             icon = task_icon(name)
             if not icon.isNull():
-                item.setIcon(icon)
-            self.preferred.addItem(item)
+                icon_item.setIcon(icon)
+            icon_item.setData(Qt.ItemDataRole.UserRole, name)
+            name_item = QTableWidgetItem(name)
+            name_item.setData(Qt.ItemDataRole.UserRole, name)
+            self.preferred.setItem(row, 0, icon_item)
+            self.preferred.setItem(row, 1, name_item)
             if name == selected:
-                self.preferred.setCurrentItem(item)
+                self.preferred.setCurrentCell(row, 1)
         self._update_buttons()
 
     def _refresh_all(self, selected: str | None = None):
@@ -170,7 +196,7 @@ class PreferredTasksPage(QFrame):
         available = self._selected_available()
         current = self.preferred.currentRow()
         self.add_button.setEnabled(available is not None and available not in self._preferred)
-        self.remove_button.setEnabled(current >= 0)
+        self.remove_button.setEnabled(self._selected_preferred() is not None)
         self.up_button.setEnabled(current > 0)
         self.down_button.setEnabled(0 <= current < len(self._preferred) - 1)
 
@@ -185,16 +211,6 @@ class PreferredTasksPage(QFrame):
         name = self._selected_preferred()
         if name is None:
             return
-        if name == "SCF":
-            answer = QMessageBox.question(
-                self, "Remove SCF from Preferred tasks?",
-                "SCF is needed for almost every calculation workflow. "
-                "Remove it from Preferred tasks anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return
         index = self._preferred.index(name)
         self._preferred.remove(name)
         self._refresh_all(
@@ -213,5 +229,5 @@ class PreferredTasksPage(QFrame):
         self._refresh_all(self._preferred[target])
 
     def _restore(self):
-        self._preferred = list(supported_task_names())
+        self._preferred = list(default_preferred_task_names())
         self._refresh_all()

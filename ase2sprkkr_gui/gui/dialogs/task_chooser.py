@@ -170,14 +170,14 @@ class TaskChooserDialog(QDialog):
             toolbar.addWidget(self.applicability_filter)
         root.addLayout(toolbar)
 
-        self._fields = ["name"]
+        self._fields = ["icon", "name"]
         if self._has_structure:
             self._fields.append("applicable")
         self._fields.extend(("preferred", "supported", "experimental", "info"))
         self.table = QTableWidget(0, len(self._fields), self)
         self.table.setObjectName("customTaskTable")
         self.table.setHorizontalHeaderLabels([
-            {"name": "Name", "experimental": "Experimental",
+            {"icon": "", "name": "Name", "experimental": "Experimental",
              "applicable": "Possible", "preferred": "Preferred",
              "supported": "Supported", "info": "Info"}[key]
             for key in self._fields
@@ -189,6 +189,8 @@ class TaskChooserDialog(QDialog):
         self.table.verticalHeader().hide()
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 32)
         header.setSectionResizeMode(self._fields.index("info"), QHeaderView.ResizeMode.Stretch)
         header.setSortIndicatorShown(False)
         header.sectionClicked.connect(self._sort_by_column)
@@ -210,6 +212,8 @@ class TaskChooserDialog(QDialog):
 
     def _sort_by_column(self, index: int) -> None:
         field = self._fields[index]
+        if field == "icon":
+            return
         if self._primary == field:
             self._descending = not self._descending
         else:
@@ -245,18 +249,20 @@ class TaskChooserDialog(QDialog):
             values = {
                 "name": row.name, "experimental": "Yes" if row.experimental else "No",
                 "applicable": row.applicable, "info": row.info,
-                "preferred": "Yes" if row.preferred else "No",
+                "preferred": "—" if row.name == "SCF" else "Yes" if row.preferred else "No",
                 "supported": "Yes" if row.supported else "No",
             }
             for column, key in enumerate(self._fields):
-                item = QTableWidgetItem(values[key])
+                item = QTableWidgetItem() if key == "icon" else QTableWidgetItem(values[key])
                 item.setData(Qt.ItemDataRole.UserRole, row.name)
                 item.setToolTip(
                     row.reason if key == "applicable"
+                    else "SCF is shown automatically when convergence is required."
+                    if key == "preferred" and row.name == "SCF"
                     else (row.details or row.info) if key == "info"
                     else row.info
                 )
-                if key == "name":
+                if key == "icon":
                     icon = task_icon(row.name)
                     if not icon.isNull():
                         item.setIcon(icon)

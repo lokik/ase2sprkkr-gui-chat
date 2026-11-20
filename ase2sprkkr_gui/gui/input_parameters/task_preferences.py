@@ -59,6 +59,11 @@ def supported_task_names() -> tuple[str, ...]:
     }))
 
 
+def default_preferred_task_names() -> tuple[str, ...]:
+    """GUI task shortcuts; SCF is always managed by the convergence workflow."""
+    return tuple(name for name in supported_task_names() if name != "SCF")
+
+
 def all_task_names() -> tuple[str, ...]:
     return tuple(sorted({
         task_ui_name(name) for name in InputParameters.task_registry.names()
@@ -75,13 +80,12 @@ def effective_preferred(
     The saved supported set is a baseline for detecting additions, not a
     second configuration of task support.
     """
-    supported = supported_task_names()
     if selected is None:
-        return supported
+        return default_preferred_task_names()
     available = set(all_task_names())
     result = list(dict.fromkeys(
         task_ui_name(name) for name in selected
-        if task_ui_name(name) in available
+        if task_ui_name(name) in available and task_ui_name(name) != "SCF"
     ))
     return tuple(result)
 
