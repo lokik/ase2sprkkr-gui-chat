@@ -761,6 +761,7 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
     application.processEvents()
     assert window._start_over_button.isEnabled()
     assert window._custom_button.text() == "Custom Calculation"
+    gui.controller.reset()
     window.close()
 
 
@@ -786,6 +787,7 @@ def test_external_structure_viewer_lives_under_preview_fit(tmp_path, monkeypatch
     )
     window._structure_overview.external_viewer_button.click()
     assert calls == [(gui.controller, gui.settings, window)]
+    gui.controller.reset()
     window.close()
 
 
