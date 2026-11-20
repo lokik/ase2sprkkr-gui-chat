@@ -101,7 +101,7 @@ class WorkflowWindow(QMainWindow):
         self._workflow_planner = WorkflowPlanner(settings=settings)
         self.controller.structureChanged.connect(self._on_structure_changed)
         self.controller.resultChanged.connect(lambda _result: self._refresh())
-        self.recent_history.changed.connect(self._refresh)
+        self.recent_history.changed.connect(self._refresh_recent_history)
         self._build_ui()
         self._refresh()
 
@@ -328,6 +328,13 @@ class WorkflowWindow(QMainWindow):
         self._structure_actions.set_uniform_card_height(height)
         self._actions.set_uniform_card_height(height)
 
+    def _refresh_recent_history(self) -> None:
+        # The recent-file menu is only present in the empty-workspace plan.
+        # With a structure loaded, history updates cannot change the actions;
+        # structureChanged already refreshed those actions during loading.
+        if self.controller.atoms is None:
+            self._refresh()
+
     def _refresh(self) -> None:
         plan = self._workflow_planner.for_workspace(
             self.controller,
@@ -520,9 +527,6 @@ class WorkflowWindow(QMainWindow):
             file_flows.continue_recent(
                 self.controller, self.recent_history, kind, file_path, self,
             )
-        if self.controller.atoms is None:
-            self._refresh()
-
     def _build_2d(self, _checked: bool = False, *, surface_mode: bool = False) -> None:
         structure_flows.build_2d_structure(
             self.controller,
