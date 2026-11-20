@@ -544,11 +544,11 @@ class WorkflowWindow(QMainWindow):
         self._update_navigation(snapshot)
         if atoms is None:
             self._calculate_notice.setText(
-                "Load or create a structure to enable calculations."
+                "Create or load a structure to see available guided calculations."
             )
         else:
             self._calculate_notice.setText(
-                "No calculation is available for the current structure."
+                "No guided calculation is available for the current structure."
             )
         self._calculate_notice.setVisible(not self._actions.has_actions)
 
