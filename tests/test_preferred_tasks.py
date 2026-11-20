@@ -169,15 +169,13 @@ def test_newly_supported_tasks_are_confirmed_once_on_open(
     tmp_path, monkeypatch, answer, open_settings,
 ):
     from ase2sprkkr_gui.main import GuiApplication
-    from ase2sprkkr_gui.gui.application import settings as settings_module
-
     settings_path = tmp_path / "prefs.json"
     initial = ApplicationSettings(settings_path)
     initial.preferred_tasks = ("DOS",)
     initial.preferred_supported_snapshot = ("DOS",)
     assert initial.save()
 
-    monkeypatch.setattr(settings_module, "supported_task_names",
+    monkeypatch.setattr(prefs, "supported_task_names",
                         lambda: ("DOS", "SCF", "XAS"))
     gui = GuiApplication(
         settings_path=settings_path,
@@ -389,14 +387,13 @@ def test_task_icons_use_separate_unlabelled_columns_on_both_task_lists(
 
 
 def test_scf_alone_is_not_treated_as_a_new_preferred_task(tmp_path, monkeypatch):
-    from ase2sprkkr_gui.gui.application import settings as settings_module
     path = tmp_path / "prefs.json"
     settings = ApplicationSettings(path)
     settings.preferred_tasks = ("DOS",)
     settings.preferred_supported_snapshot = ("DOS",)
     assert settings.save()
     monkeypatch.setattr(
-        settings_module, "default_preferred_task_names", lambda: ("DOS",),
+        prefs, "supported_task_names", lambda: ("DOS", "SCF"),
     )
     loaded = ApplicationSettings(path)
     loaded.load()
