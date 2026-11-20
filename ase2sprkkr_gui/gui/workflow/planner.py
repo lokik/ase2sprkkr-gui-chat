@@ -34,6 +34,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     ExplainEmbedding,
     ConvergeHostScf,
     ContinueRecent,
+    LoadAllRecentResults,
     RepeatRecentInput,
     CreateStructure,
     CreateStructureKind,
@@ -121,6 +122,10 @@ def _recent_menu(
                 for item in group.items
             ),
             empty_text=group.empty_text,
+            footer=(
+                ActionMenuItem(LoadAllRecentResults(), "Load all results")
+                if group.kind == "output" and group.items else None
+            ),
         )
         for group in presentation.groups
     )

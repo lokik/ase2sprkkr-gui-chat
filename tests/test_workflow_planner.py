@@ -15,6 +15,7 @@ from ase2sprkkr_gui.gui.input_parameters.tasks import (
 )
 from ase2sprkkr_gui.gui.workflow.model import (
     ActionIcon,
+    ActionMenuItem,
     AvailableAction,
     AvailableActionGroup,
     Build2D,
@@ -22,6 +23,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     BuildEmbedding,
     ExplainEmbedding,
     ContinueRecent,
+    LoadAllRecentResults,
     RepeatRecentInput,
     CreateStructure,
     CreateStructureKind,
@@ -162,6 +164,10 @@ def test_initial_plan_uses_typed_commands_and_planned_recent_menu():
         "/tmp/scf.out",
         "/tmp/older.out",
     )
+    assert continue_action.menu[0].footer is None
+    assert continue_action.menu[1].footer == ActionMenuItem(
+        LoadAllRecentResults(), "Load all results",
+    )
     assert all(
         item.tooltip == item.command.path
         for group in continue_action.menu
@@ -180,6 +186,7 @@ def test_initial_recent_menu_keeps_empty_kind_visible():
     assert recent_action.menu[0].items
     assert recent_action.menu[1].items == ()
     assert recent_action.menu[1].empty_text == "(No recent files)"
+    assert recent_action.menu[1].footer is None
 
 
 def test_recent_input_is_repeated_from_custom_not_continue():

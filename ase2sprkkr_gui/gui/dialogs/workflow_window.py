@@ -60,6 +60,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     ExplainEmbedding,
     ConvergeHostScf,
     ContinueRecent,
+    LoadAllRecentResults,
     RepeatRecentInput,
     CreateStructure,
     CreateStructureKind,
@@ -473,6 +474,11 @@ class WorkflowWindow(QMainWindow):
             return
         if isinstance(command, ContinueRecent):
             self._continue_recent(command.kind, command.path)
+            return
+        if isinstance(command, LoadAllRecentResults):
+            file_flows.load_all_recent_outputs(
+                self.controller, self.recent_history, self,
+            )
             return
         if isinstance(command, RepeatRecentInput):
             custom_flow.load_custom_input(

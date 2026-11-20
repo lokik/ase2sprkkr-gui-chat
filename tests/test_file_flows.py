@@ -292,3 +292,52 @@ def test_host_load_cancel_or_cluster_file_preserves_current_cluster(
     assert warning and warning[0][0] == "Not a Host Potential"
     assert controller.atoms is cluster
     assert controller.structure_generation == generation
+
+
+def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    latest = tmp_path / "new.out"
+    earlier = tmp_path / "old.out"
+    broken = tmp_path / "broken.out"
+    history = RecentFiles(tmp_path / "recent.json")
+    history.remember("output", earlier)
+    history.remember("output", broken)
+    history.remember("output", latest)
+    selected = []
+    parsed = []
+    notices = []
+
+    class Controller:
+        resultSelectionRequested = SimpleNamespace(emit=selected.append)
+
+        def adopt_external_result(self, result):
+            return SimpleNamespace(record=SimpleNamespace(id=result))
+
+    def load(path):
+        parsed.append(path)
+        if path == broken:
+            raise ValueError("invalid output")
+        return 1 if path == earlier else 2
+
+    calls = []
+    def modal(parent, operation, **kwargs):
+        calls.append(kwargs["title"])
+        return operation()
+
+    monkeypatch.setattr(file_flows, "load_result_file", load)
+    monkeypatch.setattr(file_flows, "run_modal_task", modal)
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "warning",
+        lambda parent, title, detail: notices.append((title, detail)),
+    )
+    original = history.paths("output")
+    imported = file_flows.load_all_recent_outputs(Controller(), history, None)
+
+    assert imported == (earlier, latest)
+    assert parsed == [earlier, broken, latest]
+    assert calls == ["Loading Recent Results"]
+    assert selected == [2]
+    assert history.paths("output") == original
+    assert len(notices) == 1
+    assert "skipped 1" in notices[0][1]

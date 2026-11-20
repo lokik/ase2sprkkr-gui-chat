@@ -432,6 +432,18 @@ class WorkflowActionsWidget(QWidget):
             empty = QAction(group.empty_text, menu)
             empty.setEnabled(False)
             menu.addAction(empty)
+        if group.footer is not None:
+            menu.addSeparator()
+            item = group.footer
+            menu_action = QAction(item.title, menu)
+            if item.tooltip is not None:
+                menu_action.setToolTip(item.tooltip)
+            menu_action.triggered.connect(
+                lambda _checked=False, command=item.command: self.commandRequested.emit(
+                    command
+                )
+            )
+            menu.addAction(menu_action)
 
     def _icon(self, icon: ActionIcon) -> QIcon:
         standard = {

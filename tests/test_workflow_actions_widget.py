@@ -16,6 +16,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AvailableAction,
     AvailableActionGroup,
     ContinueRecent,
+    LoadAllRecentResults,
     RepeatRecentInput,
     StartOver,
     WorkflowPlan,
@@ -231,6 +232,40 @@ def test_renderer_continue_uses_two_half_height_flat_dropdowns():
 
     card.click()
     assert emitted == [structure, primary]
+    widget.close()
+
+
+def test_recent_results_menu_has_separated_load_all_footer():
+    app = _app()
+    result = ContinueRecent("output", "/tmp/scf.out")
+    widget = WorkflowActionsWidget()
+    widget.set_plan(WorkflowPlan(
+        "", (AvailableActionGroup(
+            WorkflowSection.LOAD, "Load",
+            (AvailableAction(
+                result, "Continue: scf.out", "", "load", ActionIcon.CONTINUE,
+                menu=(
+                    ActionMenuGroup("Structures", (), empty_text="No structures"),
+                    ActionMenuGroup(
+                        "Results",
+                        (ActionMenuItem(result, "scf.out", "/tmp/scf.out"),),
+                        footer=ActionMenuItem(LoadAllRecentResults(), "Load all results"),
+                    ),
+                ),
+            ),),
+        ),),
+    ))
+    widget.show()
+    app.processEvents()
+    results = widget.findChild(QToolButton, "continueResultsMenuButton")
+    assert results is not None
+    actions = results.menu().actions()
+    assert [action.text() for action in actions] == ["scf.out", "", "Load all results"]
+    assert actions[1].isSeparator()
+    emitted = []
+    widget.commandRequested.connect(emitted.append)
+    actions[-1].trigger()
+    assert emitted == [LoadAllRecentResults()]
     widget.close()
 
 

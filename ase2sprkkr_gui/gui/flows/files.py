@@ -330,6 +330,62 @@ def choose_and_load_output(
     return bool(file_path and load_output(controller, recent_files, file_path, parent))
 
 
+def load_all_recent_outputs(
+    controller: WorkspaceController,
+    recent_files: RecentFiles,
+    parent: QWidget,
+) -> tuple[Path, ...]:
+    """Import current recent results in one batch, preserving the workspace.
+
+    Parse off the GUI thread and adopt each result on the GUI thread.
+    Process oldest first, so the newest successful result is selected.
+    """
+    paths = tuple(Path(path) for path in reversed(recent_files.paths("output")))
+    if not paths:
+        return ()
+
+    def read_all():
+        loaded, failures = [], []
+        for path in paths:
+            try:
+                loaded.append((path, load_result_file(path)))
+            except Exception as exc:  # noqa: BLE001 - unrelated/stale files must not interrupt the batch
+                failures.append((path.name, str(exc)))
+        return loaded, failures
+
+    try:
+        loaded, failures = run_modal_task(
+            parent, read_all,
+            title="Loading Recent Results",
+            label="Reading recent SPR-KKR results…",
+        )
+    except Exception as exc:  # noqa: BLE001 - reader error
+        QMessageBox.critical(parent, "Loading Recent Results Failed", str(exc))
+        return ()
+
+    imported: list[Path] = []
+    selected_id = None
+    for path, result in loaded:
+        try:
+            adoption = controller.adopt_external_result(result)
+            if adoption.record is not None:
+                selected_id = adoption.record.id
+            imported.append(path)
+        except Exception as exc:  # noqa: BLE001 - continue with independent results
+            failures.append((path.name, str(exc)))
+
+    if selected_id is not None:
+        controller.resultSelectionRequested.emit(selected_id)
+    if failures:
+        summary = "\n".join(f"{name}: {reason}" for name, reason in failures[:8])
+        QMessageBox.warning(
+            parent, "Loading Recent Results",
+            f"Imported {len(imported)} result(s); "
+            f"skipped {len(failures)} file(s):\n{summary}",
+        )
+    return tuple(imported)
+
+
 def load_output_directory(
     controller: WorkspaceController,
     recent_files: RecentFiles,

@@ -131,6 +131,11 @@ class ContinueRecent:
 
 
 @dataclass(frozen=True)
+class LoadAllRecentResults:
+    """Import all recent output files into the result history."""
+
+
+@dataclass(frozen=True)
 class RepeatRecentInput:
     """Reopen a recent SPR-KKR input file to repeat its calculation."""
 
@@ -190,6 +195,7 @@ WorkflowCommand = Union[
     ExplainEmbedding,
     Load,
     ContinueRecent,
+    LoadAllRecentResults,
     RepeatRecentInput,
     VisualizeStructure,
     EditStructure,
@@ -218,6 +224,7 @@ class ActionMenuGroup:
     title: str
     items: tuple[ActionMenuItem, ...]
     empty_text: str | None = None
+    footer: ActionMenuItem | None = None
 
     def __post_init__(self) -> None:
         if not self.items and self.empty_text is None:
