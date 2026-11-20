@@ -93,7 +93,9 @@ class WorkflowWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.setWindowTitle("Ase2sprkkr - Workflow")
-        manage_window_geometry(self, "workflow", default_size=(1320, 760))
+        manage_window_geometry(
+            self, "workflow", default_size=(1320, 760), default_maximized=True
+        )
         self.controller = controller
         self.recent_history = recent_files
         self.settings = settings
