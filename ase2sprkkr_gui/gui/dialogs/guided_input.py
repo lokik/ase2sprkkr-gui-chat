@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometry
 from ase2sprkkr_gui.gui.dialogs.expert_input import edit_input_parameters_session
 from ase2sprkkr_gui.gui.flows import presets as preset_flows
@@ -88,8 +89,10 @@ class GuidedInputParametersDialog(QDialog):
         calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
         file_source_directory=None,
         directory: str | Path | None = None,
+        recent_files: RecentFiles | None = None,
     ) -> None:
         super().__init__(parent)
+        self.recent_files = recent_files
         self._calculation_unavailable_reason = calculation_unavailable_reason
         self.task = task.lower()
         self.atoms = atoms
@@ -503,6 +506,7 @@ class GuidedInputParametersDialog(QDialog):
             show_changed_only=False,
             atoms=self.atoms,
             directory=self.directory,
+            recent_files=self.recent_files,
         )
         if accepted is None:
             return
@@ -551,6 +555,7 @@ class GuidedInputParametersDialog(QDialog):
             return
         choose_and_save_input_parameters(
             self.session.result(), self, atoms=self.atoms, directory=self.directory,
+            recent_files=self.recent_files,
         )
 
     def parameters(self) -> InputParameters:
@@ -567,6 +572,7 @@ def select_guided_input_parameters(
     dataset_prefix: str | None = None,
     calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
     directory: str | Path | None = None,
+    recent_files: RecentFiles | None = None,
 ) -> InputParameters | None:
     definition = guided_task_definition(task)
     if not InputParameters.is_task_name(definition.backend_task):
@@ -593,6 +599,7 @@ def select_guided_input_parameters(
         atoms=atoms,
         calculation_unavailable_reason=calculation_unavailable_reason,
         directory=directory,
+        recent_files=recent_files,
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None

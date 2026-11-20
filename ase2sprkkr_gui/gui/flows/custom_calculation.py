@@ -64,6 +64,8 @@ def _custom_input_dialog(
     parent: QWidget,
     parameters: InputParameters,
     input_directory: Path | None,
+    *,
+    recent_files: RecentFiles | None = None,
 ) -> QDialog:
     """Construct the editor on the GUI thread before hiding the load dialog."""
     source_directory = None
@@ -83,6 +85,7 @@ def _custom_input_dialog(
             calculation_unavailable_reason=explanation,
             file_source_directory=source_directory,
             directory=directory,
+            recent_files=recent_files,
         )
     else:
         dialog = InputParametersDialog(
@@ -91,6 +94,7 @@ def _custom_input_dialog(
             calculation_unavailable_reason=explanation,
             file_source_directory=source_directory,
             directory=directory,
+            recent_files=recent_files,
         )
     return dialog
 
@@ -113,6 +117,7 @@ def edit_custom_parameters(
         source_directory = Path(input_directory or controller.directory or Path.cwd()).resolve()
     dialog = prepared_dialog if prepared_dialog is not None else _custom_input_dialog(
         controller, parent, parameters, input_directory,
+        recent_files=recent_files,
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return True  # The file may have been saved even if running was cancelled.
@@ -163,7 +168,9 @@ def load_custom_input(
     """Read input into a local editor session, never a workspace document."""
     path = Path(path).expanduser().resolve()
     def prepare_editor(parameters: InputParameters):
-        dialog = _custom_input_dialog(controller, parent, parameters, path.parent)
+        dialog = _custom_input_dialog(
+            controller, parent, parameters, path.parent, recent_files=recent_files,
+        )
         # Publishing recent history refreshes workflow action cards. Do this
         # before closing Working, rather than blocking the GUI afterwards.
         recent_files.remember("input", path)

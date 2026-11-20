@@ -139,7 +139,7 @@ class LoadAllRecentResults:
 class RepeatRecentInput:
     """Reopen a recent SPR-KKR input file to repeat its calculation."""
 
-    path: str
+    path: str | None = None
 
 
 @dataclass(frozen=True)

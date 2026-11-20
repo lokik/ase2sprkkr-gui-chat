@@ -143,26 +143,25 @@ def _custom_group(
             "calculation", ActionIcon.FILE,
         )
     ]
-    # A saved input starts another calculation, not a structure/result continuation.
-    if not has_structure and recent is not None:
-        inputs = recent_menu_items(recent.paths("input"))
-        if inputs:
-            actions.append(_action(
-                RepeatRecentInput(inputs[0].path),
-                "Repeat calculation",
-                f"From {Path(inputs[0].path).name}",
-                "calculation", ActionIcon.CONTINUE,
-                tooltip=inputs[0].path,
-                menu=(ActionMenuGroup(
-                    "Inputs",
-                    tuple(
-                        ActionMenuItem(
-                            RepeatRecentInput(item.path), item.label, item.tooltip
-                        )
-                        for item in inputs
-                    ),
-                ),),
-            ))
+    # A repeatable input is independent of the active structure.
+    inputs = recent_menu_items(recent.paths("input")) if recent is not None else ()
+    actions.append(_action(
+        RepeatRecentInput(inputs[0].path if inputs else None),
+        "Repeat calculation",
+        f"From {Path(inputs[0].path).name}" if inputs else "No recent input files",
+        "calculation", ActionIcon.CONTINUE,
+        tooltip=inputs[0].path if inputs else None,
+        menu=(ActionMenuGroup(
+            "Inputs",
+            tuple(
+                ActionMenuItem(
+                    RepeatRecentInput(item.path), item.label, item.tooltip
+                )
+                for item in inputs
+            ),
+            empty_text="(No recent inputs)",
+        ),),
+    ))
     return AvailableActionGroup(WorkflowSection.CUSTOM, "Custom", tuple(actions))
 
 class WorkflowPlanner:
@@ -438,7 +437,7 @@ class WorkflowPlanner:
                 )
             )
 
-        groups.append(_custom_group(True))
+        groups.append(_custom_group(True, recent))
 
         structure_actions = []
         if not invalid_cluster:

@@ -257,6 +257,8 @@ def run_calculation(
         additional = f"\nCluster potential: {cluster_file}" if cluster_file else ""
         if submitted_input_generation is not None:
             controller.mark_input_parameters_saved(submitted_input_generation)
+        if input_file is not None:
+            recent_files.remember("input", input_file)
         QMessageBox.information(
             parent, "SPR-KKR Files Prepared",
             f"Input: {input_file}\nHost potential: {host_file}{additional}\n"
@@ -281,11 +283,13 @@ def run_calculation(
                     on_result_loaded(loaded, request))
         adoption_completed(adoption)
 
-    def submitted() -> None:
+    def submitted(input_file: str | None) -> None:
         if submitted_input_generation is not None:
             # submit() returned successfully; input files are already written.
             # Later workspace edits retain their own unsaved generation.
             controller.mark_input_parameters_saved(submitted_input_generation)
+        if input_file is not None:
+            recent_files.remember("input", input_file)
 
     try:
         description = profile_description(profile_name)
@@ -394,6 +398,7 @@ def configure_and_run_task(
             atoms=atoms,
             dataset_default_mode=dataset_default_mode,
             directory=controller.directory,
+            recent_files=recent_files,
         )
     except GuidedTaskUnavailable as exc:
         QMessageBox.critical(
@@ -472,6 +477,7 @@ def configure_and_run_host_scf(
             dataset_default_mode=dataset_default_mode,
             dataset_prefix="host_",
             directory=controller.directory,
+            recent_files=recent_files,
         )
     except GuidedTaskUnavailable as exc:
         QMessageBox.critical(parent, "Task Unavailable", str(exc))
@@ -621,6 +627,7 @@ def recompute_result(
             parent=parent,
             atoms=atoms,
             directory=controller.directory,
+            recent_files=recent_files,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return None
@@ -629,6 +636,7 @@ def recompute_result(
     else:
         edited = edit_input_parameters(
             parameters, parent=parent, atoms=atoms, directory=controller.directory,
+            recent_files=recent_files,
         )
         if edited is None:
             return None

@@ -384,6 +384,8 @@ class WorkflowActionsWidget(QWidget):
                 button.add_recent_menu(
                     group.title, icon, self._group_menu(group, button),
                 )
+        if isinstance(action.command, RepeatRecentInput) and action.command.path is None:
+            button.setEnabled(False)
         if shortcut:
             button.setShortcut(QKeySequence(shortcut))
             button.setToolTip(

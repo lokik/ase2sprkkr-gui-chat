@@ -100,3 +100,26 @@ def test_background_cleanup_replaces_initial_recent_menus_once(tmp_path):
     )
     assert tuple(item.command.path for item in recent.menu[0].items) == (str(existing),)
     window.close()
+
+
+
+def test_recent_inputs_refresh_repeat_calculation_with_structure_loaded(tmp_path):
+    from ase import Atoms
+
+    app = QApplication.instance() or QApplication([])
+    gui = GuiApplication(recent_files_path=tmp_path / "recent.json")
+    window = gui.create_workflow_window()
+    gui.controller.replace_structure(Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True))
+    app.processEvents()
+
+    custom = window.workflow_plan.group(WorkflowSection.CUSTOM)
+    assert custom.actions[1].command == RepeatRecentInput(None)
+    saved = tmp_path / "Fe_SCF.inp"
+    saved.touch()
+    gui.recent_files.remember("input", saved)
+    app.processEvents()
+
+    custom = window.workflow_plan.group(WorkflowSection.CUSTOM)
+    assert custom.actions[1].command == RepeatRecentInput(str(saved.resolve()))
+    assert custom.actions[1].menu[0].items[0].command.path == str(saved.resolve())
+    window.close()

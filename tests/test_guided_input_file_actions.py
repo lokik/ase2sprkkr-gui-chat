@@ -150,3 +150,21 @@ def test_calculate_invalid_input_is_disabled_without_disabling_save(monkeypatch)
     assert "Energy window" in dialog.calculate_button.toolTip()
     assert dialog.save_input_button.isEnabled()
     dialog.close()
+
+
+
+def test_explicit_input_save_populates_recent_history(tmp_path, monkeypatch):
+    from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
+
+    _app, dialog = _dialog()
+    history = RecentFiles(tmp_path / "recent.json")
+    dialog.recent_files = history
+    target = tmp_path / "saved.inp"
+    monkeypatch.setattr(
+        input_flows.QFileDialog, "getSaveFileName",
+        lambda *_args, **_kwargs: (str(target), ""),
+    )
+    dialog.save_input_button.click()
+    assert target.is_file()
+    assert history.paths("input") == (str(target.resolve()),)
+    dialog.close()

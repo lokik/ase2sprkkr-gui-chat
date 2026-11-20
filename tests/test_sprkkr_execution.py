@@ -582,6 +582,11 @@ def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_lau
     events = []
 
     class Runner:
+        spec = SimpleNamespace(
+            directory=str(tmp_path),
+            input_file=str(tmp_path / "Fe_SCF.inp"),
+        )
+
         def submit(self):
             events.append("submit")
             if failure_point == "submit":
@@ -599,7 +604,7 @@ def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_lau
 
     execution = SprkkrExecution(
         _request(tmp_path), _Cancellation(),
-        submitted=lambda: events.append("acknowledged"),
+        submitted=lambda path: events.append(("acknowledged", path)),
     )
     monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
     monkeypatch.setattr(
@@ -608,13 +613,13 @@ def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_lau
     )
     if failure_point == "none":
         execution.run()
-        assert events == ["submit", "acknowledged", "wait", "loaded"]
+        assert events == ["submit", ("acknowledged", str(tmp_path / "Fe_SCF.inp")), "wait", "loaded"]
     else:
         with pytest.raises(RuntimeError):
             execution.run()
         assert events == (
             ["submit"] if failure_point == "submit"
-            else ["submit", "acknowledged", "wait"]
+            else ["submit", ("acknowledged", str(tmp_path / "Fe_SCF.inp")), "wait"]
         )
 
 
@@ -626,10 +631,10 @@ def test_run_monitor_forwards_worker_submit_signal_on_gui_thread(tmp_path):
     observed = []
     window = SprkkrRunWindow(
         _request(tmp_path),
-        on_submitted=lambda: observed.append("submitted"),
+        on_submitted=lambda path: observed.append(path),
     )
     worker = window._worker_factory(window._cancellation)
-    worker.submitted.emit()
+    worker.submitted.emit(str(tmp_path / "Fe_SCF.inp"))
     app.processEvents()
-    assert observed == ["submitted"]
+    assert observed == [str(tmp_path / "Fe_SCF.inp")]
     window.close()

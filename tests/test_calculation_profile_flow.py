@@ -489,7 +489,36 @@ def test_prepare_only_selection_writes_inputs_without_creating_run(monkeypatch, 
     ))
     monkeypatch.setattr(calculation_flow.QMessageBox, "information",
                         lambda *_args: calls.append("reported"))
+    history = RecentFiles(tmp_path / "recent.json")
     assert calculation_flow.run_calculation(
-        controller, RecentFiles(tmp_path / "recent.json"), object()
+        controller, history, object()
     ) is None
     assert calls == [("prepare", str(tmp_path), None), "reported"]
+    assert history.paths("input") == (str((tmp_path / "Fe_SCF.inp").resolve()),)
+
+
+
+def test_successful_submission_registers_input_before_result(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    history = RecentFiles(tmp_path / "recent.json")
+    received = []
+    input_path = tmp_path / "Fe_SCF.inp"
+
+    class Window:
+        def __init__(self, **kwargs):
+            self.on_submitted = kwargs["on_submitted"]
+
+        def show(self):
+            pass
+
+        def start(self):
+            self.on_submitted(str(input_path))
+            received.extend(history.paths("input"))
+
+    monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
+    monkeypatch.setattr(calculation_flow, "profile_description", lambda _: None)
+    assert calculation_flow.run_calculation(
+        controller, history, object(), select_profile=False,
+    ) is not None
+    assert received == [str(input_path.resolve())]
+    assert history.paths("output") == ()

@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from ase2sprkkr import SPRKKR
 from kkrunner.backends.contracts import SubmissionNotStarted
+from kkrunner.files import FileManifest
 from kkrunner.runs import MpiNotFoundWarning
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import (
@@ -38,7 +39,7 @@ class SprkkrExecution:
         status: Callable[[str], None] | None = None,
         warning: Callable[[str], None] | None = None,
         persistent_job_changed: Callable[[str], None] | None = None,
-        submitted: Callable[[], None] | None = None,
+        submitted: Callable[[str | None], None] | None = None,
     ) -> None:
         self.request = request
         self.cancellation = cancellation
@@ -173,7 +174,10 @@ class SprkkrExecution:
         # and parsing are unrelated to whether those inputs were saved.
         if self._submitted is not None:
             try:
-                self._submitted()
+                # Exact staged input, not an inferred filename template.
+                spec = getattr(runner, "spec", None)
+                path = FileManifest.from_spec(spec).input_file if spec is not None else None
+                self._submitted(str(path) if path is not None else None)
             except Exception:  # noqa: BLE001 - observers must not fail a launched job
                 logger.exception("Submission observer failed")
         if self.cancellation.requested:

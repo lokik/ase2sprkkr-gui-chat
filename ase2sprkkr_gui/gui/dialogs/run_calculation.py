@@ -27,7 +27,7 @@ class _SprkkrRunWorker(RunMonitorWorker):
     """Qt signal adapter around the backend-only :class:`SprkkrExecution`."""
 
     persistentJobChanged = pyqtSignal(str)
-    submitted = pyqtSignal()
+    submitted = pyqtSignal(object)
     conflict = pyqtSignal(object)
     submissionRejected = pyqtSignal(str)
 
@@ -92,7 +92,7 @@ class SprkkrRunWindow(RunMonitorWindow):
         profile_description: str | None = None,
         project_id: str | None = None,
         on_finished=None,
-        on_submitted: Callable[[], None] | None = None,
+        on_submitted: Callable[[str | None], None] | None = None,
         on_back_to_setup: Callable[[], None] | None = None,
     ) -> None:
         header = f"Directory: {request.directory}"
@@ -154,11 +154,11 @@ class SprkkrRunWindow(RunMonitorWindow):
         self._execution_manager = manager
         self._project_id = project_id
 
-    @pyqtSlot()
-    def _on_submitted(self) -> None:
+    @pyqtSlot(object)
+    def _on_submitted(self, input_path: str | None) -> None:
         """Deliver submission acknowledgement on the GUI thread."""
         if self._submitted_callback is not None:
-            self._submitted_callback()
+            self._submitted_callback(input_path)
 
     @pyqtSlot(str)
     def _persistent_job_changed_received(self, job_id: str) -> None:

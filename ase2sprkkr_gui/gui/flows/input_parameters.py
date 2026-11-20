@@ -7,6 +7,7 @@ from pathlib import Path
 from ase2sprkkr import InputParameters
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
+from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.dialogs.input_file import InputFileEditor
 from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
 
@@ -96,6 +97,7 @@ def choose_and_save_input_parameters(
     *,
     atoms=None,
     directory: str | Path | None = None,
+    recent_files: RecentFiles | None = None,
 ) -> bool:
     """Save a detached input snapshot, independently of the workspace and run."""
     file_path, _ = QFileDialog.getSaveFileName(
@@ -113,6 +115,8 @@ def choose_and_save_input_parameters(
     except Exception as exc:  # noqa: BLE001 - native serializers have diverse failures
         QMessageBox.critical(parent, "Save Input Failed", str(exc))
         return False
+    if recent_files is not None:
+        recent_files.remember("input", file_path)
     return True
 
 

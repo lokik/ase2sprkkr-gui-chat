@@ -115,6 +115,7 @@ class WorkflowWindow(QMainWindow):
         )
         self.controller = controller
         self.recent_history = recent_files
+        self._displayed_recent_inputs = recent_files.paths("input")
         self.settings = settings
         self._track_launch_monitor = track_launch_monitor
         self.project_repository = project_repository
@@ -353,9 +354,12 @@ class WorkflowWindow(QMainWindow):
         self._actions.set_uniform_card_height(height)
 
     def _refresh_recent_history(self) -> None:
-        # Recent files affect only the empty start screen, not a loaded
-        # structure or a hostless CLUPOT awaiting its host.
-        if self.controller.atoms is None and self.controller.unresolved_cluster_path is None:
+        # Only input-history changes affect Repeat calculation in a loaded workspace.
+        inputs_changed = self.recent_history.paths("input") != self._displayed_recent_inputs
+        if inputs_changed or (
+            self.controller.atoms is None
+            and self.controller.unresolved_cluster_path is None
+        ):
             self._refresh()
         self._validate_recent_files_async()
 
@@ -388,9 +392,11 @@ class WorkflowWindow(QMainWindow):
         self.recent_history.remove_known_missing(snapshot, missing)
 
     def _refresh(self) -> None:
+        snapshot = self.recent_history.read_snapshot()
+        self._displayed_recent_inputs = snapshot.input
         plan = self._workflow_planner.for_workspace(
             self.controller,
-            recent=self.recent_history.read_snapshot(),
+            recent=snapshot,
         )
         atoms = self.controller.atoms
         kind = self.controller.structure_kind()
@@ -481,6 +487,8 @@ class WorkflowWindow(QMainWindow):
             )
             return
         if isinstance(command, RepeatRecentInput):
+            if command.path is None:
+                return
             custom_flow.load_custom_input(
                 self.controller, self.recent_history, self, command.path,
                 track_launch_monitor=self._track_launch_monitor,

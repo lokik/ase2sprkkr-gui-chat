@@ -347,7 +347,8 @@ def test_file_input_keeps_working_dialog_until_editor_is_prepared(tmp_path, monk
         events.append("read")
         return parsed
 
-    def build(ctrl, owner, parameters, input_directory):
+    def build(ctrl, owner, parameters, input_directory, *, recent_files):
+        assert recent_files is recent
         assert QThread.currentThread() is app.thread()
         assert (ctrl, owner, parameters, input_directory) == (
             controller, parent, parsed, tmp_path,
@@ -468,3 +469,22 @@ def test_native_2d_applicability_uses_registered_task_metadata():
     bulk_choices = {row.name: row for row in task_chooser.task_choices(bulk)}
     assert bulk_choices["CHILANDAU"].applicable == "Yes"
     assert bulk_choices["BONDING"].applicable == "No"
+
+
+
+def test_expert_explicit_save_populates_recent_history(tmp_path, monkeypatch):
+    _app()
+    history = RecentFiles(tmp_path / "recent.json")
+    dialog = expert_input.InputParametersDialog(
+        InputParameters.create("scf"), recent_files=history,
+    )
+    target = tmp_path / "expert_scf.inp"
+    from ase2sprkkr_gui.gui.flows import input_parameters as input_flows
+    monkeypatch.setattr(
+        input_flows.QFileDialog, "getSaveFileName",
+        lambda *_args, **_kwargs: (str(target), ""),
+    )
+    dialog.save_btn.click()
+    assert target.is_file()
+    assert history.paths("input") == (str(target.resolve()),)
+    dialog.close()

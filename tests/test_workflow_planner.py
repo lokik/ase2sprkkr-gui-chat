@@ -558,3 +558,19 @@ def test_default_bsf_is_one_action_for_both_native_modes():
         action.command in (RunTask("bsfek"), RunTask("bsfkk"))
         for action in calculate.actions
     )
+
+
+
+def test_repeat_calculation_is_always_present_for_loaded_and_empty_workspaces():
+    planner = WorkflowPlanner()
+    empty = planner.initial_plan()
+    repeat = empty.group(WorkflowSection.CUSTOM).actions[1]
+    assert repeat.command == RepeatRecentInput(None)
+    assert repeat.menu[0].items == ()
+    assert repeat.menu[0].empty_text == "(No recent inputs)"
+
+    history = RecentSnapshot(inputs=("/tmp/Fe_scf.inp",))
+    loaded = planner.for_workspace(Workspace(atoms=FormulaAtoms()), recent=history)
+    repeat = loaded.group(WorkflowSection.CUSTOM).actions[1]
+    assert repeat.command == RepeatRecentInput("/tmp/Fe_scf.inp")
+    assert repeat.menu[0].items[0].command == repeat.command

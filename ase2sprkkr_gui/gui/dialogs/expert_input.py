@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometry
 from ase2sprkkr_gui.gui.flows import presets as preset_flows
 from ase2sprkkr_gui.gui.flows.input_parameters import (
@@ -53,8 +54,10 @@ class InputParametersDialog(QDialog):
         calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
         file_source_directory=None,
         directory: str | Path | None = None,
+        recent_files: RecentFiles | None = None,
     ) -> None:
         super().__init__(parent)
+        self.recent_files = recent_files
         self.atoms = atoms
         self.directory = directory or file_source_directory
         self._calculation_mode = calculation_mode
@@ -169,6 +172,7 @@ class InputParametersDialog(QDialog):
         if self._commit_pending():
             choose_and_save_input_parameters(
                 self.session.result(), self, atoms=self.atoms, directory=self.directory,
+                recent_files=self.recent_files,
             )
 
     def _commit_pending(self) -> bool:
@@ -222,6 +226,7 @@ def edit_input_parameters(
     show_changed_only: bool = False,
     atoms: Any = None,
     directory: str | Path | None = None,
+    recent_files: RecentFiles | None = None,
 ) -> InputParameters | None:
     """Open the expert editor and return its accepted isolated draft."""
     session = create_input_parameters_session(params)
@@ -231,6 +236,7 @@ def edit_input_parameters(
         show_changed_only=show_changed_only,
         atoms=atoms,
         directory=directory,
+        recent_files=recent_files,
     )
     if accepted is None:
         return None
@@ -244,6 +250,7 @@ def edit_input_parameters_session(
     show_changed_only: bool = False,
     atoms: Any = None,
     directory: str | Path | None = None,
+    recent_files: RecentFiles | None = None,
 ) -> InputParametersSession | None:
     """Run Expert over an isolated fork and return the fork only on Accept."""
     dialog = InputParametersDialog(
@@ -252,6 +259,7 @@ def edit_input_parameters_session(
         show_changed_only=show_changed_only,
         atoms=atoms,
         directory=directory,
+        recent_files=recent_files,
     )
     code = dialog.exec()
     if code == QDialog.DialogCode.Accepted:
