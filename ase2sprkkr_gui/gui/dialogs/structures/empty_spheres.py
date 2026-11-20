@@ -4,6 +4,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ase2sprkkr import config
+from ase2sprkkr.bindings.empty_spheres import (
+    INHOUSE_EMPTY_SPHERES_DEFAULTS,
+    configured_empty_spheres_params,
+)
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -18,12 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 
-_DEFAULTS = {
-    "min_radius": 0.65,
-    "max_radius": 2.0,
-    "max_spheres": 256,
-    "mesh": (24, 24, 24),
-}
+_DEFAULTS = INHOUSE_EMPTY_SPHERES_DEFAULTS
 
 
 def _mesh(value: Any) -> tuple[int, int, int]:
@@ -43,10 +43,12 @@ class EmptySpheresDialog(QDialog):
         self,
         *,
         initial: Mapping[str, Any] | None = None,
+        defaults: Mapping[str, Any] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Empty Spheres")
+        self._defaults = {**_DEFAULTS, **(defaults or {})}
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -111,20 +113,20 @@ class EmptySpheresDialog(QDialog):
 
     def _load(self, values: Mapping[str, Any]) -> None:
         self.min_radius.setValue(
-            float(values.get("min_radius", _DEFAULTS["min_radius"]))
+            float(values.get("min_radius", self._defaults["min_radius"]))
         )
         self.max_radius.setValue(
-            float(values.get("max_radius", _DEFAULTS["max_radius"]))
+            float(values.get("max_radius", self._defaults["max_radius"]))
         )
         self.max_spheres.setValue(
-            int(values.get("max_spheres", _DEFAULTS["max_spheres"]))
+            int(values.get("max_spheres", self._defaults["max_spheres"]))
         )
-        mesh = _mesh(values.get("mesh", _DEFAULTS["mesh"]))
+        mesh = _mesh(values.get("mesh", self._defaults["mesh"]))
         for spin, value in zip(self.mesh, mesh):
             spin.setValue(value)
 
     def _restore_defaults(self) -> None:
-        self._load(_DEFAULTS)
+        self._load(self._defaults)
 
     def parameters(self) -> dict[str, Any]:
         return {
@@ -151,7 +153,11 @@ def select_empty_spheres_parameters(
     initial: Mapping[str, Any] | None = None,
     parent: QWidget | None = None,
 ) -> dict[str, Any] | None:
-    dialog = EmptySpheresDialog(initial=initial, parent=parent)
+    dialog = EmptySpheresDialog(
+        initial=initial,
+        defaults=configured_empty_spheres_params(config),
+        parent=parent,
+    )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     return dialog.parameters()
