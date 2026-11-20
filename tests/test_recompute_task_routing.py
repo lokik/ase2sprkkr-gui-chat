@@ -66,7 +66,8 @@ def test_non_guided_result_recompute_uses_expert_and_detached_request(monkeypatc
     workspace_input = controller.input_parameters
     editor_calls = []
 
-    def edit(parameters, *, parent, atoms):
+    def edit(parameters, *, parent, atoms, directory):
+        assert directory == controller.directory
         editor_calls.append((parameters, parent, atoms))
         return edited
 
@@ -117,7 +118,8 @@ def test_recompute_uses_effective_task_without_adopting_expert_input(monkeypatch
     input_generation = controller.input_parameters_generation
     editor_calls = []
 
-    def edit(parameters, *, parent, atoms):
+    def edit(parameters, *, parent, atoms, directory):
+        assert directory == controller.directory
         editor_calls.append((parameters, parent, atoms))
         return edited
 

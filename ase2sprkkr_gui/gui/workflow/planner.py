@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from ase2sprkkr import InputParameters
-from ase2sprkkr.sprkkr.executables import executables
+from ase2sprkkr.sprkkr.executables import task_system_error
 
 from ase2sprkkr_gui.gui.input_parameters.tasks import (
     WorkflowStage,
@@ -122,14 +122,12 @@ def _recent_menu(
     )
 
 
-def _cluster_task_supported(definition):
-    """Require explicit task support, not merely a shared cluster executable."""
+def _task_supported(definition, system_kind):
     try:
         task = InputParameters.task_registry[definition.backend_task.upper()]
-        return ("embedded" in task.supports
-                and executables[task.executable].cluster_variant is not None)
-    except (AttributeError, KeyError):
+    except KeyError:
         return False
+    return task_system_error(task, system_kind) is None
 
 
 def _custom_group(has_structure: bool) -> AvailableActionGroup:
@@ -345,12 +343,11 @@ class WorkflowPlanner:
             # converged. Keep Continue SCF available, but also offer supported
             # post-SCF calculations without changing its persisted SCFSTATUS.
             supported_tasks += workflow_tasks(WorkflowStage.POST_SCF)
-        if is_cluster:
-            # A START host cannot provide usable embedding boundary conditions.
-            # An iterating host is allowed with an explicit reliability warning.
-            supported_tasks = (() if invalid_cluster or host_needs_initial_scf else tuple(
-                d for d in supported_tasks if _cluster_task_supported(d)
-            ))
+        kind = "embedded" if is_cluster else workspace.structure_kind()
+        if invalid_cluster or host_needs_initial_scf:
+            supported_tasks = ()
+        else:
+            supported_tasks = tuple(d for d in supported_tasks if _task_supported(d, kind))
         for definition in supported_tasks:
             title = definition.workflow.label
             description = definition.workflow.description

@@ -449,18 +449,21 @@ def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
     from ase2sprkkr_gui.gui.workflow import planner as planning
 
     fake_registry = {
-        "SCF": SimpleNamespace(executable="kkrscf", supports={"3d", "2d", "embedded"}),
-        "DOS": SimpleNamespace(executable="kkrgen", supports={"3d", "2d", "embedded"}),
-        "XAS": SimpleNamespace(executable="kkrgen", supports={"3d", "2d"}),
-        "ARPES": SimpleNamespace(executable="kkrspec", supports={"3d", "2d"}),
-        "BSFEK": SimpleNamespace(executable="kkrgen", supports={"3d", "2d"}),
-        "JXC": SimpleNamespace(executable="kkrgen", supports={"3d", "2d"}),
+        name: SimpleNamespace(name=name, executable=executable, supports=supports)
+        for name, executable, supports in (
+            ("SCF", "kkrscf", {"3d", "2d", "embedded"}),
+            ("DOS", "kkrgen", {"3d", "2d", "embedded"}),
+            ("XAS", "kkrgen", {"3d", "2d"}),
+            ("ARPES", "kkrspec", {"3d", "2d"}),
+            ("BSFEK", "kkrgen", {"3d", "2d"}),
+            ("JXC", "kkrgen", {"3d", "2d"}),
+        )
     }
     monkeypatch.setattr(planning.InputParameters, "task_registry", fake_registry)
     for stage, expected in ((WorkflowStage.SCF, ("scf",)),
                             (WorkflowStage.POST_SCF, ("dos",))):
         filtered = tuple(d.backend_task for d in workflow_tasks(stage)
-                         if planning._cluster_task_supported(d))
+                         if planning._task_supported(d, "embedded"))
         assert filtered == expected
 
 

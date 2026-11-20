@@ -5,15 +5,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from ase2sprkkr import InputParameters
-from ase2sprkkr.sprkkr.executables import executables
+from ase2sprkkr.sprkkr.executables import task_system_error
+from ase2sprkkr.sprkkr.sprkkr_atoms import system_kind_for_atoms
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget, QAbstractItemView,
 )
-
-from ase2sprkkr_gui.physics.lattice import detect_structure_kind
 
 
 @dataclass(frozen=True)
@@ -26,53 +25,21 @@ class TaskChoice:
     details: str = ""
 
 
-def applicability(task: Any, structure_kind: str | None, *, atoms: Any = None) -> tuple[str, str]:
-    """Declare geometry support; potential/readiness checks happen separately."""
-    if structure_kind is None:
+def applicability(task: Any, system_kind: str | None) -> tuple[str, str]:
+    """Present the backend's geometry support in the chooser."""
+    if system_kind is None:
         return "Unknown", "No structure is loaded."
-
-    # Native 0D atoms can represent either a free cluster or an embedding.
-    if structure_kind == "0d":
-        structure_kind = (
-            "embedded" if getattr(atoms, "embedding_host", None) is not None
-            else "cluster"
-        )
-
-    if structure_kind == "embedded":
-        if "embedded" not in task.supports:
-            return "No", "This task does not support embedded-cluster calculations."
-        executable = executables.get(task.executable) if hasattr(executables, "get") else (
-            executables[task.executable] if task.executable in executables else None
-        )
-        if executable is None or executable.cluster_variant is None:
-            return "No", "No embedded-cluster executable is available for this task."
-        return "Yes", "The task supports embedded-cluster calculations."
-
-    if structure_kind == "cluster":
-        if "cluster" not in task.supports:
-            return "No", "This task does not support free clusters without a host potential."
-        return "Yes", "The task supports free-cluster calculations."
-
-    if structure_kind == "2d":
-        if "2d" not in task.supports:
-            return "No", "This task does not support native 2D calculations."
-        return "Yes", "The task supports native 2D calculations."
-
-    if structure_kind == "3d":
-        if "3d" not in task.supports:
-            return "No", "This task does not support periodic 3D calculations."
-        return "Yes", "The task supports periodic 3D calculations."
-
-    return "Unknown", f"Unknown structure type: {structure_kind}."
+    error = task_system_error(task, system_kind)
+    return ("No", error) if error else ("Yes", "The task supports this structure.")
 
 
 def task_choices(atoms: Any = None) -> tuple[TaskChoice, ...]:
     """Discover registered native tasks, including experimental tasks."""
-    kind = detect_structure_kind(atoms) if atoms is not None else None
+    kind = system_kind_for_atoms(atoms)
     rows = []
     for name in InputParameters.task_registry.names():
         task = InputParameters.task_registry[name]
-        status, reason = applicability(task, kind, atoms=atoms)
+        status, reason = applicability(task, kind)
         try:
             definition = InputParameters.input_parameters_registry.definition_for_task(task)
             # Backend info is the short summary; description is detailed help.
