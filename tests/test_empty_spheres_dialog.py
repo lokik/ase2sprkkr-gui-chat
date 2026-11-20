@@ -41,3 +41,20 @@ def test_empty_sphere_initial_values():
         "mesh": (20, 22, 24),
     }
     dialog.close()
+
+def test_empty_sphere_dialog_uses_configured_defaults_and_preserves_previous_parameters():
+    _application = QApplication.instance() or QApplication([])
+    dialog = EmptySpheresDialog(
+        defaults={"min_radius": 0.8, "mesh": (22, 24, 26)},
+        initial={"max_radius": 1.7},
+    )
+    assert dialog.parameters() == {
+        "min_radius": 0.8,
+        "max_radius": 1.7,
+        "max_spheres": 256,
+        "mesh": (22, 24, 26),
+    }
+    dialog._restore_defaults()
+    assert dialog.parameters()["min_radius"] == 0.8
+    assert dialog.parameters()["max_radius"] == 2.0
+    dialog.close()
