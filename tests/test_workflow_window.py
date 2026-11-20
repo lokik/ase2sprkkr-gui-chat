@@ -316,6 +316,23 @@ def test_hostless_recent_cluster_refreshes_only_once(tmp_path, monkeypatch):
     window.close()
 
 
+
+def test_result_only_notification_does_not_rebuild_workflow(tmp_path, monkeypatch):
+    application = QApplication.instance() or QApplication([])
+    gui, window = _workflow(tmp_path)
+    calls = []
+    original = window._structure_actions.set_plan
+
+    def record(plan):
+        calls.append(plan)
+        original(plan)
+
+    monkeypatch.setattr(window._structure_actions, "set_plan", record)
+    gui.controller.resultChanged.emit(object())
+    assert calls == []
+    window.close()
+
+
 def test_recent_history_still_refreshes_empty_workspace(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
