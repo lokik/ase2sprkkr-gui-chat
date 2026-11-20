@@ -8,6 +8,10 @@ from typing import Any
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QPushButton,
+    QSpinBox,
     QFormLayout,
     QFrame,
     QGroupBox,
@@ -18,6 +22,10 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr import config
+from ase2sprkkr.bindings.empty_spheres import (
+    INHOUSE_EMPTY_SPHERES_DEFAULTS,
+    configured_empty_spheres_params,
+)
 from ase2sprkkr.common.configuration_transaction import ConfigurationTransaction
 from ase2sprkkr.common.output_printing import (
     normalize_output_filter,
@@ -83,6 +91,8 @@ class Ase2sprkkrSettingsPage(QFrame):
         super().__init__(parent)
         self._config = config if configuration is None else configuration
         self._original_empty = self._config.running.empty_spheres()
+        self._original_empty_params = configured_empty_spheres_params(self._config)
+        self._reset_empty_params = False
         self._original_output = self._config.running.print_output()
         self._original_token = self._config.nomad.token()
 
@@ -191,6 +201,60 @@ class Ase2sprkkrSettingsPage(QFrame):
 
         layout.addWidget(running_group)
 
+        spheres_group = QGroupBox("Empty-sphere search defaults (XBand)", self)
+        spheres_form = QFormLayout(spheres_group)
+        default_params = {
+            **INHOUSE_EMPTY_SPHERES_DEFAULTS,
+            **self._original_empty_params,
+        }
+        self.empty_min_radius = QDoubleSpinBox(spheres_group)
+        self.empty_max_radius = QDoubleSpinBox(spheres_group)
+        for widget, value in (
+            (self.empty_min_radius, default_params["min_radius"]),
+            (self.empty_max_radius, default_params["max_radius"]),
+        ):
+            widget.setDecimals(4)
+            widget.setRange(0.0, 100.0)
+            widget.setSingleStep(0.05)
+            widget.setSuffix(" Å")
+            widget.setValue(float(value))
+        spheres_form.addRow("Minimum radius:", self.empty_min_radius)
+        spheres_form.addRow("Maximum radius:", self.empty_max_radius)
+
+        self.empty_max_spheres = QSpinBox(spheres_group)
+        self.empty_max_spheres.setRange(1, 100000)
+        self.empty_max_spheres.setValue(int(default_params["max_spheres"]))
+        spheres_form.addRow("Maximum number of spheres:", self.empty_max_spheres)
+
+        mesh_widget = QWidget(spheres_group)
+        mesh_layout = QGridLayout(mesh_widget)
+        mesh_layout.setContentsMargins(0, 0, 0, 0)
+        self.empty_mesh = []
+        mesh = default_params["mesh"]
+        if isinstance(mesh, int):
+            mesh = (mesh,) * 3
+        for column, (axis, value) in enumerate(zip("XYZ", mesh)):
+            widget = QSpinBox(mesh_widget)
+            widget.setRange(1, 10000)
+            widget.setValue(int(value))
+            mesh_layout.addWidget(QLabel(axis, mesh_widget), 0, column)
+            mesh_layout.addWidget(widget, 1, column)
+            self.empty_mesh.append(widget)
+        spheres_form.addRow("Search mesh:", mesh_widget)
+
+        self.restore_empty_params = QPushButton("Restore library defaults", spheres_group)
+        self.restore_empty_params.clicked.connect(self._restore_empty_defaults)
+        spheres_form.addRow("", self.restore_empty_params)
+        self.empty_params_notice = QLabel(
+            "Only changed parameters are saved. These defaults also apply to "
+            "Python calculations unless explicitly overridden.",
+            spheres_group,
+        )
+        self.empty_params_notice.setWordWrap(True)
+        spheres_form.addRow("", self.empty_params_notice)
+        self._initial_empty_values = self._empty_param_values()
+        layout.addWidget(spheres_group)
+
         nomad_group = QGroupBox("NOMAD", self)
         nomad_form = QFormLayout(nomad_group)
         self.nomad_token = QLineEdit(nomad_group)
@@ -212,6 +276,23 @@ class Ase2sprkkrSettingsPage(QFrame):
         nomad_form.addRow("", self.remove_token)
         layout.addWidget(nomad_group)
         layout.addStretch(1)
+
+    def _empty_param_values(self) -> dict[str, Any]:
+        return {
+            "min_radius": self.empty_min_radius.value(),
+            "max_radius": self.empty_max_radius.value(),
+            "max_spheres": self.empty_max_spheres.value(),
+            "mesh": tuple(widget.value() for widget in self.empty_mesh),
+        }
+
+    def _restore_empty_defaults(self) -> None:
+        defaults = INHOUSE_EMPTY_SPHERES_DEFAULTS
+        self.empty_min_radius.setValue(defaults["min_radius"])
+        self.empty_max_radius.setValue(defaults["max_radius"])
+        self.empty_max_spheres.setValue(defaults["max_spheres"])
+        for widget, value in zip(self.empty_mesh, defaults["mesh"]):
+            widget.setValue(value)
+        self._reset_empty_params = True
 
     def _all_output_changed(self, checked: bool) -> None:
         if checked:
@@ -244,6 +325,19 @@ class Ase2sprkkrSettingsPage(QFrame):
         empty = self.empty_spheres.currentData()
         if empty != self._original_empty:
             out.append((self._config.running.empty_spheres, empty))
+
+        values = self._empty_param_values()
+        if values["min_radius"] > values["max_radius"]:
+            raise ValueError("Minimum empty-sphere radius cannot exceed maximum radius.")
+        section = self._config.running.empty_spheres_params
+        for name, value in values.items():
+            if self._reset_empty_params:
+                # Restore deletes overrides rather than persisting today's defaults.
+                requested = None if value == INHOUSE_EMPTY_SPHERES_DEFAULTS[name] else value
+                if requested != self._original_empty_params.get(name):
+                    out.append((getattr(section, name), requested))
+            elif value != self._initial_empty_values[name]:
+                out.append((getattr(section, name), value))
 
         # Parsing may normalize an existing multi-regex value for display.
         # Preserve the original representation until the user edits the mode
@@ -280,6 +374,9 @@ class Ase2sprkkrSettingsPage(QFrame):
             self._config.save_user_preferences()
 
         self._original_empty = self._config.running.empty_spheres()
+        self._original_empty_params = configured_empty_spheres_params(self._config)
+        self._initial_empty_values = self._empty_param_values()
+        self._reset_empty_params = False
         self._original_output = self._config.running.print_output()
         self._output_edited = False
         self._original_token = self._config.nomad.token()
