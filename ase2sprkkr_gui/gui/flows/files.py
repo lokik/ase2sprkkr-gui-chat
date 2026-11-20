@@ -101,24 +101,29 @@ def load_structure(
     except OSError as exc:
         QMessageBox.critical(parent, "Load Error", str(exc))
         return False
-    candidate = load_structure_candidate(path, parent, reader=_read_structure_file)
+    change = None
+
+    def apply_loaded_structure(candidate):
+        nonlocal change
+        change = controller.replace_structure(
+            candidate.atoms,
+            potential_path=str(path) if path.suffix.lower() in _POTENTIAL_SUFFIXES else None,
+            directory=str(path.parent),
+            expected_structure_generation=structure_generation,
+            expected_directory_generation=directory_generation,
+        )
+        if change is DocumentChange.APPLIED:
+            controller.mark_structure_saved(controller.structure_generation)
+            recent_files.remember("structure", file_path)
+
+    candidate = load_structure_candidate(
+        path, parent, reader=_read_structure_file, on_loaded=apply_loaded_structure,
+    )
     if candidate is None:
         return False
-    atoms = candidate.atoms
-
-    potential_path = str(path) if path.suffix.lower() in _POTENTIAL_SUFFIXES else None
-    change = controller.replace_structure(
-        atoms,
-        potential_path=potential_path,
-        directory=str(path.parent),
-        expected_structure_generation=structure_generation,
-        expected_directory_generation=directory_generation,
-    )
     if not document_change_applied(parent, change):
         return False
-    controller.mark_structure_saved(controller.structure_generation)
-    warn_if_structure_kind_is_unknown(atoms, parent)
-    recent_files.remember("structure", file_path)
+    warn_if_structure_kind_is_unknown(candidate.atoms, parent)
     return True
 
 
