@@ -92,6 +92,30 @@ def test_overview_shows_separate_host_and_cluster_information(application):
     widget.close()
 
 
+
+def test_replacing_host_view_with_bulk_draws_preview_once(application, monkeypatch):
+    host = SPRKKRAtoms.promote_ase_atoms(bulk("Fe", "bcc", a=2.87)).potential
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    widget = StructureOverviewWidget()
+    widget.set_structure(cluster, kind="0d")
+    widget.host_radio.setChecked(True)
+
+    calls = []
+    original = widget._render_preview
+
+    def draw(*args):
+        calls.append(1)
+        return original(*args)
+
+    monkeypatch.setattr(widget, "_render_preview", draw)
+    widget.set_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True), kind="3d")
+    assert widget.cluster_radio.isChecked()
+    assert len(calls) == 1
+    widget.close()
+
+
 def test_host_facts_use_columns_when_wide_and_stack_when_narrow(application):
     host = SPRKKRAtoms.promote_ase_atoms(bulk("Fe", "bcc", a=2.87)).potential
     draft = EmbeddingDraft(host)
