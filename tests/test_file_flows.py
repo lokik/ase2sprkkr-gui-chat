@@ -30,6 +30,36 @@ def test_structure_flow_loads_potential_and_document_metadata(tmp_path, monkeypa
     assert history.paths("structure") == (str(path),)
 
 
+
+def test_periodic_potential_from_recent_file_is_probed_and_parsed_once(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    path = tmp_path / "Fe.pot"
+    path.touch()
+    atoms = Atoms("Fe", cell=(3, 3, 3), pbc=True)
+    history = RecentFiles(tmp_path / "recent.json")
+    controller = WorkspaceController()
+    calls = []
+
+    def probe(candidate):
+        calls.append(("probe", candidate))
+        return False
+
+    def read(candidate, *, check_file_unchanged):
+        calls.append(("read", candidate))
+        assert check_file_unchanged
+        return SimpleNamespace(atoms=atoms)
+
+    monkeypatch.setattr(file_flows.Potential, "is_cluster_file", staticmethod(probe))
+    monkeypatch.setattr(
+        file_flows.PeriodicPotential, "from_file", staticmethod(read),
+    )
+
+    assert file_flows.load_structure(controller, history, path, None)
+    assert calls == [("probe", path.resolve()), ("read", str(path.resolve()))]
+    assert controller.atoms is atoms
+
+
 def test_loading_nonpotential_structure_drops_old_potential_source(tmp_path, monkeypatch):
     atoms = Atoms("Cu", cell=(2.8, 2.8, 2.8), pbc=True)
     path = tmp_path / "Cu.xyz"
