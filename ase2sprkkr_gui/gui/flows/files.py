@@ -294,7 +294,7 @@ def load_input_parameters(
         QMessageBox.critical(
             parent,
             "Load Error",
-            f"Failed to load input parameters:\\n{exc}",
+            f"Failed to load input parameters:\n{exc}",
         )
         return False
 
