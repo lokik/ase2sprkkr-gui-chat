@@ -153,8 +153,9 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     assert window.findChild(QLabel, "workflowCalculateTitle").text() == "Calculate"
     assert "Create a 3D Structure" in names(window._structure_actions)
     assert "Load a Structure" in names(window._structure_actions)
-    assert window._actions.has_actions
-    assert "Custom input file" in names(window._actions)
+    assert not window._actions.has_actions
+    assert window._custom_button.text() == "Custom Input File"
+    assert not window._repeat_button.isEnabled()
 
     window.controller.replace_structure(
         Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
@@ -167,6 +168,9 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     assert "Visualize Structure" in names(window._structure_actions)
     assert "Save Structure" in names(window._structure_actions)
     assert window._actions.has_actions
+    assert window._custom_button.text() == "Custom Calculation"
+    assert "Visualize Structure" not in names(window._structure_actions)
+    assert "Start Over" not in names(window._structure_actions)
     assert "Edit Structure" not in names(window._actions)
     assert "Visualize Structure" not in names(window._actions)
     assert all("SCF" not in name for name in names(window._structure_actions))
@@ -174,8 +178,8 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     window.controller.reset()
     application.processEvents()
     assert window._structure_title.text() == "Start with..."
-    assert window._actions.has_actions
-    assert "Custom input file" in names(window._actions)
+    assert not window._actions.has_actions
+    assert window._custom_button.text() == "Custom Input File"
     window.close()
 
 
@@ -632,47 +636,66 @@ def test_cancel_new_2d_prompts_to_keep_or_discard_3d(tmp_path, monkeypatch, keep
     window.close()
 
 
-def test_workflow_navigation_is_one_bottom_panel_with_four_icon_buttons(
+def test_workflow_navigation_is_one_full_width_row_of_nine_icon_buttons(
     tmp_path, monkeypatch
 ):
-    _application = QApplication.instance() or QApplication([])
+    application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
 
     navigation = window.findChild(QGroupBox, "workflowNavigation")
     assert navigation is not None
-    # The navigation footer is outside the results frame, and below it.
-    sidebar = navigation.parentWidget()
-    assert sidebar is window._result_actions.parentWidget()
-    assert isinstance(window._result_actions, QFrame)
-    assert window._result_actions.frameShape() == QFrame.Shape.StyledPanel
+    # The footer is a sibling of the entire three-column splitter, not
+    # a child of Results. It has precisely one row with three button groups.
+    root = window.centralWidget().layout()
+    assert navigation.parentWidget() is window.centralWidget()
+    assert root.itemAt(root.count() - 1).widget() is navigation
+    assert isinstance(root.itemAt(0).widget(), QSplitter)
     assert not window._result_actions.isAncestorOf(navigation)
-    sidebar_layout = sidebar.layout()
-    assert sidebar_layout.indexOf(window._result_actions) < sidebar_layout.indexOf(
-        navigation
+    assert navigation.layout().count() == 3
+    assert all(
+        group.layout().count() == 3
+        for group in (
+            navigation.layout().itemAt(i).widget()
+            for i in range(3)
+        )
     )
-    assert sidebar_layout.itemAt(sidebar_layout.count() - 1).widget() is navigation
-    assert not hasattr(window, 'browser_panel')
 
     buttons = navigation.findChildren(QToolButton)
     assert buttons == [
-        window._project_browser_button,
-        window._load_input_button,
+        window._start_over_button,
+        window._recent_structures_button,
         window._settings_button,
+        window._repeat_button,
+        window._load_input_button,
+        window._custom_button,
+        window._recent_results_button,
+        window._project_browser_button,
         window._close_button,
     ]
     assert [button.text() for button in buttons] == [
-        "Project Browser", "Load Input File", "Settings", "Close"
+        "Start from Scratch", "Recent Structures", "Settings",
+        "Repeat Calculation", "Load Input File", "Custom Input File",
+        "Recent Results", "Project Browser", "Close",
     ]
     assert all(not button.icon().isNull() for button in buttons)
     assert all(
         button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
         for button in buttons
     )
+    assert all(button.minimumHeight() == 72 for button in buttons)
+    assert not window._start_over_button.isEnabled()
+    assert not window._recent_structures_button.isEnabled()
+    assert not window._recent_results_button.isEnabled()
+    assert not window._repeat_button.isEnabled()
 
     actions = []
     monkeypatch.setattr(
         workflow_module.custom_flow, "choose_custom_input",
         lambda *_args, **_kwargs: actions.append("load"),
+    )
+    monkeypatch.setattr(
+        workflow_module.custom_flow, "choose_custom_task",
+        lambda *_args, **_kwargs: actions.append("custom"),
     )
     monkeypatch.setattr(
         workflow_module,
@@ -683,23 +706,109 @@ def test_workflow_navigation_is_one_bottom_panel_with_four_icon_buttons(
 
     window._project_browser_button.click()
     window._load_input_button.click()
+    window._custom_button.click()
     window._settings_button.click()
 
     assert actions == [
         "projects",
         "load",
+        "custom",
         ("settings", gui.settings, window),
     ]
-    # The application composition root must still connect this button to
-    # the same non-modal project browser as the main window.
+    # The application composition root still opens the non-modal browser.
     assert gui._project_browser is not None
     assert gui._project_browser.isVisible()
     window.show()
-    _application.processEvents()
+    application.processEvents()
     window._close_button.click()
-    _application.processEvents()
+    application.processEvents()
     assert not window.isVisible()
     assert gui._project_browser is None or not gui._project_browser.isVisible()
+
+
+def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatch):
+    application = QApplication.instance() or QApplication([])
+    gui, window = _workflow(tmp_path)
+    paths = {
+        "structure": [tmp_path / "older.pot", tmp_path / "newer.pot"],
+        "input": [tmp_path / "older.inp", tmp_path / "newer.inp"],
+        "output": [tmp_path / "older.out", tmp_path / "newer.out"],
+    }
+    for kind, entries in paths.items():
+        for entry in entries:
+            entry.write_text("test")
+            gui.recent_files.remember(kind, entry)
+    application.processEvents()
+    events = []
+    monkeypatch.setattr(
+        window, "_continue_recent",
+        lambda kind, path: events.append((kind, path)),
+    )
+    monkeypatch.setattr(
+        window, "execute_workflow_command",
+        lambda command: events.append(command),
+    )
+    for kind, button in (
+        ("structure", window._recent_structures_button),
+        ("input", window._repeat_button),
+        ("output", window._recent_results_button),
+    ):
+        assert button.isEnabled()
+        assert button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        button.click()
+        button.menu().actions()[1].trigger()
+
+    assert events[:2] == [
+        ("structure", str(paths["structure"][1])),
+        ("structure", str(paths["structure"][0])),
+    ]
+    from ase2sprkkr_gui.gui.workflow.model import (
+        LoadAllRecentResults, RepeatRecentInput,
+    )
+    assert events[2:4] == [
+        RepeatRecentInput(str(paths["input"][1])),
+        RepeatRecentInput(str(paths["input"][0])),
+    ]
+    assert events[4:6] == [
+        ("output", str(paths["output"][1])),
+        ("output", str(paths["output"][0])),
+    ]
+    output_menu = window._recent_results_button.menu()
+    assert output_menu.actions()[-2].isSeparator()
+    assert output_menu.actions()[-1].text() == "Load all results"
+    output_menu.actions()[-1].trigger()
+    assert events[-1] == LoadAllRecentResults()
+
+    gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
+    application.processEvents()
+    assert window._start_over_button.isEnabled()
+    assert window._custom_button.text() == "Custom Calculation"
+    window.close()
+
+
+def test_external_structure_viewer_lives_under_preview_fit(tmp_path, monkeypatch):
+    application = QApplication.instance() or QApplication([])
+    gui, window = _workflow(tmp_path)
+    assert not hasattr(window._structure_actions, "external_viewer_button")
+    gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
+    application.processEvents()
+    preview = window._structure_overview.preview
+    controls = preview.layout().itemAt(1).layout()
+    fit_index = next(
+        i for i in range(controls.count())
+        if controls.itemAt(i).widget() is preview.fit_button
+    )
+    assert controls.itemAt(fit_index + 1).widget() is (
+        window._structure_overview.external_viewer_button
+    )
+    calls = []
+    monkeypatch.setattr(
+        workflow_module.visualization_flow, "visualize_structure",
+        lambda *args: calls.append(args),
+    )
+    window._structure_overview.external_viewer_button.click()
+    assert calls == [(gui.controller, gui.settings, window)]
+    window.close()
 
 
 def test_main_window_close_also_closes_project_browser(tmp_path):
