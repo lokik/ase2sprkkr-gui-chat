@@ -526,3 +526,40 @@ def test_regex_text_is_preserved_when_checkbox_disabled(monkeypatch):
     assert tuple(configuration.running.print_output()) == ("info", "ERROR")
     assert len(saved) == 2
     page.close()
+
+def test_empty_sphere_settings_save_partial_overrides_and_restore(monkeypatch):
+    _application = _app()
+    configuration = _configuration()
+    saved = _capture_saves(monkeypatch, configuration)
+    page = Ase2sprkkrSettingsPage(configuration=configuration)
+
+    assert page.changes() == []
+    page.empty_min_radius.setValue(0.8)
+    page.empty_mesh[1].setValue(32)
+    assert configuration.running.empty_spheres_params.min_radius() is None
+    page.save()
+
+    section = configuration.running.empty_spheres_params
+    assert section.min_radius() == 0.8
+    assert section.max_radius() is None
+    assert tuple(section.mesh()) == (24, 32, 24)
+    assert len(saved) == 1
+
+    page.restore_empty_params.click()
+    page.save()
+    assert section.min_radius() is None
+    assert section.mesh() is None
+    assert len(saved) == 2
+    page.close()
+
+
+def test_invalid_empty_sphere_radius_range_rejected(monkeypatch):
+    _application = _app()
+    configuration = _configuration()
+    saved = _capture_saves(monkeypatch, configuration)
+    page = Ase2sprkkrSettingsPage(configuration=configuration)
+    page.empty_min_radius.setValue(3.0)
+    with pytest.raises(ValueError, match="cannot exceed"):
+        page.save()
+    assert saved == []
+    page.close()
