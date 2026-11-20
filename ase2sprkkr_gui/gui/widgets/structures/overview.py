@@ -5,13 +5,16 @@ from collections.abc import Mapping
 
 import numpy as np
 from ase.data.colors import jmol_colors
-from PyQt6.QtCore import QSignalBlocker, Qt
+from PyQt6.QtCore import QSignalBlocker, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QBoxLayout,
     QButtonGroup,
     QFrame,
     QLabel,
     QRadioButton,
+    QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -121,6 +124,8 @@ class StructureOverviewWidget(QFrame):
     modifies an Atoms object, or reclassifies its host as a cluster.
     """
 
+    visualizeRequested = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("guidedStructureOverview")
@@ -149,11 +154,27 @@ class StructureOverviewWidget(QFrame):
             source_layout.addWidget(button)
         self.cluster_radio.setChecked(True)
 
+        # This belongs only to the main overview, not to reusable previews
+        # or their fullscreen copies.
+        self.external_viewer_button = QToolButton(self)
+        self.external_viewer_button.setObjectName("guidedExternalViewerButton")
+        self.external_viewer_button.setIcon(QIcon.fromTheme(
+            "applications-graphics",
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
+        ))
+        self.external_viewer_button.setIconSize(QSize(20, 20))
+        self.external_viewer_button.setToolTip("Open in external structure viewer")
+        self.external_viewer_button.setAccessibleName("Visualize Structure")
+        self.external_viewer_button.clicked.connect(
+            lambda _checked=False: self.visualizeRequested.emit()
+        )
+
         self.preview = EmbeddingPreview(
             self,
             compact=True,
             controls_on_right=True,
             controls_header=self._view_selector,
+            controls_footer=self.external_viewer_button,
         )
         self.preview.setObjectName("guidedStructurePreview")
         for button in (self.host_radio, self.cluster_radio):
