@@ -20,6 +20,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
     BuildEmbedding,
+    ExplainEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -129,6 +130,7 @@ def test_initial_plan_uses_typed_commands_and_planned_recent_menu():
         CreateStructure(CreateStructureKind.SHELL),
         CreateStructure(CreateStructureKind.SURFACE),
         CreateStructure(CreateStructureKind.TWO_D),
+        ExplainEmbedding(),
     )
     assert _commands(plan, WorkflowSection.LOAD) == (
         Load(LoadKind.ONLINE_STRUCTURE),
@@ -207,25 +209,24 @@ def test_current_structure_plan_has_canonical_group_order_without_output_loader(
     )
 
 
-def test_calculation_order_follows_guided_task_metadata():
+def test_calculation_order_follows_default_preferred_tasks():
+    from ase2sprkkr_gui.gui.input_parameters.task_preferences import supported_task_names
+
     before = WorkflowPlanner().for_workspace(
         Workspace(
             atoms=FormulaAtoms(),
             spheres_action=EmptySpheresAction.RECALCULATE,
         )
     )
+    expected = tuple(RunTask(name.lower()) for name in supported_task_names())
     assert _commands(before, WorkflowSection.CALCULATE) == (
-        UpdateEmptySpheres(),
-        RunTask("scf"),
+        UpdateEmptySpheres(), *expected,
     )
 
     after = WorkflowPlanner().for_workspace(
         Workspace(atoms=FormulaAtoms(), converged=True)
     )
-    assert _commands(after, WorkflowSection.CALCULATE) == tuple(
-        RunTask(definition.backend_task)
-        for definition in workflow_tasks(WorkflowStage.POST_SCF)
-    )
+    assert _commands(after, WorkflowSection.CALCULATE) == expected
 
 
 def test_registry_presentation_is_used_without_local_task_catalogue():
@@ -298,11 +299,16 @@ def test_interrupted_scf_preserves_exact_stage(status, description):
 
 
 @pytest.mark.parametrize("status", ("ITR", "ITERATING", "ITR-BULK"))
-def test_periodic_iteration_does_not_unlock_post_scf_tasks(status):
+def test_periodic_iteration_keeps_preferred_tasks_and_continue_scf(status):
+    from ase2sprkkr_gui.gui.input_parameters.task_preferences import supported_task_names
+
     plan = WorkflowPlanner().for_workspace(
         Workspace(atoms=FormulaAtoms(), status=status, kind="3d")
     )
-    assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
+    assert _commands(plan, WorkflowSection.CALCULATE) == tuple(
+        RunTask(name.lower()) for name in supported_task_names()
+    )
+    assert _scf_action(plan).title == "Continue SCF"
 
 
 def test_unknown_scf_status_remains_visible_for_forward_compatibility():
@@ -403,8 +409,8 @@ def test_embedded_structure_plan_offers_cluster_scf_and_save_without_host_potent
     plan = WorkflowPlanner().for_workspace(
         EmbeddingWorkspace(atoms=atoms, kind="0d", build_2d=False)
     )
-    assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
-    assert "host POTFIL" in plan.group(WorkflowSection.CALCULATE).actions[0].description
+    assert RunTask("scf") in _commands(plan, WorkflowSection.CALCULATE)
+    assert "host POTFIL" in _scf_action(plan).description
     assert _commands(plan, WorkflowSection.CREATE) == (
         AttachHostPotential(), LoadHostPotential(), CreateHostPotential(), BuildEmbedding(),
     )
@@ -446,9 +452,14 @@ def test_native_host_does_not_offer_redundant_attachment():
 
 def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
     from types import SimpleNamespace
+    from ase2sprkkr_gui.gui.input_parameters.task_preferences import displayed_tasks
     from ase2sprkkr_gui.gui.workflow import planner as planning
 
-    fake_registry = {
+    class Registry(dict):
+        def names(self):
+            return tuple(self)
+
+    fake_registry = Registry({
         name: SimpleNamespace(name=name, executable=executable, supports=supports)
         for name, executable, supports in (
             ("SCF", "kkrscf", {"3d", "2d", "embedded"}),
@@ -458,13 +469,11 @@ def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
             ("BSFEK", "kkrgen", {"3d", "2d"}),
             ("JXC", "kkrgen", {"3d", "2d"}),
         )
-    }
+    })
     monkeypatch.setattr(planning.InputParameters, "task_registry", fake_registry)
-    for stage, expected in ((WorkflowStage.SCF, ("scf",)),
-                            (WorkflowStage.POST_SCF, ("dos",))):
-        filtered = tuple(d.backend_task for d in workflow_tasks(stage)
-                         if planning._task_supported(d, "embedded"))
-        assert filtered == expected
+    assert displayed_tasks("embedded", ("XAS", "SCF", "DOS")) == (
+        "SCF", "DOS",
+    )
 
 
 def test_read_only_clupot_offers_explicit_attachment_and_replacement():

@@ -4,12 +4,11 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from ase2sprkkr import InputParameters
-from ase2sprkkr.sprkkr.executables import task_system_error
-
+from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
+    displayed_tasks, supported_task_names,
+)
 from ase2sprkkr_gui.gui.input_parameters.tasks import (
-    WorkflowStage,
-    WorkflowTaskRole,
-    workflow_tasks,
+    WorkflowTaskRole, guided_task_definition, is_guided_task,
 )
 from ase2sprkkr_gui.gui.presentation import (
     ActionCategory,
@@ -30,6 +29,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
     BuildEmbedding,
+    ExplainEmbedding,
     ConvergeHostScf,
     ContinueRecent,
     CreateStructure,
@@ -122,14 +122,6 @@ def _recent_menu(
     )
 
 
-def _task_supported(definition, system_kind):
-    try:
-        task = InputParameters.task_registry[definition.backend_task.upper()]
-    except KeyError:
-        return False
-    return task_system_error(task, system_kind) is None
-
-
 def _custom_group(has_structure: bool) -> AvailableActionGroup:
     return AvailableActionGroup(
         WorkflowSection.CUSTOM, "Custom",
@@ -144,6 +136,15 @@ def _custom_group(has_structure: bool) -> AvailableActionGroup:
 
 class WorkflowPlanner:
     """Build the complete ordered Guided workflow presentation plan."""
+
+    def __init__(self, settings=None) -> None:
+        self.settings = settings
+
+    def _preferred(self) -> tuple[str, ...]:
+        return (
+            supported_task_names() if self.settings is None
+            else self.settings.effective_preferred_tasks()
+        )
 
     def initial_plan(
         self,
@@ -226,6 +227,14 @@ class WorkflowPlanner:
                 ActionIcon.INTERFACE,
             ),
         )
+        if self.settings is None or self.settings.show_embedded_cluster_hint:
+            create_actions += (
+                _action(
+                    ExplainEmbedding(), "Create Embedded Cluster",
+                    "First prepare a periodic bulk or 2D host structure",
+                    "structure", ActionIcon.EMBEDDING,
+                ),
+            )
         create = AvailableActionGroup(
             WorkflowSection.CREATE, "Create structure", create_actions
         )
@@ -336,22 +345,32 @@ class WorkflowPlanner:
                 "calculation", ActionIcon.RUN,
             ))
 
-        stage = WorkflowStage.POST_SCF if converged else WorkflowStage.SCF
-        supported_tasks = workflow_tasks(stage)
-        if is_cluster and progress is ScfProgress.ITERATING:
-            # Native CLUPOT may remain ITERATING after an embedded SCF has
-            # converged. Keep Continue SCF available, but also offer supported
-            # post-SCF calculations without changing its persisted SCFSTATUS.
-            supported_tasks += workflow_tasks(WorkflowStage.POST_SCF)
         kind = "embedded" if is_cluster else workspace.structure_kind()
-        if invalid_cluster or host_needs_initial_scf:
-            supported_tasks = ()
-        else:
-            supported_tasks = tuple(d for d in supported_tasks if _task_supported(d, kind))
-        for definition in supported_tasks:
-            title = definition.workflow.label
-            description = definition.workflow.description
-            if definition.workflow.role is WorkflowTaskRole.SCF:
+        names = (
+            () if invalid_cluster or host_needs_initial_scf
+            else displayed_tasks(kind, self._preferred())
+        )
+        for name in names:
+            if is_guided_task(name):
+                definition = guided_task_definition(name)
+                title = (
+                    definition.workflow.label
+                    if name.lower() == definition.backend_task
+                    else f"Calculate {name}"
+                )
+                description = definition.workflow.description
+                scf = definition.workflow.role is WorkflowTaskRole.SCF
+            else:
+                title = f"Calculate {name}"
+                try:
+                    definition = InputParameters.input_parameters_registry.definition_for_task(
+                        InputParameters.task_registry[name]
+                    )
+                    description = getattr(definition, "info", "") or "Configure a native SPR-KKR task"
+                except (AttributeError, KeyError, ValueError):
+                    description = "Configure a native SPR-KKR task"
+                scf = name == "SCF"
+            if scf:
                 if progress.can_continue:
                     title = "Continue SCF"
                     description = (
@@ -366,11 +385,8 @@ class WorkflowPlanner:
                 description += " (warning: host SCF has not converged; results may be unreliable)"
             calculate.append(
                 _action(
-                    RunTask(definition.backend_task),
-                    title,
-                    description,
-                    "calculation",
-                    ActionIcon.RUN,
+                    RunTask(name.lower()), title, str(description),
+                    "calculation", ActionIcon.RUN,
                 )
             )
 

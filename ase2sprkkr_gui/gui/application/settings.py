@@ -6,6 +6,9 @@ from pathlib import Path
 
 from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
 from ase2sprkkr_gui.gui.application.config import config_home
+from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
+    effective_preferred, supported_task_names,
+)
 from ase2sprkkr_gui.gui.plots.atom_sizes import (
     MAX_ATOM_SIZE_PERCENT, MIN_ATOM_SIZE_PERCENT, set_atom_appearance,
 )
@@ -31,6 +34,36 @@ class ApplicationSettings:
         self.atom_size_percent = 100
         self.atom_relative_sizes = True
         self.atom_potential_radii = True
+        self.show_embedded_cluster_hint = True
+        # None means follow GUI-supported tasks automatically, without a
+        # persisted preference list. An empty tuple is an explicit selection.
+        self.preferred_tasks: tuple[str, ...] | None = None
+        self.preferred_supported_snapshot: tuple[str, ...] | None = None
+
+    def effective_preferred_tasks(self) -> tuple[str, ...]:
+        return effective_preferred(
+            self.preferred_tasks, self.preferred_supported_snapshot,
+        )
+
+    def newly_supported_tasks(self) -> tuple[str, ...]:
+        """New GUI editors since a customized task selection was saved."""
+        if self.preferred_tasks is None or self.preferred_supported_snapshot is None:
+            return ()
+        previous = set(self.preferred_supported_snapshot)
+        return tuple(
+            name for name in supported_task_names() if name not in previous
+        )
+
+    def acknowledge_supported_tasks(self, *, add: bool) -> None:
+        """Record a user's decision, retaining task order and explicit removals."""
+        if self.preferred_tasks is None or self.preferred_supported_snapshot is None:
+            return
+        new = self.newly_supported_tasks()
+        if add:
+            self.preferred_tasks = tuple(dict.fromkeys(
+                (*self.preferred_tasks, *new)
+            ))
+        self.preferred_supported_snapshot = supported_task_names()
 
     def load(self) -> None:
         """Load settings; corrupt or unreadable files keep defaults."""
@@ -39,6 +72,9 @@ class ApplicationSettings:
         self.atom_size_percent = 100
         self.atom_relative_sizes = True
         self.atom_potential_radii = True
+        self.show_embedded_cluster_hint = True
+        self.preferred_tasks = None
+        self.preferred_supported_snapshot = None
         self._apply_atom_appearance()
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -69,6 +105,24 @@ class ApplicationSettings:
         potential = data.get("atom_potential_radii")
         if isinstance(potential, bool):
             self.atom_potential_radii = potential
+        hint = data.get("show_embedded_cluster_hint")
+        if isinstance(hint, bool):
+            self.show_embedded_cluster_hint = hint
+
+        def task_names(key):
+            value = data.get(key)
+            if (not isinstance(value, list)
+                    or any(not isinstance(name, str) or not name.strip() for name in value)):
+                return None
+            return tuple(dict.fromkeys(name.strip().upper() for name in value))
+
+        selected = task_names("preferred_tasks")
+        baseline = task_names("preferred_supported_tasks")
+        # A customized list must have its supported-task baseline. The
+        # application never writes one without the other.
+        if selected is not None and baseline is not None:
+            self.preferred_tasks = selected
+            self.preferred_supported_snapshot = baseline
         self._apply_atom_appearance()
 
     def _apply_atom_appearance(self) -> None:
@@ -79,18 +133,24 @@ class ApplicationSettings:
 
     def save(self) -> bool:
         """Persist settings, returning false when the file is not writable."""
-        try:
-            atomic_write_json(
-                self.path,
-                {
-                    "viewer": self.viewer,
-                    "dataset_default_mode": self.dataset_default_mode,
-                    "share_python_shell_history": self.share_python_shell_history,
-                    "atom_size_percent": self.atom_size_percent,
-                    "atom_relative_sizes": self.atom_relative_sizes,
-                    "atom_potential_radii": self.atom_potential_radii,
-                },
+        data = {
+            "viewer": self.viewer,
+            "dataset_default_mode": self.dataset_default_mode,
+            "share_python_shell_history": self.share_python_shell_history,
+            "atom_size_percent": self.atom_size_percent,
+            "atom_relative_sizes": self.atom_relative_sizes,
+            "atom_potential_radii": self.atom_potential_radii,
+            "show_embedded_cluster_hint": self.show_embedded_cluster_hint,
+        }
+        if self.preferred_tasks is not None:
+            data["preferred_tasks"] = list(self.preferred_tasks)
+            data["preferred_supported_tasks"] = list(
+                self.preferred_supported_snapshot
+                if self.preferred_supported_snapshot is not None
+                else supported_task_names()
             )
+        try:
+            atomic_write_json(self.path, data)
         except OSError:
             return False
         self._apply_atom_appearance()

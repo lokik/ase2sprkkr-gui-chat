@@ -51,6 +51,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
     BuildEmbedding,
+    ExplainEmbedding,
     ConvergeHostScf,
     ContinueRecent,
     CreateStructure,
@@ -96,7 +97,7 @@ class WorkflowWindow(QMainWindow):
         self.settings = settings
         self._track_launch_monitor = track_launch_monitor
         self.project_repository = project_repository
-        self._workflow_planner = WorkflowPlanner()
+        self._workflow_planner = WorkflowPlanner(settings=settings)
         self.controller.structureChanged.connect(self._on_structure_changed)
         self.controller.resultChanged.connect(lambda _result: self._refresh())
         self.recent_history.changed.connect(self._refresh)
@@ -388,6 +389,9 @@ class WorkflowWindow(QMainWindow):
                 CreateStructureKind.TWO_D: self._create_transition,
             }[command.kind]()
             return
+        if isinstance(command, ExplainEmbedding):
+            self._explain_embedded_cluster()
+            return
         if isinstance(command, BuildEmbedding):
             structure_flows.build_embedding_structure(self.controller, self)
             return
@@ -441,6 +445,28 @@ class WorkflowWindow(QMainWindow):
             self._start_over()
             return
         raise TypeError(f"Unsupported workflow command {type(command).__name__}.")
+
+    def _explain_embedded_cluster(self) -> None:
+        answer = QMessageBox.question(
+            self, "Creating an Embedded Cluster",
+            "An embedded cluster needs a periodic host. First create or load "
+            "a bulk (3D) or layered (2D) structure; then choose "
+            "'Build Embedded Cluster' from the structure actions.\n\n"
+            "Show this introductory action again?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.No:
+            self.settings.show_embedded_cluster_hint = False
+            if self.settings.save():
+                self._refresh()
+            else:
+                self.settings.show_embedded_cluster_hint = True
+                QMessageBox.warning(
+                    self, "Cannot Save Settings",
+                    "Could not save the preference; the introductory action "
+                    "will remain visible.",
+                )
 
     def _on_structure_changed(self, _atoms: Any) -> None:
         self._refresh()
@@ -502,6 +528,21 @@ class WorkflowWindow(QMainWindow):
         )
 
     def _prepare_task(self, task: str) -> None:
+        from ase2sprkkr_gui.gui.input_parameters.tasks import is_guided_task
+        if not is_guided_task(task):
+            from ase2sprkkr import InputParameters
+            from ase2sprkkr_gui.gui.input_parameters.dataset import apply_default_dataset
+
+            parameters = InputParameters.for_task(task)
+            apply_default_dataset(
+                parameters, self.settings.dataset_default_mode, self.controller.atoms,
+            )
+            custom_flow.edit_custom_parameters(
+                self.controller, self.recent_history, self, parameters,
+                track_launch_monitor=self._track_launch_monitor,
+                project_repository=self.project_repository,
+            )
+            return
         calculation_flow.configure_and_run_task(
             self.controller,
             self.recent_history,
@@ -537,8 +578,12 @@ class WorkflowWindow(QMainWindow):
     def _save_structure(self) -> None:
         file_flows.save_structure(self.controller, self.recent_history, self)
 
-    def _open_settings(self) -> None:
-        if edit_settings(self.settings, self):
+    def _open_settings(self, *, preferred_tasks: bool = False) -> None:
+        accepted = (
+            edit_settings(self.settings, self, initial_tab="Preferred tasks")
+            if preferred_tasks else edit_settings(self.settings, self)
+        )
+        if accepted:
             self._refresh()
 
     def _custom_task(self) -> None:

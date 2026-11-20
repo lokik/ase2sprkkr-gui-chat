@@ -184,7 +184,9 @@ def choose_custom_task(
     track_launch_monitor=None,
     project_repository=None,
 ) -> bool:
-    picker = TaskChooserDialog(controller.atoms, parent)
+    picker = TaskChooserDialog(
+        controller.atoms, parent, settings=getattr(parent, "settings", None),
+    )
     if picker.exec() != QDialog.DialogCode.Accepted or not picker.selected_task:
         return False
     try:

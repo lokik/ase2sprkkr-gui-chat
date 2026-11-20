@@ -14,6 +14,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
     BuildEmbedding,
+    ExplainEmbedding,
     ContinueRecent,
     CreateStructure,
     CreateStructureKind,
@@ -38,6 +39,7 @@ def _workflow(tmp_path, *, workspace=None):
     gui = GuiApplication(
         workspace=workspace,
         recent_files_path=tmp_path / "recent.json",
+        settings_path=tmp_path / "settings.json",
     )
     return gui, gui.create_workflow_window()
 
@@ -751,4 +753,24 @@ def test_action_cards_are_equal_height_across_both_guided_columns(tmp_path):
     window._layout_splitter.moveSplitter(window._layout_splitter.sizes()[0] - 60, 1)
     application.processEvents()
     assert len(card_heights()) == 1
+    window.close()
+
+
+def test_introductory_cluster_action_appears_without_structure_and_can_be_hidden(
+    tmp_path, monkeypatch,
+):
+    gui, window = _workflow(tmp_path)
+    assert ExplainEmbedding() in _commands(window)
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *_args: QMessageBox.StandardButton.No,
+    )
+
+    window.execute_workflow_command(ExplainEmbedding())
+
+    assert gui.settings.show_embedded_cluster_hint is False
+    assert ExplainEmbedding() not in _commands(window)
+    saved = gui.settings.__class__(gui.settings.path)
+    saved.load()
+    assert saved.show_embedded_cluster_hint is False
     window.close()

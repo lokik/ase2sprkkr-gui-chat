@@ -99,6 +99,11 @@ class Build2D:
 
 
 @dataclass(frozen=True)
+class ExplainEmbedding:
+    """Explain which periodic host is needed before creating a cluster."""
+
+
+@dataclass(frozen=True)
 class BuildEmbedding:
     """Build a new embedded cluster, or edit an existing one."""
 
@@ -169,6 +174,7 @@ WorkflowCommand = Union[
     CreateStructure,
     Build2D,
     BuildEmbedding,
+    ExplainEmbedding,
     Load,
     ContinueRecent,
     VisualizeStructure,

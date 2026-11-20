@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QEvent, QObject, Qt
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
+from PyQt6.QtWidgets import QApplication, QCheckBox, QFileDialog, QMessageBox, QWidget
 from kkrunner.projects import ProjectRepository
 from ase2sprkkr_gui.gui.application.persistent_jobs import project_run_manager
 
@@ -341,7 +341,60 @@ class GuiApplication(QObject):
 
     def show_workflow_window(self) -> None:
         """Show and activate the workflow view."""
-        self._show_window(self.create_workflow_window())
+        window = self.create_workflow_window()
+        self._show_window(window)
+        self._offer_new_supported_tasks(window)
+
+    def _offer_new_supported_tasks(self, window: WorkflowWindow) -> None:
+        """Prompt once per newly supported task generation, only for saved overrides."""
+        new = self.settings.newly_supported_tasks()
+        if not new:
+            return
+
+        names = ", ".join(new)
+        singular = len(new) == 1
+        message = QMessageBox(window)
+        message.setWindowTitle(
+            "New Supported Task" if singular else "New Supported Tasks"
+        )
+        message.setIcon(QMessageBox.Icon.Information)
+        message.setText(
+            f"A new task {names} is supported. Add it to your preferred tasks?"
+            if singular else
+            f"New tasks {names} are supported. Add them to your preferred tasks?"
+        )
+        message.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        message.setDefaultButton(QMessageBox.StandardButton.Yes)
+        open_preferred = QCheckBox("Open Preferred tasks", message)
+        open_preferred.setChecked(False)
+        message.setCheckBox(open_preferred)
+        answer = message.exec()
+        if answer not in (
+            QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No,
+        ):
+            return
+
+        previous = (
+            self.settings.preferred_tasks,
+            self.settings.preferred_supported_snapshot,
+        )
+        self.settings.acknowledge_supported_tasks(
+            add=answer == QMessageBox.StandardButton.Yes,
+        )
+        if not self.settings.save():
+            (self.settings.preferred_tasks,
+             self.settings.preferred_supported_snapshot) = previous
+            QMessageBox.warning(
+                window, "Cannot Save Settings",
+                "Could not save your preferred-task choice. You will be "
+                "asked again the next time settings are loaded.",
+            )
+            return
+        window._refresh()
+        if open_preferred.isChecked():
+            window._open_settings(preferred_tasks=True)
 
     def _show_loaded_result(self, _job_id: str) -> None:
         """Bring the selected result into the primary workspace view."""

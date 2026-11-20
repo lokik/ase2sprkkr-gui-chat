@@ -172,7 +172,7 @@ def test_task_chooser_filters_sorts_and_keeps_unsupported_selectable(monkeypatch
     chooser = TaskChooserDialog(object())
     assert [chooser.table.horizontalHeaderItem(i).text()
             for i in range(chooser.table.columnCount())] == [
-        "Name", "Applicable to structure", "Experimental", "Info"
+        "Name", "Possible", "Preferred", "Supported", "Experimental", "Info"
     ]
     assert _names(chooser.table) == ["A", "Z", "B", "C"]
 
@@ -208,7 +208,7 @@ def test_task_chooser_without_structure_has_no_applicability_column(monkeypatch)
     chooser = TaskChooserDialog(None)
     assert [chooser.table.horizontalHeaderItem(i).text()
             for i in range(chooser.table.columnCount())] == [
-        "Name", "Experimental", "Info"
+        "Name", "Preferred", "Supported", "Experimental", "Info"
     ]
     assert chooser.applicability_filter is None
     assert _names(chooser.table) == ["A", "C", "B", "Z"]
@@ -229,7 +229,7 @@ def test_custom_input_is_available_without_structure_and_does_not_publish_ipd(
     controller = WorkspaceController(WorkspaceState())
     history = RecentFiles(tmp_path / "recent.json")
     edited = []
-    monkeypatch.setattr(custom_flow, "TaskChooserDialog", lambda *_args: SimpleNamespace(
+    monkeypatch.setattr(custom_flow, "TaskChooserDialog", lambda *_args, **_kwargs: SimpleNamespace(
         exec=lambda: QDialog.DialogCode.Accepted, selected_task="SCF",
     ))
     monkeypatch.setattr(

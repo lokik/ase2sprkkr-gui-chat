@@ -254,6 +254,22 @@ class GeneralSettingsPage(QFrame):
         )
         shell_form.addRow(self.share_python_shell_history)
         layout.addWidget(self.python_shell_group)
+
+        self.guided_group = QGroupBox("Guided workflow", self)
+        guided_form = QFormLayout(self.guided_group)
+        self.show_embedded_cluster_hint = QCheckBox(
+            "Offer Create Embedded Cluster when no structure is loaded",
+            self.guided_group,
+        )
+        self.show_embedded_cluster_hint.setChecked(
+            settings.show_embedded_cluster_hint
+        )
+        self.show_embedded_cluster_hint.setToolTip(
+            "Show an introductory action explaining that a periodic host "
+            "is required before creating an embedded cluster."
+        )
+        guided_form.addRow(self.show_embedded_cluster_hint)
+        layout.addWidget(self.guided_group)
         layout.addStretch(1)
 
     def _size_slider_changed(self, position: int) -> None:

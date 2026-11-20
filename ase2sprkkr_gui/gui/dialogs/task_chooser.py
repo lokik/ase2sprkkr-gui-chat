@@ -7,6 +7,10 @@ from typing import Any
 from ase2sprkkr import InputParameters
 from ase2sprkkr.sprkkr.executables import task_system_error
 from ase2sprkkr.sprkkr.sprkkr_atoms import system_kind_for_atoms
+from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
+    supported_task_names, effective_preferred,
+)
+from ase2sprkkr_gui.gui.misc.icons import task_icon
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
@@ -23,6 +27,8 @@ class TaskChoice:
     info: str
     reason: str = ""
     details: str = ""
+    preferred: bool = False
+    supported: bool = False
 
 
 def applicability(task: Any, system_kind: str | None) -> tuple[str, str]:
@@ -33,9 +39,13 @@ def applicability(task: Any, system_kind: str | None) -> tuple[str, str]:
     return ("No", error) if error else ("Yes", "The task supports this structure.")
 
 
-def task_choices(atoms: Any = None) -> tuple[TaskChoice, ...]:
+def task_choices(
+    atoms: Any = None, *, preferred: tuple[str, ...] | None = None,
+) -> tuple[TaskChoice, ...]:
     """Discover registered native tasks, including experimental tasks."""
     kind = system_kind_for_atoms(atoms)
+    supported = set(supported_task_names())
+    preferred_names = set(effective_preferred(None) if preferred is None else preferred)
     rows = []
     for name in InputParameters.task_registry.names():
         task = InputParameters.task_registry[name]
@@ -62,6 +72,8 @@ def task_choices(atoms: Any = None) -> tuple[TaskChoice, ...]:
             task.name.upper(), task.experimental, status,
             " ".join(info.split()) or f"SPR-KKR {task.executable} calculation",
             reason, details.strip(),
+            task.name.upper() in preferred_names,
+            task.name.upper() in supported,
         ))
     return tuple(rows)
 
@@ -73,29 +85,32 @@ def order_choices(
     descending: bool = False,
     has_structure: bool = True,
 ) -> list[TaskChoice]:
-    """Stable multi-key sort; remaining default keys always break ties."""
-    default = (("applicable", "experimental", "name") if has_structure
-               else ("experimental", "name"))
+    """Stable multi-column sort: possible, preferred, supported, nonexperimental, name."""
+    default = (
+        ("applicable", "preferred", "supported", "experimental", "name")
+        if has_structure else
+        ("preferred", "supported", "experimental", "name")
+    )
     keys = ((primary,) + tuple(key for key in default if key != primary)
-            if primary in ("applicable", "experimental", "name", "info")
-            else default)
+            if primary in (*default, "info") else default)
 
     def value(row: TaskChoice, key: str):
         if key == "applicable":
             return {"Yes": 0, "No": 1, "Unknown": 2}.get(row.applicable, 3)
+        if key in ("preferred", "supported"):
+            return 0 if getattr(row, key) else 1
         if key == "experimental":
-            # Descending text order is No before Yes.
-            return "Yes" if row.experimental else "No"
+            # Reverse numeric order: secondary sorting and the first
+            # Experimental click both put non-experimental tasks first.
+            return 0 if row.experimental else 1
         return getattr(row, key).casefold()
 
     ordered = list(rows)
     for key in reversed(keys[1:]):
         ordered.sort(
             key=lambda row, k=key: value(row, k),
-            reverse=(key == "experimental"),
+            reverse=key == "experimental",
         )
-    # Default: Applicable Yes/No, Experimental No/Yes, then Name.
-    # Without a structure Experimental is the first, descending key.
     reverse_first = descending if primary in keys else keys[0] == "experimental"
     ordered.sort(key=lambda row: value(row, keys[0]), reverse=reverse_first)
     return ordered
@@ -104,12 +119,20 @@ def order_choices(
 class TaskChooserDialog(QDialog):
     """Filterable, sortable task picker; unsupported tasks remain selectable."""
 
-    def __init__(self, atoms: Any = None, parent: QWidget | None = None):
+    def __init__(
+        self, atoms: Any = None, parent: QWidget | None = None, *, settings=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Choose SPR-KKR task")
         self.resize(880, 560)
         self._has_structure = atoms is not None
-        self._records = task_choices(atoms)
+        if settings is None:
+            settings = getattr(parent, "settings", None)
+        preferred = settings.effective_preferred_tasks() if settings is not None else None
+        self._records = (
+            task_choices(atoms) if preferred is None
+            else task_choices(atoms, preferred=preferred)
+        )
         self._primary: str | None = None
         self._descending = False
         self.selected_task: str | None = None
@@ -136,12 +159,13 @@ class TaskChooserDialog(QDialog):
         self._fields = ["name"]
         if self._has_structure:
             self._fields.append("applicable")
-        self._fields.extend(("experimental", "info"))
+        self._fields.extend(("preferred", "supported", "experimental", "info"))
         self.table = QTableWidget(0, len(self._fields), self)
         self.table.setObjectName("customTaskTable")
         self.table.setHorizontalHeaderLabels([
             {"name": "Name", "experimental": "Experimental",
-             "applicable": "Applicable to structure", "info": "Info"}[key]
+             "applicable": "Possible", "preferred": "Preferred",
+             "supported": "Supported", "info": "Info"}[key]
             for key in self._fields
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -207,6 +231,8 @@ class TaskChooserDialog(QDialog):
             values = {
                 "name": row.name, "experimental": "Yes" if row.experimental else "No",
                 "applicable": row.applicable, "info": row.info,
+                "preferred": "Yes" if row.preferred else "No",
+                "supported": "Yes" if row.supported else "No",
             }
             for column, key in enumerate(self._fields):
                 item = QTableWidgetItem(values[key])
@@ -216,6 +242,10 @@ class TaskChooserDialog(QDialog):
                     else (row.details or row.info) if key == "info"
                     else row.info
                 )
+                if key == "name":
+                    icon = task_icon(row.name)
+                    if not icon.isNull():
+                        item.setIcon(icon)
                 self.table.setItem(index, column, item)
         target = next((i for i, row in enumerate(rows) if row.name == previously), 0)
         if rows:

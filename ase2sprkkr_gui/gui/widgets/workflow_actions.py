@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.misc.resources import icon_path
+from ase2sprkkr_gui.gui.misc.icons import task_icon
 from ase2sprkkr_gui.gui.style import SPACE_LG, SPACE_SM, heading_font
 from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
 from ase2sprkkr_gui.gui.workflow.model import (
@@ -281,11 +282,15 @@ class WorkflowActionsWidget(QWidget):
         if action.tooltip is not None:
             button.setToolTip(action.tooltip)
 
+        custom_icon = (
+            task_icon(action.command.backend_task)
+            if isinstance(action.command, RunTask) else QIcon()
+        )
         configure_action_card(
             button,
             action.title,
             action.description,
-            self._icon(action.icon),
+            custom_icon if not custom_icon.isNull() else self._icon(action.icon),
             category=action.category,
             icon_size=icon_size,
             minimum_height=minimum_height,
