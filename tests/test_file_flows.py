@@ -300,6 +300,8 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
     latest = tmp_path / "new.out"
     earlier = tmp_path / "old.out"
     broken = tmp_path / "broken.out"
+    earlier_potential = tmp_path / "old.pot"
+    latest_potential = tmp_path / "new.pot_new"
     history = RecentFiles(tmp_path / "recent.json")
     history.remember("output", earlier)
     history.remember("output", broken)
@@ -312,7 +314,13 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
         resultSelectionRequested = SimpleNamespace(emit=selected.append)
 
         def adopt_external_result(self, result):
-            return SimpleNamespace(record=SimpleNamespace(id=result))
+            return SimpleNamespace(
+                record=SimpleNamespace(id=result),
+                potential_path=(
+                    earlier_potential if result == 1 else latest_potential
+                ),
+                potential_error=None,
+            )
 
     def load(path):
         parsed.append(path)
@@ -339,5 +347,132 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
     assert calls == ["Loading Recent Results"]
     assert selected == [2]
     assert history.paths("output") == original
+    assert history.paths("structure") == (
+        str(latest_potential.resolve()), str(earlier_potential.resolve()),
+    )
+    assert history.last_kind == "output"
     assert len(notices) == 1
     assert "skipped 1" in notices[0][1]
+
+
+
+def test_load_output_registers_reusable_potential_without_activating_it(
+    tmp_path, monkeypatch,
+):
+    from types import SimpleNamespace
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+
+    output = tmp_path / "SCF.out"
+    potential = tmp_path / "SCF.pot_new"
+    output.write_text("output")
+    potential.write_text("potential")
+    loaded_atoms = Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
+    loaded = LoadedResult(
+        result=SimpleNamespace(
+            task_name="scf", produces_potential=True, output_values={},
+        ),
+        output_path=output,
+        potential_path=potential,
+        atoms=loaded_atoms,
+        potential_error=None,
+        directory=str(tmp_path),
+        input_parameters=None,
+    )
+    monkeypatch.setattr(file_flows, "_read_output", lambda *_args: loaded)
+    monkeypatch.setattr(file_flows, "_try_adopt_companion_scf", lambda *_args: None)
+
+    original_atoms = Atoms("Cu", cell=(3, 3, 3), pbc=True)
+    controller = WorkspaceController(WorkspaceState(atoms=original_atoms))
+    history = RecentFiles(tmp_path / "recent.json")
+    changed = []
+    history.changed.connect(lambda: changed.append(True))
+
+    assert file_flows.load_output(controller, history, output, None)
+    assert history.paths("output") == (str(output.resolve()),)
+    assert history.paths("structure") == (str(potential.resolve()),)
+    assert history.last_kind == "output"
+    assert len(changed) == 1
+    assert controller.atoms is original_atoms
+    assert controller.potential_path is None
+
+
+def test_load_output_does_not_remember_unreadable_potential(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+
+    output = tmp_path / "SCF.out"
+    potential = tmp_path / "broken.pot_new"
+    output.write_text("output")
+    loaded = LoadedResult(
+        result=SimpleNamespace(
+            task_name="scf", produces_potential=True, output_values={},
+        ),
+        output_path=output,
+        potential_path=potential,
+        atoms=None,
+        potential_error=ValueError("invalid potential"),
+        directory=str(tmp_path),
+        input_parameters=None,
+    )
+    monkeypatch.setattr(file_flows, "_read_output", lambda *_args: loaded)
+    monkeypatch.setattr(file_flows, "_try_adopt_companion_scf", lambda *_args: None)
+    warnings = []
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+    controller = WorkspaceController()
+    history = RecentFiles(tmp_path / "recent.json")
+
+    assert file_flows.load_output(controller, history, output, None)
+    assert history.paths("output") == (str(output.resolve()),)
+    assert history.paths("structure") == ()
+    assert len(warnings) == 1
+
+
+def test_directory_import_adds_only_successfully_loaded_potentials(
+    tmp_path, monkeypatch,
+):
+    from types import SimpleNamespace
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+
+    output_a, output_b = tmp_path / "a.out", tmp_path / "b.out"
+    potential_a, potential_b = tmp_path / "a.pot_new", tmp_path / "b.clu"
+    for path in (output_a, output_b, potential_a):
+        path.touch()
+
+    def load(path):
+        good = path == output_a
+        return LoadedResult(
+            result=SimpleNamespace(
+                task_name="scf", produces_potential=True, output_values={},
+            ),
+            output_path=path,
+            potential_path=potential_a if good else potential_b,
+            atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True) if good else None,
+            potential_error=None if good else FileNotFoundError(potential_b),
+            directory=str(tmp_path),
+            input_parameters=None,
+        )
+
+    monkeypatch.setattr(file_flows, "load_result_file", load)
+    monkeypatch.setattr(
+        file_flows, "run_modal_task", lambda _parent, operation, **_kw: operation(),
+    )
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "information", lambda *_args: None,
+    )
+    controller = WorkspaceController()
+    history = RecentFiles(tmp_path / "recent.json")
+    changed = []
+    history.changed.connect(lambda: changed.append(True))
+
+    assert file_flows.load_output_directory(controller, history, tmp_path, None) == (
+        output_a, output_b,
+    )
+    assert history.paths("structure") == (str(potential_a.resolve()),)
+    assert history.paths("output") == (
+        str(output_b.resolve()), str(output_a.resolve()),
+    )
+    assert history.last_kind == "output"
+    assert len(changed) == 2
