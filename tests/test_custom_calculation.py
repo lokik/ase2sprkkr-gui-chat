@@ -13,7 +13,8 @@ from ase import Atoms
 import ase2sprkkr
 from ase2sprkkr import InputParameters
 import pytest
-from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox, QTabWidget
+from PyQt6.QtCore import QThread
+from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox, QTabWidget, QWidget
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.sprkkr_execution import SprkkrExecution
@@ -25,6 +26,7 @@ from ase2sprkkr_gui.gui.dialogs.task_chooser import (
     TaskChoice, TaskChooserDialog, applicability, order_choices,
 )
 from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
+from ase2sprkkr_gui.gui.misc.modal_task import _ModalTaskDialog
 from ase2sprkkr_gui.main import GuiApplication
 
 
@@ -325,6 +327,52 @@ def test_file_input_prepares_without_workspace_structure(tmp_path, monkeypatch, 
     assert controller.atoms is None
     assert controller.input_parameters is None
     assert all(path.read_bytes() == content for path, content in original.items())
+
+
+
+def test_file_input_keeps_working_dialog_until_editor_is_prepared(tmp_path, monkeypatch):
+    app = _app()
+    parent = QWidget()
+    controller = WorkspaceController(WorkspaceState())
+    recent = RecentFiles(tmp_path / "recent.json")
+    path = tmp_path / "Fe.inp"
+    path.write_text("test input", encoding="utf-8")
+    parsed = object()
+    prepared = QDialog(parent)
+    events = []
+
+    def read(input_path):
+        assert QThread.currentThread() is not app.thread()
+        assert input_path == path
+        events.append("read")
+        return parsed
+
+    def build(ctrl, owner, parameters, input_directory):
+        assert QThread.currentThread() is app.thread()
+        assert (ctrl, owner, parameters, input_directory) == (
+            controller, parent, parsed, tmp_path,
+        )
+        waiting = parent.findChild(_ModalTaskDialog)
+        assert waiting is not None and waiting.isVisible()
+        events.append("build")
+        return prepared
+
+    def edit(ctrl, files, owner, parameters, **options):
+        assert (ctrl, files, owner, parameters) == (
+            controller, recent, parent, parsed,
+        )
+        assert options["prepared_dialog"] is prepared
+        assert not parent.findChild(_ModalTaskDialog).isVisible()
+        events.append("edit")
+        return True
+
+    monkeypatch.setattr(custom_flow.InputParameters, "from_file", staticmethod(read))
+    monkeypatch.setattr(custom_flow, "_custom_input_dialog", build)
+    monkeypatch.setattr(custom_flow, "edit_custom_parameters", edit)
+
+    assert custom_flow.load_custom_input(controller, recent, parent, path)
+    assert events == ["read", "build", "edit"]
+    assert recent.paths("input") == (str(path),)
 
 
 def test_cli_input_uses_standalone_editor_and_not_workspace_document(tmp_path, monkeypatch):
