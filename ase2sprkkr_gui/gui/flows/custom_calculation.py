@@ -162,18 +162,22 @@ def load_custom_input(
 ) -> bool:
     """Read input into a local editor session, never a workspace document."""
     path = Path(path).expanduser().resolve()
+    def prepare_editor(parameters: InputParameters):
+        dialog = _custom_input_dialog(controller, parent, parameters, path.parent)
+        # Publishing recent history refreshes workflow action cards. Do this
+        # before closing Working, rather than blocking the GUI afterwards.
+        recent_files.remember("input", path)
+        return parameters, dialog
+
     try:
         parameters, dialog = run_modal_task(
             parent, lambda: InputParameters.from_file(path),
             title="Loading Input", label="Preparing input editor…",
-            on_success=lambda loaded: (
-                loaded, _custom_input_dialog(controller, parent, loaded, path.parent)
-            ),
+            on_success=prepare_editor,
         )
     except Exception as exc:  # noqa: BLE001 - parser errors vary by input schema
         QMessageBox.critical(parent, "Cannot Load Input", str(exc))
         return False
-    recent_files.remember("input", path)
     return edit_custom_parameters(
         controller, recent_files, parent, parameters,
         input_directory=path.parent,
