@@ -20,6 +20,7 @@ from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 from ase2sprkkr_gui.gui.input_parameters.dataset import apply_default_dataset
 from ase2sprkkr_gui.gui.input_parameters.tasks import is_guided_task
 from ase2sprkkr_gui.gui.input_parameters.task_preferences import native_task_name
+from ase2sprkkr_gui.gui.misc.modal_task import run_modal_task
 
 
 _INPUT_FILTER = "SPR-KKR input files (*.inp *.in *.txt);;All files (*)"
@@ -58,18 +59,13 @@ def calculation_unavailable_reason(
     return None
 
 
-def edit_custom_parameters(
+def _custom_input_dialog(
     controller: WorkspaceController,
-    recent_files: RecentFiles,
     parent: QWidget,
     parameters: InputParameters,
-    *,
-    input_directory: Path | None = None,
-    track_launch_monitor=None,
-    project_repository=None,
-) -> bool:
-    """Edit an isolated input file, then optionally submit a single run."""
-    expected_generation = controller.structure_generation
+    input_directory: Path | None,
+) -> QDialog:
+    """Construct the editor on the GUI thread before hiding the load dialog."""
     source_directory = None
     if controller.atoms is None:
         source_directory = Path(input_directory or controller.directory or Path.cwd()).resolve()
@@ -96,6 +92,28 @@ def edit_custom_parameters(
             file_source_directory=source_directory,
             directory=directory,
         )
+    return dialog
+
+
+def edit_custom_parameters(
+    controller: WorkspaceController,
+    recent_files: RecentFiles,
+    parent: QWidget,
+    parameters: InputParameters,
+    *,
+    input_directory: Path | None = None,
+    track_launch_monitor=None,
+    project_repository=None,
+    prepared_dialog: QDialog | None = None,
+) -> bool:
+    """Edit an isolated input file, then optionally submit a single run."""
+    expected_generation = controller.structure_generation
+    source_directory = None
+    if controller.atoms is None:
+        source_directory = Path(input_directory or controller.directory or Path.cwd()).resolve()
+    dialog = prepared_dialog if prepared_dialog is not None else _custom_input_dialog(
+        controller, parent, parameters, input_directory,
+    )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return True  # The file may have been saved even if running was cancelled.
 
@@ -145,7 +163,13 @@ def load_custom_input(
     """Read input into a local editor session, never a workspace document."""
     path = Path(path).expanduser().resolve()
     try:
-        parameters = InputParameters.from_file(path)
+        parameters, dialog = run_modal_task(
+            parent, lambda: InputParameters.from_file(path),
+            title="Loading Input", label="Preparing input editor…",
+            on_success=lambda loaded: (
+                loaded, _custom_input_dialog(controller, parent, loaded, path.parent)
+            ),
+        )
     except Exception as exc:  # noqa: BLE001 - parser errors vary by input schema
         QMessageBox.critical(parent, "Cannot Load Input", str(exc))
         return False
@@ -153,6 +177,7 @@ def load_custom_input(
     return edit_custom_parameters(
         controller, recent_files, parent, parameters,
         input_directory=path.parent,
+        prepared_dialog=dialog,
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
     )
