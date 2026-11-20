@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QGridLayout,
+    QHBoxLayout,
     QPushButton,
     QSpinBox,
     QFormLayout,
@@ -199,7 +200,7 @@ class Ase2sprkkrSettingsPage(QFrame):
         self.output_filter.textChanged.connect(self._regex_edited)
         self._update_output_controls()
 
-        layout.addWidget(running_group)
+        settings_columns = QHBoxLayout()
 
         spheres_group = QGroupBox("Empty-sphere search defaults (XBand)", self)
         spheres_form = QFormLayout(spheres_group)
@@ -253,7 +254,9 @@ class Ase2sprkkrSettingsPage(QFrame):
         self.empty_params_notice.setWordWrap(True)
         spheres_form.addRow("", self.empty_params_notice)
         self._initial_empty_values = self._empty_param_values()
-        layout.addWidget(spheres_group)
+        settings_columns.addWidget(running_group, 3)
+        settings_columns.addWidget(spheres_group, 2)
+        layout.addLayout(settings_columns)
 
         nomad_group = QGroupBox("NOMAD", self)
         nomad_form = QFormLayout(nomad_group)
