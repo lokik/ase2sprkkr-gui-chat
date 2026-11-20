@@ -198,3 +198,50 @@ def test_checked_recent_files_cleanup_is_atomic_and_snapshot_guarded(tmp_path):
         current, {"structure": (str(first),)}
     )
     assert notifications == [True]
+
+
+def test_result_and_potential_history_are_atomic_and_keep_output_primary(tmp_path):
+    output = tmp_path / "SCF.out"
+    potential = tmp_path / "SCF.pot_new"
+    output.touch()
+    potential.touch()
+    history = RecentFiles(tmp_path / "recent.json")
+    changes = []
+    history.changed.connect(lambda: changes.append(history.read_snapshot()))
+
+    history.remember_result(output, potential_path=potential)
+
+    assert history.paths("structure") == (str(potential.resolve()),)
+    assert history.paths("output") == (str(output.resolve()),)
+    assert history.last_kind == "output"
+    assert len(changes) == 1
+    assert changes[0] == history.read_snapshot()
+    history.remember_result(output, potential_path=potential)
+    assert len(changes) == 1
+
+    reloaded = RecentFiles(history.path)
+    reloaded.load()
+    assert reloaded.read_snapshot() == history.read_snapshot()
+
+
+def test_batch_related_potentials_preserve_recent_results_and_kind(tmp_path):
+    old = tmp_path / "old.out"
+    latest = tmp_path / "latest.out"
+    a = tmp_path / "a.pot"
+    b = tmp_path / "b.clu"
+    history = RecentFiles(tmp_path / "recent.json")
+    history.remember("output", old)
+    history.remember("output", latest)
+    before = history.paths("output")
+    changes = []
+    history.changed.connect(lambda: changes.append(history.read_snapshot()))
+
+    history.remember_many(
+        (("structure", a), ("structure", b)),
+        preserve_last_kind=True,
+    )
+
+    assert history.paths("output") == before
+    assert history.paths("structure") == (str(b.resolve()), str(a.resolve()))
+    assert history.last_kind == "output"
+    assert len(changes) == 1
