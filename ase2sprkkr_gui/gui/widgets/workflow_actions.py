@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 from ase2sprkkr_gui.gui.misc.icons import task_icon
-from ase2sprkkr_gui.gui.style import SPACE_LG, SPACE_SM, heading_font
+from ase2sprkkr_gui.gui.style import PANEL_RADIUS, SPACE_LG, SPACE_SM, heading_font
 from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
 from ase2sprkkr_gui.gui.workflow.model import (
     ActionIcon,
@@ -135,8 +135,9 @@ class _ContinueActionButton(QPushButton):
         )
         button.setIcon(icon)
         button.setIconSize(QSize(20, 20))
-        button.setText("▾")
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        # InstantPopup already renders Qt's native down-arrow indicator.
+        # Do not add a second triangle as button text.
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setMenu(menu)
         button.setToolTip(f"Recent {name.lower()}")
@@ -144,10 +145,16 @@ class _ContinueActionButton(QPushButton):
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         border = self.palette().color(QPalette.ColorRole.Mid).name()
+        corner = (
+            f"border-top-right-radius: {PANEL_RADIUS}px;"
+            if name == "Structures" else
+            f"border-bottom-right-radius: {PANEL_RADIUS}px;"
+        )
         button.setStyleSheet(
             f"QToolButton {{ background: transparent; border: none; "
-            f"border-left: 1px solid {border}; padding: 0; }}"
-            f"QToolButton:hover {{ background: {self.palette().color(QPalette.ColorRole.Midlight).name()}; }}"
+            f"border-left: 1px solid {border}; padding: 0; {corner} }}"
+            f"QToolButton:hover, QToolButton:pressed {{ "
+            f"background: {self.palette().color(QPalette.ColorRole.Midlight).name()}; }}"
         )
         self._recent_buttons.append(button)
         self._position_recent_buttons()

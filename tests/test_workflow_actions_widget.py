@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QToolButton
 
@@ -211,7 +212,11 @@ def test_renderer_continue_uses_two_half_height_flat_dropdowns():
     assert structures.width() >= 68 and results.width() >= 68
     assert structures.height() + results.height() == card.height()
     assert structures.geometry().bottom() + 1 == results.geometry().top()
-    assert "▾" in structures.text() and "▾" in results.text()
+    assert structures.text() == "" and results.text() == ""
+    assert structures.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+    assert results.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+    assert structures.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
+    assert results.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
     assert structures.accessibleName() == "Choose recent structures"
     assert results.accessibleName() == "Choose recent results"
 
