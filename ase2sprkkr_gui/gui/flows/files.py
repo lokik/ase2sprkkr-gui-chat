@@ -276,26 +276,28 @@ def load_input_parameters(
     directory_generation = controller.directory_generation
     path = Path(file_path).resolve()
     try:
-        parameters = run_modal_task(
+        # Replacing the input emits signals that can rebuild expensive GUI
+        # widgets. Finish that work before dismissing the existing wait dialog.
+        change = run_modal_task(
             parent,
             lambda: InputParameters.from_file(path),
             title="Loading Input",
-            label="Reading input parameters…",
+            label="Loading input parameters…",
+            on_success=lambda parameters: controller.replace_input_parameters(
+                parameters,
+                directory=str(path.parent),
+                expected_input_parameters_generation=input_generation,
+                expected_directory_generation=directory_generation,
+            ),
         )
     except Exception as exc:  # noqa: BLE001 - parser errors are presented
         QMessageBox.critical(
             parent,
             "Load Error",
-            f"Failed to load input parameters:\n{exc}",
+            f"Failed to load input parameters:\\n{exc}",
         )
         return False
 
-    change = controller.replace_input_parameters(
-        parameters,
-        directory=str(path.parent),
-        expected_input_parameters_generation=input_generation,
-        expected_directory_generation=directory_generation,
-    )
     if not document_change_applied(parent, change):
         return False
     controller.mark_input_parameters_saved(controller.input_parameters_generation)
