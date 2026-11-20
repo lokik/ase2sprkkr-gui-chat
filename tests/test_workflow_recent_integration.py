@@ -67,3 +67,36 @@ def test_recent_input_is_opened_with_standalone_editor(tmp_path, monkeypatch):
     ]
     assert gui.controller.input_parameters is None
     window.close()
+
+
+def test_background_cleanup_replaces_initial_recent_menus_once(tmp_path):
+    import time
+    from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
+
+    app = QApplication.instance() or QApplication([])
+    recent_path = tmp_path / "recent.json"
+    history = RecentFiles(recent_path)
+    missing = tmp_path / "deleted.cif"
+    existing = tmp_path / "present.cif"
+    existing.touch()
+    history.remember("structure", missing)
+    history.remember("structure", existing)
+
+    gui = GuiApplication(recent_files_path=recent_path)
+    window = gui.create_workflow_window()
+    load = window.workflow_plan.group(WorkflowSection.LOAD)
+    assert load is not None
+    assert any(isinstance(a.command, ContinueRecent) for a in load.actions)
+
+    deadline = time.monotonic() + 2
+    while gui.recent_files.paths("structure") != (str(existing),) and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+    assert gui.recent_files.paths("structure") == (str(existing),)
+    recent = next(
+        a for a in window.workflow_plan.group(WorkflowSection.LOAD).actions
+        if isinstance(a.command, ContinueRecent)
+    )
+    assert tuple(item.command.path for item in recent.menu[0].items) == (str(existing),)
+    window.close()

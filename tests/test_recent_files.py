@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 from ase2sprkkr_gui.gui.application.config import config_home
-from ase2sprkkr_gui.gui.application.recent_files import RecentFiles, default_recent_files_path
+from ase2sprkkr_gui.gui.application.recent_files import (
+    RecentFiles, default_recent_files_path, find_missing_recent_paths,
+)
 from ase2sprkkr_gui.gui.recent_presentation import recent_path_label
 
 
@@ -144,3 +146,55 @@ def test_recent_menu_labels_do_not_touch_filesystem(tmp_path, monkeypatch):
     assert len(items) == 1
     assert items[0].label == "missing/calculation.inp"
     assert items[0].tooltip == str(path)
+
+
+def test_background_recent_scan_only_prunes_definitely_missing(tmp_path, monkeypatch):
+    existing = tmp_path / "present.cif"
+    existing.touch()
+    missing = tmp_path / "missing.inp"
+    inaccessible = tmp_path / "inaccessible.out"
+    history = RecentFiles(tmp_path / "recent.json")
+    history.remember("structure", existing)
+    history.remember("input", missing)
+    history.remember("output", inaccessible)
+    original_stat = Path.stat
+
+    def stat_with_network_error(path, *args, **kwargs):
+        if str(path) == str(inaccessible):
+            raise PermissionError("mount inaccessible")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", stat_with_network_error)
+    snapshot = history.read_snapshot()
+    assert find_missing_recent_paths(snapshot) == {
+        "input": (str(missing),),
+    }
+
+
+def test_checked_recent_files_cleanup_is_atomic_and_snapshot_guarded(tmp_path):
+    first = tmp_path / "missing-structure.cif"
+    next_file = tmp_path / "later.cif"
+    first_history = RecentFiles(tmp_path / "recent.json")
+    first_history.remember("structure", first)
+    stale_snapshot = first_history.read_snapshot()
+    first_history.remember("structure", next_file)
+    notifications = []
+    first_history.changed.connect(lambda: notifications.append(True))
+
+    # A slow scan must not remove items from a newer history.
+    assert not first_history.remove_known_missing(
+        stale_snapshot, {"structure": (str(first),)}
+    )
+    assert first_history.paths("structure") == (str(next_file), str(first))
+    assert notifications == []
+
+    current = first_history.read_snapshot()
+    assert first_history.remove_known_missing(
+        current, {"structure": (str(first),)}
+    )
+    assert first_history.paths("structure") == (str(next_file),)
+    assert notifications == [True]
+    assert not first_history.remove_known_missing(
+        current, {"structure": (str(first),)}
+    )
+    assert notifications == [True]

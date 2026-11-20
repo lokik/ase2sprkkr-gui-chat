@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from threading import Thread
 from typing import Any
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette
 from PyQt6.QtWidgets import (
     QFrame,
@@ -21,7 +22,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
+from ase2sprkkr_gui.gui.application.recent_files import (
+    RECENT_KINDS,
+    RecentFiles,
+    RecentFilesSnapshot,
+    find_missing_recent_paths,
+)
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
 from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometry
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
@@ -77,6 +83,16 @@ from ase2sprkkr_gui.gui.workflow.model import (
 from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
 
 
+class _RecentValidationSignals(QObject):
+    """Deliver a one-shot filesystem check to the GUI thread."""
+
+    finished = pyqtSignal(object, object)
+
+
+def _check_recent_files(snapshot: RecentFilesSnapshot, signals: _RecentValidationSignals) -> None:
+    signals.finished.emit(snapshot, find_missing_recent_paths(snapshot))
+
+
 class WorkflowWindow(QMainWindow):
     """Primary task-oriented Ase2sprkkr application window."""
 
@@ -102,12 +118,15 @@ class WorkflowWindow(QMainWindow):
         self._track_launch_monitor = track_launch_monitor
         self.project_repository = project_repository
         self._workflow_planner = WorkflowPlanner(settings=settings)
+        self._recent_validation_running = False
+        self._recent_validation_signals: _RecentValidationSignals | None = None
         self.controller.structureChanged.connect(self._on_structure_changed)
         # Results have their own presenter; they do not change workflow
         # availability unless the controller also emits structureChanged.
         self.recent_history.changed.connect(self._refresh_recent_history)
         self._build_ui()
         self._refresh()
+        self._validate_recent_files_async()
 
     @property
     def result_actions_widget(self) -> ResultActionsWidget:
@@ -337,6 +356,35 @@ class WorkflowWindow(QMainWindow):
         # structure or a hostless CLUPOT awaiting its host.
         if self.controller.atoms is None and self.controller.unresolved_cluster_path is None:
             self._refresh()
+        self._validate_recent_files_async()
+
+    def _validate_recent_files_async(self) -> None:
+        """Keep the initial menus responsive; inspect paths in one daemon worker."""
+        if self._recent_validation_running:
+            return
+        snapshot = self.recent_history.read_snapshot()
+        if not any(snapshot.paths(kind) for kind in RECENT_KINDS):
+            return
+        signals = _RecentValidationSignals()
+        signals.finished.connect(self._recent_files_checked)
+        self._recent_validation_signals = signals
+        self._recent_validation_running = True
+        Thread(
+            target=_check_recent_files, args=(snapshot, signals),
+            name="recent-files-check", daemon=True,
+        ).start()
+
+    def _recent_files_checked(self, snapshot: RecentFilesSnapshot, missing: dict) -> None:
+        self._recent_validation_running = False
+        self._recent_validation_signals = None
+        if self.recent_history.read_snapshot() != snapshot:
+            # History changed while the worker was checking a filesystem.
+            # Its result is obsolete; validate the latest snapshot instead.
+            self._validate_recent_files_async()
+            return
+        # The history emits one changed signal, replacing the whole menu
+        # presentation once, and only when missing files were actually found.
+        self.recent_history.remove_known_missing(snapshot, missing)
 
     def _refresh(self) -> None:
         plan = self._workflow_planner.for_workspace(
