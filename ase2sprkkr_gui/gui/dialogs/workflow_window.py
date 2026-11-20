@@ -329,10 +329,9 @@ class WorkflowWindow(QMainWindow):
         self._actions.set_uniform_card_height(height)
 
     def _refresh_recent_history(self) -> None:
-        # The recent-file menu is only present in the empty-workspace plan.
-        # With a structure loaded, history updates cannot change the actions;
-        # structureChanged already refreshed those actions during loading.
-        if self.controller.atoms is None:
+        # Recent files affect only the empty start screen, not a loaded
+        # structure or a hostless CLUPOT awaiting its host.
+        if self.controller.atoms is None and self.controller.unresolved_cluster_path is None:
             self._refresh()
 
     def _refresh(self) -> None:
