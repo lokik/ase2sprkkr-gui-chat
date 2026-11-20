@@ -57,7 +57,7 @@ class ActionIcon(Enum):
     SHELL = auto()
 
 
-ContinueRecentKind = Literal["structure", "input", "output"]
+ContinueRecentKind = Literal["structure", "output"]
 
 
 @dataclass(frozen=True)
@@ -126,8 +126,15 @@ class ContinueRecent:
     path: str
 
     def __post_init__(self) -> None:
-        if self.kind not in {"structure", "input", "output"}:
-            raise ValueError("Recent continuation kind must be 'structure', 'input' or 'output'.")
+        if self.kind not in {"structure", "output"}:
+            raise ValueError("Recent continuation kind must be 'structure' or 'output'.")
+
+
+@dataclass(frozen=True)
+class RepeatRecentInput:
+    """Reopen a recent SPR-KKR input file to repeat its calculation."""
+
+    path: str
 
 
 @dataclass(frozen=True)
@@ -183,6 +190,7 @@ WorkflowCommand = Union[
     ExplainEmbedding,
     Load,
     ContinueRecent,
+    RepeatRecentInput,
     VisualizeStructure,
     EditStructure,
     SaveStructure,

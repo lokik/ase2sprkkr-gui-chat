@@ -22,6 +22,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     BuildEmbedding,
     ExplainEmbedding,
     ContinueRecent,
+    RepeatRecentInput,
     CreateStructure,
     CreateStructureKind,
     EditStructure,
@@ -152,14 +153,12 @@ def test_initial_plan_uses_typed_commands_and_planned_recent_menu():
     assert continue_action.tooltip == "/tmp/scf.out"
     assert tuple(group.title for group in continue_action.menu) == (
         "Structures",
-        "Inputs",
-        "Outputs",
+        "Results",
     )
     assert tuple(item.command.path for item in continue_action.menu[0].items) == (
         "/tmp/Fe.cif",
     )
-    assert continue_action.menu[1].items == ()
-    assert tuple(item.command.path for item in continue_action.menu[2].items) == (
+    assert tuple(item.command.path for item in continue_action.menu[1].items) == (
         "/tmp/scf.out",
         "/tmp/older.out",
     )
@@ -181,7 +180,31 @@ def test_initial_recent_menu_keeps_empty_kind_visible():
     assert recent_action.menu[0].items
     assert recent_action.menu[1].items == ()
     assert recent_action.menu[1].empty_text == "(No recent files)"
-    assert recent_action.menu[2].empty_text == "(No recent files)"
+
+
+def test_recent_input_is_repeated_from_custom_not_continue():
+    plan = WorkflowPlanner().initial_plan(RecentSnapshot(
+        inputs=("/tmp/first.inp", "/tmp/second.inp"),
+        outputs=("/tmp/result.out",),
+        last_kind="input",
+    ))
+    load = plan.group(WorkflowSection.LOAD)
+    assert load is not None
+    assert isinstance(load.actions[-1].command, ContinueRecent)
+    assert load.actions[-1].command.kind == "output"
+    assert [group.title for group in load.actions[-1].menu] == [
+        "Structures", "Results",
+    ]
+
+    custom = plan.group(WorkflowSection.CUSTOM)
+    assert custom is not None
+    repeat = custom.actions[1]
+    assert repeat.title == "Repeat calculation"
+    assert repeat.command == RepeatRecentInput("/tmp/first.inp")
+    assert [item.command for item in repeat.menu[0].items] == [
+        RepeatRecentInput("/tmp/first.inp"),
+        RepeatRecentInput("/tmp/second.inp"),
+    ]
 
 
 def test_current_structure_plan_has_canonical_group_order_without_output_loader():
@@ -291,7 +314,9 @@ def test_continue_recent_is_semantic_and_validates_kind():
     command = ContinueRecent("structure", "/tmp/Fe.cif")
     assert command.kind == "structure"
     assert command.path == "/tmp/Fe.cif"
-    assert ContinueRecent("input", "/tmp/input.inp").kind == "input"
+    with pytest.raises(ValueError, match="continuation kind"):
+        ContinueRecent("input", "/tmp/input.inp")  # type: ignore[arg-type]
+    assert RepeatRecentInput("/tmp/input.inp").path == "/tmp/input.inp"
     with pytest.raises(ValueError, match="continuation kind"):
         ContinueRecent("invalid", "/tmp/bad")  # type: ignore[arg-type]
 

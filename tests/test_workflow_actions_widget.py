@@ -15,6 +15,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AvailableAction,
     AvailableActionGroup,
     ContinueRecent,
+    RepeatRecentInput,
     StartOver,
     WorkflowPlan,
     WorkflowSection,
@@ -164,8 +165,8 @@ def test_renderer_emits_typed_command_instead_of_interpreting_title():
     widget.close()
 
 
-def test_renderer_menu_is_fully_driven_by_plan():
-    _app()
+def test_renderer_continue_uses_two_half_height_flat_dropdowns():
+    app = _app()
     primary = ContinueRecent("output", "/tmp/SCF.out")
     structure = ContinueRecent("structure", "/tmp/Fe.cif")
     widget = WorkflowActionsWidget()
@@ -174,66 +175,88 @@ def test_renderer_menu_is_fully_driven_by_plan():
             "subtitle",
             (
                 AvailableActionGroup(
-                    WorkflowSection.LOAD,
-                    "Load",
+                    WorkflowSection.LOAD, "Load",
                     (
                         AvailableAction(
-                            primary,
-                            "Continue: SCF.out",
-                            "",
-                            "load",
-                            ActionIcon.CONTINUE,
-                            tooltip="/tmp/SCF.out",
+                            primary, "Continue: SCF.out", "", "load",
+                            ActionIcon.CONTINUE, tooltip="/tmp/SCF.out",
                             menu=(
                                 ActionMenuGroup(
                                     "Structures",
-                                    (
-                                        ActionMenuItem(
-                                            structure,
-                                            "Fe.cif",
-                                            "/tmp/Fe.cif",
-                                        ),
-                                    ),
+                                    (ActionMenuItem(structure, "Fe.cif", "/tmp/Fe.cif"),),
                                     empty_text="(No recent files)",
                                 ),
                                 ActionMenuGroup(
-                                    "Outputs",
-                                    (),
-                                    empty_text="Nothing here",
+                                    "Results", (), empty_text="Nothing here",
                                 ),
                             ),
                         ),
                     ),
                 ),
-            )
+            ),
         )
     )
     emitted = []
     widget.commandRequested.connect(emitted.append)
+    widget.resize(360, 220)
+    widget.show()
+    app.processEvents()
 
-    button = widget.findChild(QToolButton)
-    assert button is not None
-    assert button.toolTip() == "/tmp/SCF.out"
-    menu = button.menu()
-    assert menu is not None
-    assert [action.text() for action in menu.actions()] == ["Structures", "Outputs"]
+    card = widget.findChild(QPushButton)
+    assert card is not None
+    assert card.toolTip() == "/tmp/SCF.out"
+    structures = card.findChild(QToolButton, "continueStructuresMenuButton")
+    results = card.findChild(QToolButton, "continueResultsMenuButton")
+    assert structures is not None and results is not None
+    assert structures.width() >= 68 and results.width() >= 68
+    assert structures.height() + results.height() == card.height()
+    assert structures.geometry().bottom() + 1 == results.geometry().top()
+    assert "▾" in structures.text() and "▾" in results.text()
+    assert structures.accessibleName() == "Choose recent structures"
+    assert results.accessibleName() == "Choose recent results"
 
-    structures = menu.actions()[0].menu()
-    assert structures is not None
-    structure_action = structures.actions()[0]
-    assert structure_action.text() == "Fe.cif"
+    assert [action.text() for action in structures.menu().actions()] == ["Fe.cif"]
+    structure_action = structures.menu().actions()[0]
     assert structure_action.toolTip() == "/tmp/Fe.cif"
     structure_action.trigger()
     assert emitted == [structure]
 
-    outputs = menu.actions()[1].menu()
-    assert outputs is not None
-    assert len(outputs.actions()) == 1
-    assert outputs.actions()[0].text() == "Nothing here"
-    assert not outputs.actions()[0].isEnabled()
+    assert [action.text() for action in results.menu().actions()] == ["Nothing here"]
+    assert not results.menu().actions()[0].isEnabled()
 
-    button.click()
+    card.click()
     assert emitted == [structure, primary]
+    widget.close()
+
+
+def test_single_recent_input_group_opens_flat_menu():
+    _app()
+    command = RepeatRecentInput("/tmp/first.inp")
+    widget = WorkflowActionsWidget()
+    widget.set_plan(WorkflowPlan(
+        "", (
+            AvailableActionGroup(
+                WorkflowSection.CUSTOM, "Custom",
+                (AvailableAction(
+                    command, "Repeat calculation", "From first.inp",
+                    "calculation", ActionIcon.CONTINUE,
+                    menu=(ActionMenuGroup(
+                        "Inputs", (
+                            ActionMenuItem(command, "first.inp", "/tmp/first.inp"),
+                        ),
+                    ),),
+                ),),
+            ),
+        ),
+    ))
+    button = widget.findChild(QToolButton)
+    assert button is not None
+    assert [a.text() for a in button.menu().actions()] == ["first.inp"]
+    emitted = []
+    widget.commandRequested.connect(emitted.append)
+    button.menu().actions()[0].trigger()
+    button.click()
+    assert emitted == [command, command]
     widget.close()
 
 

@@ -54,6 +54,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     ExplainEmbedding,
     ConvergeHostScf,
     ContinueRecent,
+    RepeatRecentInput,
     CreateStructure,
     CreateStructureKind,
     Load,
@@ -423,6 +424,13 @@ class WorkflowWindow(QMainWindow):
         if isinstance(command, ContinueRecent):
             self._continue_recent(command.kind, command.path)
             return
+        if isinstance(command, RepeatRecentInput):
+            custom_flow.load_custom_input(
+                self.controller, self.recent_history, self, command.path,
+                track_launch_monitor=self._track_launch_monitor,
+                project_repository=self.project_repository,
+            )
+            return
         if isinstance(command, VisualizeStructure):
             self._visualize_structure()
             return
@@ -517,16 +525,10 @@ class WorkflowWindow(QMainWindow):
         )
 
     def _continue_recent(self, kind: RecentLaunchKind, file_path: str) -> None:
-        if kind == "input":
-            custom_flow.load_custom_input(
-                self.controller, self.recent_history, self, file_path,
-                track_launch_monitor=self._track_launch_monitor,
-                project_repository=self.project_repository,
-            )
-        else:
-            file_flows.continue_recent(
-                self.controller, self.recent_history, kind, file_path, self,
-            )
+        file_flows.continue_recent(
+            self.controller, self.recent_history, kind, file_path, self,
+        )
+
     def _build_2d(self, _checked: bool = False, *, surface_mode: bool = False) -> None:
         structure_flows.build_2d_structure(
             self.controller,

@@ -1,6 +1,7 @@
 """Single Qt-free owner of Guided workflow availability and ordering."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Protocol
 
 from ase2sprkkr import InputParameters
@@ -19,6 +20,7 @@ from ase2sprkkr_gui.gui.recent_presentation import (
     RecentHistorySnapshot,
     RecentLaunchPresentation,
     recent_launch_presentation,
+    recent_menu_items,
 )
 from ase2sprkkr_gui.gui.workflow.model import (
     ActionIcon,
@@ -32,6 +34,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     ExplainEmbedding,
     ConvergeHostScf,
     ContinueRecent,
+    RepeatRecentInput,
     CreateStructure,
     CreateStructureKind,
     Load,
@@ -123,17 +126,39 @@ def _recent_menu(
     )
 
 
-def _custom_group(has_structure: bool) -> AvailableActionGroup:
-    return AvailableActionGroup(
-        WorkflowSection.CUSTOM, "Custom",
-        (_action(
+def _custom_group(
+    has_structure: bool,
+    recent: RecentHistorySnapshot | None = None,
+) -> AvailableActionGroup:
+    actions = [
+        _action(
             CustomTask(),
             "Custom calculation" if has_structure else "Custom input file",
             "Choose any registered SPR-KKR task; edit or save input without requiring Guided support.",
             "calculation", ActionIcon.FILE,
-        ),),
-    )
-
+        )
+    ]
+    # A saved input starts another calculation, not a structure/result continuation.
+    if not has_structure and recent is not None:
+        inputs = recent_menu_items(recent.paths("input"))
+        if inputs:
+            actions.append(_action(
+                RepeatRecentInput(inputs[0].path),
+                "Repeat calculation",
+                f"From {Path(inputs[0].path).name}",
+                "calculation", ActionIcon.CONTINUE,
+                tooltip=inputs[0].path,
+                menu=(ActionMenuGroup(
+                    "Inputs",
+                    tuple(
+                        ActionMenuItem(
+                            RepeatRecentInput(item.path), item.label, item.tooltip
+                        )
+                        for item in inputs
+                    ),
+                ),),
+            ))
+    return AvailableActionGroup(WorkflowSection.CUSTOM, "Custom", tuple(actions))
 
 class WorkflowPlanner:
     """Build the complete ordered Guided workflow presentation plan."""
@@ -188,7 +213,7 @@ class WorkflowPlanner:
                             ),
                         ),
                     ),
-                    _custom_group(False),
+                    _custom_group(False, recent),
                 ),
             )
         create_actions = (
@@ -256,7 +281,7 @@ class WorkflowPlanner:
             ),
             _action(
                 Load(LoadKind.OUTPUT),
-                "Load SPR-KKR Output",
+                "Load SPR-KKR Result",
                 "Add a completed calculation to the result history",
                 "load",
                 ActionIcon.RESULT,
@@ -287,7 +312,7 @@ class WorkflowPlanner:
                     "Load structure",
                     tuple(load_actions),
                 ),
-                _custom_group(False),
+                _custom_group(False, recent),
             ),
         )
 

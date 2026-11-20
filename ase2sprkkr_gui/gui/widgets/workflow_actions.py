@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QPushButton,
     QStyle,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -23,8 +24,11 @@ from ase2sprkkr_gui.gui.style import SPACE_LG, SPACE_SM, heading_font
 from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
 from ase2sprkkr_gui.gui.workflow.model import (
     ActionIcon,
+    ActionMenuGroup,
     AvailableAction,
     ConvergeHostScf,
+    ContinueRecent,
+    RepeatRecentInput,
     CreateStructure,
     CreateStructureKind,
     EditStructure,
@@ -45,6 +49,7 @@ _CALCULATION_COMMANDS = (
     RunTask,
     ReconvergeScf,
     CustomTask,
+    RepeatRecentInput,
     ConvergeHostScf,
     UpdateEmptySpheres,
     UseForNewCalculation,
@@ -111,6 +116,55 @@ class _ShortcutActionButton(QPushButton):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_hint_visibility()
+
+
+class _ContinueActionButton(QPushButton):
+    """Continue card with two full-width, half-height recent-file selectors."""
+
+    MENU_WIDTH = 76
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._recent_buttons: list[QToolButton] = []
+
+    def add_recent_menu(self, name: str, icon: QIcon, menu: QMenu) -> None:
+        button = QToolButton(self)
+        button.setObjectName(
+            "continueStructuresMenuButton" if name == "Structures"
+            else "continueResultsMenuButton"
+        )
+        button.setIcon(icon)
+        button.setIconSize(QSize(20, 20))
+        button.setText("▾")
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        button.setMenu(menu)
+        button.setToolTip(f"Recent {name.lower()}")
+        button.setAccessibleName(f"Choose recent {name.lower()}")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        border = self.palette().color(QPalette.ColorRole.Mid).name()
+        button.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; "
+            f"border-left: 1px solid {border}; padding: 0; }}"
+            f"QToolButton:hover {{ background: {self.palette().color(QPalette.ColorRole.Midlight).name()}; }}"
+        )
+        self._recent_buttons.append(button)
+        self._position_recent_buttons()
+
+    def _position_recent_buttons(self) -> None:
+        count = len(self._recent_buttons)
+        for index, button in enumerate(self._recent_buttons):
+            top = self.height() * index // count
+            bottom = self.height() * (index + 1) // count
+            button.setGeometry(
+                self.width() - self.MENU_WIDTH, top,
+                self.MENU_WIDTH, bottom - top,
+            )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_recent_buttons()
 
 
 class WorkflowActionsWidget(QWidget):
@@ -268,7 +322,12 @@ class WorkflowActionsWidget(QWidget):
         parent: QWidget,
     ) -> QPushButton | QToolButton:
         shortcut = _shortcut_for_command(action.command)
-        if action.menu:
+        if isinstance(action.command, ContinueRecent) and len(action.menu) == 2:
+            button = _ContinueActionButton(parent)
+            icon_size = None
+            minimum_height = 68
+            menu_button = False
+        elif action.menu:
             button = QToolButton(parent)
             button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
             button.setMenu(self._action_menu(action, button))
@@ -299,6 +358,21 @@ class WorkflowActionsWidget(QWidget):
             menu_button=menu_button,
             subtle=action.category == "neutral",
         )
+        if isinstance(button, _ContinueActionButton):
+            layout = button.layout()
+            margins = layout.contentsMargins()
+            layout.setContentsMargins(
+                margins.left(), margins.top(),
+                button.MENU_WIDTH + SPACE_SM, margins.bottom(),
+            )
+            for group in action.menu:
+                icon = self._icon(
+                    ActionIcon.BULK_CRYSTAL if group.title == "Structures"
+                    else ActionIcon.RESULT
+                )
+                button.add_recent_menu(
+                    group.title, icon, self._group_menu(group, button),
+                )
         if shortcut:
             button.setShortcut(QKeySequence(shortcut))
             button.setToolTip(
@@ -315,26 +389,38 @@ class WorkflowActionsWidget(QWidget):
 
     def _action_menu(self, action: AvailableAction, parent: QWidget) -> QMenu:
         menu = QMenu(parent)
-        for group in action.menu:
-            submenu = QMenu(group.title, menu)
-            if group.items:
-                for item in group.items:
-                    menu_action = QAction(item.title, submenu)
-                    if item.tooltip is not None:
-                        menu_action.setToolTip(item.tooltip)
-                    menu_action.triggered.connect(
-                        lambda _checked=False, command=item.command: self.commandRequested.emit(
-                            command
-                        )
-                    )
-                    submenu.addAction(menu_action)
-            else:
-                assert group.empty_text is not None
-                empty = QAction(group.empty_text, submenu)
-                empty.setEnabled(False)
-                submenu.addAction(empty)
-            menu.addMenu(submenu)
+        if len(action.menu) == 1:
+            # One kind of recent file needs one menu, not an extra submenu.
+            self._populate_menu_items(menu, action.menu[0])
+        else:
+            for group in action.menu:
+                submenu = self._group_menu(group, menu)
+                submenu.setTitle(group.title)
+                menu.addMenu(submenu)
         return menu
+
+    def _group_menu(self, group: ActionMenuGroup, parent: QWidget) -> QMenu:
+        menu = QMenu(parent)
+        self._populate_menu_items(menu, group)
+        return menu
+
+    def _populate_menu_items(self, menu: QMenu, group: ActionMenuGroup) -> None:
+        if group.items:
+            for item in group.items:
+                menu_action = QAction(item.title, menu)
+                if item.tooltip is not None:
+                    menu_action.setToolTip(item.tooltip)
+                menu_action.triggered.connect(
+                    lambda _checked=False, command=item.command: self.commandRequested.emit(
+                        command
+                    )
+                )
+                menu.addAction(menu_action)
+        else:
+            assert group.empty_text is not None
+            empty = QAction(group.empty_text, menu)
+            empty.setEnabled(False)
+            menu.addAction(empty)
 
     def _icon(self, icon: ActionIcon) -> QIcon:
         standard = {
