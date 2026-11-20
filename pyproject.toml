@@ -39,6 +39,9 @@ ase2sprkkr_gui = [
   "assets/task-icons/*.png",
   "assets/task-icons/*.md",
   "assets/icons/COPYING-ICONS",
+  "assets/task-icons/*.svg",
+  "assets/task-icons/*.png",
+  "assets/task-icons/*.md",
   "assets/structures/*.dat",
   "assets/structures/*.md",
 ]
