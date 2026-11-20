@@ -8,7 +8,7 @@ from ase2sprkkr import InputParameters
 from ase2sprkkr.sprkkr.executables import task_system_error
 from ase2sprkkr.sprkkr.sprkkr_atoms import system_kind_for_atoms
 from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
-    supported_task_names, effective_preferred,
+    supported_task_names, effective_preferred, task_ui_name, native_task_names,
 )
 from ase2sprkkr_gui.gui.misc.icons import task_icon
 from PyQt6.QtCore import Qt
@@ -47,9 +47,23 @@ def task_choices(
     supported = set(supported_task_names())
     preferred_names = set(effective_preferred(None) if preferred is None else preferred)
     rows = []
-    for name in InputParameters.task_registry.names():
-        task = InputParameters.task_registry[name]
-        status, reason = applicability(task, kind)
+    seen = set()
+    registry = InputParameters.task_registry
+    registered = set(registry.names())
+    for name in sorted(registered):
+        display_name = task_ui_name(name)
+        if display_name in seen:
+            continue
+        seen.add(display_name)
+        variants = tuple(
+            registry[variant] for variant in native_task_names(display_name)
+            if variant in registered
+        )
+        task = variants[0]
+        outcomes = tuple(applicability(variant, kind) for variant in variants)
+        status, reason = next(
+            (item for item in outcomes if item[0] == "Yes"), outcomes[0]
+        )
         try:
             definition = InputParameters.input_parameters_registry.definition_for_task(task)
             # Backend info is the short summary; description is detailed help.
@@ -69,11 +83,11 @@ def task_choices(
             # Only a short lead sentence when no dedicated summary exists.
             info = " ".join(details.split()).split(". ", 1)[0].rstrip(".") + "."
         rows.append(TaskChoice(
-            task.name.upper(), task.experimental, status,
+            display_name, all(variant.experimental for variant in variants), status,
             " ".join(info.split()) or f"SPR-KKR {task.executable} calculation",
             reason, details.strip(),
-            task.name.upper() in preferred_names,
-            task.name.upper() in supported,
+            display_name in preferred_names,
+            display_name in supported,
         ))
     return tuple(rows)
 
@@ -139,7 +153,7 @@ class TaskChooserDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel(
-            "Choose a native task. Unsupported tasks can still be edited "
+            "Choose a task. Unsupported tasks can still be edited "
             "and saved; calculation availability is checked separately.", self
         ))
         toolbar = QHBoxLayout()

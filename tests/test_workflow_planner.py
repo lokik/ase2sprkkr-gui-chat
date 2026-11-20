@@ -488,3 +488,19 @@ def test_read_only_clupot_offers_explicit_attachment_and_replacement():
     assert _commands(plan, WorkflowSection.CALCULATE) == ()
     assert "read-only" in plan.subtitle.lower()
     assert "imported.clu" in plan.subtitle
+
+
+def test_default_bsf_is_one_action_for_both_native_modes():
+    plan = WorkflowPlanner().for_workspace(
+        Workspace(atoms=FormulaAtoms(), converged=True)
+    )
+    calculate = plan.group(WorkflowSection.CALCULATE)
+    assert calculate is not None
+    bsf = [action for action in calculate.actions
+           if action.command == RunTask("bsf")]
+    assert len(bsf) == 1
+    assert bsf[0].title == "Calculate BSF"
+    assert not any(
+        action.command in (RunTask("bsfek"), RunTask("bsfkk"))
+        for action in calculate.actions
+    )

@@ -7,7 +7,7 @@ from pathlib import Path
 from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
 from ase2sprkkr_gui.gui.application.config import config_home
 from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
-    effective_preferred, supported_task_names,
+    effective_preferred, supported_task_names, task_ui_name,
 )
 from ase2sprkkr_gui.gui.plots.atom_sizes import (
     MAX_ATOM_SIZE_PERCENT, MIN_ATOM_SIZE_PERCENT, set_atom_appearance,
@@ -49,7 +49,7 @@ class ApplicationSettings:
         """New GUI editors since a customized task selection was saved."""
         if self.preferred_tasks is None or self.preferred_supported_snapshot is None:
             return ()
-        previous = set(self.preferred_supported_snapshot)
+        previous = {task_ui_name(name) for name in self.preferred_supported_snapshot}
         return tuple(
             name for name in supported_task_names() if name not in previous
         )
@@ -61,7 +61,7 @@ class ApplicationSettings:
         new = self.newly_supported_tasks()
         if add:
             self.preferred_tasks = tuple(dict.fromkeys(
-                (*self.preferred_tasks, *new)
+                (*map(task_ui_name, self.preferred_tasks), *new)
             ))
         self.preferred_supported_snapshot = supported_task_names()
 
@@ -114,7 +114,7 @@ class ApplicationSettings:
             if (not isinstance(value, list)
                     or any(not isinstance(name, str) or not name.strip() for name in value)):
                 return None
-            return tuple(dict.fromkeys(name.strip().upper() for name in value))
+            return tuple(dict.fromkeys(task_ui_name(name.strip()) for name in value))
 
         selected = task_names("preferred_tasks")
         baseline = task_names("preferred_supported_tasks")
@@ -143,12 +143,16 @@ class ApplicationSettings:
             "show_embedded_cluster_hint": self.show_embedded_cluster_hint,
         }
         if self.preferred_tasks is not None:
-            data["preferred_tasks"] = list(self.preferred_tasks)
-            data["preferred_supported_tasks"] = list(
-                self.preferred_supported_snapshot
-                if self.preferred_supported_snapshot is not None
-                else supported_task_names()
-            )
+            data["preferred_tasks"] = list(dict.fromkeys(
+                task_ui_name(name) for name in self.preferred_tasks
+            ))
+            data["preferred_supported_tasks"] = list(dict.fromkeys(
+                task_ui_name(name) for name in (
+                    self.preferred_supported_snapshot
+                    if self.preferred_supported_snapshot is not None
+                    else supported_task_names()
+                )
+            ))
         try:
             atomic_write_json(self.path, data)
         except OSError:

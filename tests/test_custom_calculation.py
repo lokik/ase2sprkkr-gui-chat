@@ -405,7 +405,7 @@ def test_native_2d_applicability_uses_registered_task_metadata():
     bulk = Atoms("Fe", cell=[2.8, 2.8, 2.8], pbc=True)
     layer = semiinfinite_system(bulk, repeat=2)
     surface_choices = {row.name: row for row in task_chooser.task_choices(layer)}
-    for name in ("SCF", "DOS", "JXC", "BSFEK", "ARPES"):
+    for name in ("SCF", "DOS", "JXC", "BSF", "ARPES"):
         assert surface_choices[name].applicable == "Yes"
     for name in ("CHILANDAU", "POSANI", "POSANIPREP", "POSANITAU",
                  "BONDING", "PLOT2DRHO"):

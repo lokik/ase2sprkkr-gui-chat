@@ -11,17 +11,56 @@ from ase2sprkkr.sprkkr.executables import task_system_error
 from ase2sprkkr_gui.gui.input_parameters.tasks import guided_task_definitions
 
 
+# A multi-backend Guided definition can expose one presentation alias.
+# BSF is one such family: its existing 'bsf' alias covers BSFEK and BSFKK.
+# Derive GUI identities from that definition, not a parallel task registry.
+_FAMILY_BACKENDS = {
+    definition.aliases[0].upper(): tuple(
+        name.upper() for name in definition.backend_tasks
+    )
+    for definition in guided_task_definitions()
+    if len(definition.backend_tasks) > 1 and definition.aliases
+}
+_NATIVE_FAMILIES = {
+    backend: display
+    for display, backends in _FAMILY_BACKENDS.items()
+    for backend in backends
+}
+
+
+def task_ui_name(name: str) -> str:
+    """Canonical GUI identity; the backend task names remain untouched."""
+    name = str(name).upper()
+    return _NATIVE_FAMILIES.get(name, name)
+
+
+def native_task_names(name: str) -> tuple[str, ...]:
+    """Native variants for a single displayed task, preserving declared order."""
+    display = task_ui_name(name)
+    return _FAMILY_BACKENDS.get(display, (display,))
+
+
+def native_task_name(name: str) -> str:
+    """Concrete backend identity when creating a new grouped task input."""
+    return native_task_names(name)[0]
+
+
+
 def supported_task_names() -> tuple[str, ...]:
     """Registered native task names with a GUI-defined editor, alphabetically."""
     available = set(InputParameters.task_registry.names())
-    return tuple(sorted(
-        {name.upper() for definition in guided_task_definitions()
-         for name in definition.backend_tasks if name.upper() in available}
-    ))
+    return tuple(sorted({
+        task_ui_name(name)
+        for definition in guided_task_definitions()
+        for name in definition.backend_tasks
+        if name.upper() in available
+    }))
 
 
 def all_task_names() -> tuple[str, ...]:
-    return tuple(sorted(name.upper() for name in InputParameters.task_registry.names()))
+    return tuple(sorted({
+        task_ui_name(name) for name in InputParameters.task_registry.names()
+    }))
 
 
 def effective_preferred(
@@ -38,7 +77,10 @@ def effective_preferred(
     if selected is None:
         return supported
     available = set(all_task_names())
-    result = list(dict.fromkeys(name for name in selected if name in available))
+    result = list(dict.fromkeys(
+        task_ui_name(name) for name in selected
+        if task_ui_name(name) in available
+    ))
     return tuple(result)
 
 
@@ -46,9 +88,15 @@ def applicable_task_names(system_kind: str | None) -> tuple[str, ...]:
     """Native applicability only; readiness to run is evaluated elsewhere."""
     if system_kind is None:
         return ()
+    registry = InputParameters.task_registry
+    available = set(registry.names())
     return tuple(
         name for name in all_task_names()
-        if task_system_error(InputParameters.task_registry[name], system_kind) is None
+        if any(
+            variant in available
+            and task_system_error(registry[variant], system_kind) is None
+            for variant in native_task_names(name)
+        )
     )
 
 
@@ -73,7 +121,10 @@ def displayed_tasks(
     registered = InputParameters.task_registry
     for candidates in (
         sorted(possible & supported),
-        sorted(name for name in possible if not registered[name].experimental),
+        sorted(
+            name for name in possible
+            if not registered[native_task_name(name)].experimental
+        ),
         sorted(possible),
     ):
         if candidates:

@@ -242,3 +242,79 @@ def test_lowercase_task_icon_name_is_required(tmp_path, monkeypatch):
         '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"/>'
     )
     assert resources.task_icon_path("SCF") == directory / "scf.svg"
+
+
+def test_bsf_is_one_supported_and_selectable_gui_task():
+    from ase2sprkkr_gui.gui.dialogs.task_chooser import task_choices
+
+    assert prefs.supported_task_names().count("BSF") == 1
+    assert "BSFEK" not in prefs.supported_task_names()
+    assert "BSFKK" not in prefs.supported_task_names()
+    assert prefs.all_task_names().count("BSF") == 1
+    assert "BSFEK" not in prefs.all_task_names()
+    assert "BSFKK" not in prefs.all_task_names()
+
+    choices = task_choices()
+    assert tuple(row.name for row in choices).count("BSF") == 1
+    assert "BSFEK" not in {row.name for row in choices}
+    assert "BSFKK" not in {row.name for row in choices}
+    assert next(row for row in choices if row.name == "BSF").supported
+    assert prefs.native_task_name("BSF") == "BSFEK"
+    assert prefs.native_task_names("BSF") == ("BSFEK", "BSFKK")
+
+
+def test_legacy_bsf_variant_preferences_collapse_to_one_bsf_without_new_task_popup(
+    tmp_path,
+):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({
+        "preferred_tasks": ["DOS", "BSFEK", "BSFKK", "SCF"],
+        "preferred_supported_tasks": ["SCF", "BSFEK", "BSFKK", "DOS", "XAS", "ARPES", "JXC"],
+    }))
+    settings = ApplicationSettings(path)
+    settings.load()
+    assert settings.effective_preferred_tasks() == ("DOS", "BSF", "SCF")
+    assert settings.newly_supported_tasks() == ()
+    assert settings.save()
+    saved = json.loads(path.read_text())
+    assert saved["preferred_tasks"] == ["DOS", "BSF", "SCF"]
+    assert "BSFEK" not in saved["preferred_supported_tasks"]
+    assert "BSFKK" not in saved["preferred_supported_tasks"]
+    assert "BSF" in saved["preferred_supported_tasks"]
+
+
+def test_bsf_uses_one_lowercase_icon_for_both_native_modes(tmp_path, monkeypatch):
+    assets = tmp_path / "assets"
+    directory = assets / "task-icons"
+    directory.mkdir(parents=True)
+    icon_path = directory / "bsf.svg"
+    icon_path.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">'
+        '<rect x="2" y="2" width="20" height="20"/></svg>',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(resources, "_ASSETS", assets)
+    assert all(
+        resources.task_icon_path(prefs.task_ui_name(name)) == icon_path
+        for name in ("BSF", "BSFEK", "BSFKK")
+    )
+    assert all(
+        not task_icon(name).isNull()
+        for name in ("BSF", "BSFEK", "BSFKK")
+    )
+    assert resources.task_icon_path("BSFEK") is None
+
+
+def test_preferred_task_editor_shows_only_one_bsf(tmp_path):
+    page = PreferredTasksPage(ApplicationSettings(tmp_path / "settings.json"))
+    assert page.selection().count("BSF") == 1
+    assert "BSFEK" not in page.selection()
+    assert "BSFKK" not in page.selection()
+    row_names = [
+        page.available.item(i, 0).text()
+        for i in range(page.available.rowCount())
+    ]
+    assert row_names.count("BSF") == 1
+    assert "BSFEK" not in row_names
+    assert "BSFKK" not in row_names
+    page.close()

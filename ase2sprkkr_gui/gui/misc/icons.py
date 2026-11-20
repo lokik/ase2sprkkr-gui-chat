@@ -4,6 +4,7 @@ from __future__ import annotations
 from PyQt6.QtGui import QIcon
 
 from ase2sprkkr_gui.gui.misc.resources import icon_path
+from ase2sprkkr_gui.gui.input_parameters.task_preferences import task_ui_name
 
 
 def settings_icon() -> QIcon:
@@ -21,5 +22,5 @@ def task_icon(task: str) -> QIcon:
     """Use an optional bundled icon named after the canonical native task."""
     from ase2sprkkr_gui.gui.misc.resources import task_icon_path
 
-    path = task_icon_path(task)
+    path = task_icon_path(task_ui_name(task))
     return QIcon(str(path)) if path is not None else QIcon()

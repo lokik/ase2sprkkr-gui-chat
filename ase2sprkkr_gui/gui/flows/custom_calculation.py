@@ -19,6 +19,7 @@ from ase2sprkkr_gui.gui.dialogs.task_chooser import TaskChooserDialog
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 from ase2sprkkr_gui.gui.input_parameters.dataset import apply_default_dataset
 from ase2sprkkr_gui.gui.input_parameters.tasks import is_guided_task
+from ase2sprkkr_gui.gui.input_parameters.task_preferences import native_task_name
 
 
 _INPUT_FILTER = "SPR-KKR input files (*.inp *.in *.txt);;All files (*)"
@@ -190,7 +191,7 @@ def choose_custom_task(
     if picker.exec() != QDialog.DialogCode.Accepted or not picker.selected_task:
         return False
     try:
-        parameters = InputParameters.for_task(picker.selected_task)
+        parameters = InputParameters.for_task(native_task_name(picker.selected_task))
         apply_default_dataset(parameters, dataset_default_mode, controller.atoms)
     except Exception as exc:  # noqa: BLE001 - native task registry definitions vary
         QMessageBox.critical(parent, "Cannot Create Custom Input", str(exc))
