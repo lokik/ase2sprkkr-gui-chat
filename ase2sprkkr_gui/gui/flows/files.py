@@ -11,7 +11,7 @@ import numpy as np
 from ase.io import read as ase_read
 from ase.io import write as ase_write
 from ase.io.formats import ioformats
-from ase2sprkkr import InputParameters, Potential
+from ase2sprkkr import InputParameters, PeriodicPotential, Potential
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from ase2sprkkr_gui.ase.copy import copy_for_edit
@@ -46,7 +46,11 @@ def _companion_host_path(cluster_path: str | Path) -> Path:
 def _read_structure_file(path: Path):
     """Read a structure, keeping a POT file's potential authoritative in atoms."""
     if path.suffix.lower() in _POTENTIAL_SUFFIXES and path.exists():
-        return load_potential_atoms(path)
+        # The caller has already ruled out a native CLUPOT. Avoid probing
+        # the same POTFIL a second time in load_potential_atoms().
+        return PeriodicPotential.from_file(
+            str(path), check_file_unchanged=True,
+        ).atoms
     return ase_read(path)
 
 
