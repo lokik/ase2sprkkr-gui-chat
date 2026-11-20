@@ -529,7 +529,7 @@ class WorkflowPlanner:
             groups.append(AvailableActionGroup(
                 WorkflowSection.CREATE,
                 "Create / attach host" if missing_native_host
-                else "Create derived structure", tuple(derived),
+                else "Derived structures", tuple(derived),
             ))
 
         other: list[AvailableAction] = []

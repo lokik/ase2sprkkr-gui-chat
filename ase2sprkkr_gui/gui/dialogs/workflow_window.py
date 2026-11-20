@@ -4,10 +4,9 @@ from threading import Thread
 from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QKeySequence, QPalette
+from PyQt6.QtGui import QIcon, QKeySequence
 from PyQt6.QtWidgets import (
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLayout,
     QLabel,
@@ -48,7 +47,6 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XS,
     SPACE_XXL,
     button_stylesheet,
-    group_panel_stylesheet,
     heading_font,
     secondary_text_stylesheet,
 )
@@ -214,6 +212,7 @@ class WorkflowWindow(QMainWindow):
         # Calculation commands have their own column, independently scrollable
         # from structure actions and from the persistent results sidebar.
         content = QWidget(action_columns)
+        content.setObjectName("workflowCalculateColumn")
         content.setMinimumWidth(300)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, SPACE_XL, 0)
@@ -250,6 +249,7 @@ class WorkflowWindow(QMainWindow):
         # The sidebar is only a layout container: the result view and the
         # bottom navigation must be independent, visually separate panels.
         side = QWidget(splitter)
+        side.setObjectName("workflowResultsColumn")
         side.setMinimumWidth(285)
         side.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         side_layout = QVBoxLayout(side)
@@ -283,23 +283,15 @@ class WorkflowWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([880, 380])
 
-        # One compact bottom row spans all three content columns. Each of
-        # the three groups contains three familiar icon-above-label buttons.
-        navigation = QGroupBox("", central)
-        navigation.setObjectName("workflowNavigation")
-        navigation.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        navigation_layout = QHBoxLayout(navigation)
-        navigation_layout.setContentsMargins(SPACE_SM, SPACE_SM, SPACE_SM, SPACE_SM)
-        navigation_layout.setSpacing(SPACE_XL)
-
-        def navigation_group() -> QWidget:
-            group = QWidget(navigation)
+        # Each footer belongs to its content column, outside the scroll area.
+        # No extra full-width panel or separator consumes vertical space.
+        def navigation_group(column: QWidget, object_name: str) -> QWidget:
+            group = QWidget(column)
+            group.setObjectName(object_name)
             group_layout = QHBoxLayout(group)
-            group_layout.setContentsMargins(0, 0, 0, 0)
+            group_layout.setContentsMargins(0, SPACE_XS, 0, 0)
             group_layout.setSpacing(SPACE_XS)
-            navigation_layout.addWidget(group, 1)
+            column.layout().addWidget(group)
             return group
 
         def add_navigation_button(
@@ -310,18 +302,27 @@ class WorkflowWindow(QMainWindow):
             callback: Callable[[], None],
             *,
             recent_menu: bool = False,
+            compact: bool = False,
         ) -> QToolButton:
             button = QToolButton(group)
             button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(24, 24))
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            button.setMinimumHeight(72)
-            button.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            button.setIconSize(QSize(18, 18))
+            button.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
             )
+            button.setFixedHeight(36)
+            if compact:
+                button.setFixedWidth(38)
+            else:
+                # Never force the navigation into multiple rows.
+                button.setSizePolicy(
+                    QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+                )
             button.setStyleSheet(
                 button_stylesheet(self.palette(), selector="QToolButton")
+                + "QToolButton { padding: 2px 4px; }"
             )
             button.setToolTip(tooltip)
             button.setAccessibleName(label)
@@ -331,10 +332,25 @@ class WorkflowWindow(QMainWindow):
                 )
                 button.setMenu(QMenu(button))
             button.clicked.connect(callback)
-            group.layout().addWidget(button, 1)
+            group.layout().addWidget(button, 0 if compact else 1)
             return button
 
-        structure_navigation = navigation_group()
+        def add_separator(group: QWidget) -> None:
+            separator = QFrame(group)
+            separator.setFrameShape(QFrame.Shape.VLine)
+            separator.setFrameShadow(QFrame.Shadow.Sunken)
+            group.layout().addWidget(separator)
+
+        structure_navigation = navigation_group(
+            structure_column, "workflowStructureNavigation"
+        )
+        self._settings_button = add_navigation_button(
+            structure_navigation,
+            "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
+            self._open_settings, compact=True,
+        )
+        self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
+        add_separator(structure_navigation)
         self._start_over_button = add_navigation_button(
             structure_navigation,
             "Start from Scratch",
@@ -350,14 +366,10 @@ class WorkflowWindow(QMainWindow):
             lambda: self._open_recent("structure"),
             recent_menu=True,
         )
-        self._settings_button = add_navigation_button(
-            structure_navigation,
-            "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
-            self._open_settings,
-        )
-        self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
 
-        calculation_navigation = navigation_group()
+        calculation_navigation = navigation_group(
+            content, "workflowCalculationNavigation"
+        )
         self._repeat_button = add_navigation_button(
             calculation_navigation,
             "Repeat Calculation",
@@ -384,7 +396,9 @@ class WorkflowWindow(QMainWindow):
             self._custom_task,
         )
 
-        results_navigation = navigation_group()
+        results_navigation = navigation_group(
+            side, "workflowResultsNavigation"
+        )
         self._recent_results_button = add_navigation_button(
             results_navigation,
             "Recent Results",
@@ -403,6 +417,7 @@ class WorkflowWindow(QMainWindow):
             "Browse projects and past calculations",
             lambda: self.projectBrowserRequested.emit(),
         )
+        add_separator(results_navigation)
         self._close_button = add_navigation_button(
             results_navigation,
             "Close",
@@ -412,14 +427,9 @@ class WorkflowWindow(QMainWindow):
             ),
             "Close Ase2sprkkr (Ctrl+Q)",
             self.close,
+            compact=True,
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
-        navigation.setStyleSheet(
-            group_panel_stylesheet(
-                self.palette(), self.palette().color(QPalette.ColorRole.Highlight)
-            )
-        )
-        root.addWidget(navigation)
 
     def _open_recent(self, kind: str, path: str | None = None) -> None:
         """Use the latest path for the main button, or an explicit menu item."""

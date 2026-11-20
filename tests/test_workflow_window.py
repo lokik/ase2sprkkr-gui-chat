@@ -6,7 +6,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 from ase import Atoms
 from types import SimpleNamespace
 from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QGroupBox, QLabel, QMessageBox, QSplitter, QToolButton, QWidget
+from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMessageBox, QSplitter, QToolButton, QWidget
 
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -614,35 +614,43 @@ def test_cancel_new_2d_prompts_to_keep_or_discard_3d(tmp_path, monkeypatch, keep
     window.close()
 
 
-def test_workflow_navigation_is_one_full_width_row_of_nine_icon_buttons(
+def test_workflow_navigation_has_three_compact_column_footers(
     tmp_path, monkeypatch
 ):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
 
-    navigation = window.findChild(QGroupBox, "workflowNavigation")
-    assert navigation is not None
-    # The footer is a sibling of the entire three-column splitter, not
-    # a child of Results. It has precisely one row with three button groups.
     root = window.centralWidget().layout()
-    assert navigation.parentWidget() is window.centralWidget()
-    assert root.itemAt(root.count() - 1).widget() is navigation
+    assert root.count() == 1
     assert isinstance(root.itemAt(0).widget(), QSplitter)
-    assert not window._result_actions.isAncestorOf(navigation)
-    assert navigation.layout().count() == 3
-    assert all(
-        group.layout().count() == 3
-        for group in (
-            navigation.layout().itemAt(i).widget()
-            for i in range(3)
-        )
-    )
 
-    buttons = navigation.findChildren(QToolButton)
+    columns = (
+        window.findChild(QWidget, "workflowStructureColumn"),
+        window.findChild(QWidget, "workflowCalculateColumn"),
+        window.findChild(QWidget, "workflowResultsColumn"),
+    )
+    footers = (
+        window.findChild(QWidget, "workflowStructureNavigation"),
+        window.findChild(QWidget, "workflowCalculationNavigation"),
+        window.findChild(QWidget, "workflowResultsNavigation"),
+    )
+    assert all(columns) and all(footers)
+    for column, footer in zip(columns, footers):
+        assert footer.parentWidget() is column
+        assert column.layout().itemAt(column.layout().count() - 1).widget() is footer
+        assert footer.layout().contentsMargins().bottom() == 0
+    assert not window._result_actions.isAncestorOf(footers[2])
+    assert [len(footer.findChildren(QToolButton)) for footer in footers] == [
+        3, 3, 3,
+    ]
+    assert footers[0].layout().itemAt(1).widget().frameShape() == QFrame.Shape.VLine
+    assert footers[2].layout().itemAt(2).widget().frameShape() == QFrame.Shape.VLine
+
+    buttons = [button for footer in footers for button in footer.findChildren(QToolButton)]
     assert buttons == [
+        window._settings_button,
         window._start_over_button,
         window._recent_structures_button,
-        window._settings_button,
         window._repeat_button,
         window._load_input_button,
         window._custom_button,
@@ -651,16 +659,20 @@ def test_workflow_navigation_is_one_full_width_row_of_nine_icon_buttons(
         window._close_button,
     ]
     assert [button.text() for button in buttons] == [
-        "Start from Scratch", "Recent Structures", "Settings",
+        "Settings", "Start from Scratch", "Recent Structures",
         "Repeat Calculation", "Load Input File", "Custom Input File",
         "Recent Results", "Project Browser", "Close",
     ]
     assert all(not button.icon().isNull() for button in buttons)
+    assert all(button.height() == 36 for button in buttons)
     assert all(
-        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-        for button in buttons
+        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        for button in buttons[1:-1] if button is not window._settings_button
     )
-    assert all(button.minimumHeight() == 72 for button in buttons)
+    assert all(
+        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+        for button in (window._settings_button, window._close_button)
+    )
     assert not window._start_over_button.isEnabled()
     assert not window._recent_structures_button.isEnabled()
     assert not window._recent_results_button.isEnabled()
