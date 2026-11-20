@@ -4,6 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
+from types import SimpleNamespace
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QGroupBox, QLabel, QMessageBox, QSplitter, QToolButton, QWidget
 
@@ -244,6 +245,67 @@ def test_column_headings_align_and_results_resize_both_action_columns(tmp_path):
     assert structure.width() < initial_structure_width
     assert calculate.parentWidget().width() < initial_calculation_width
     assert abs(structure.width() - calculate.parentWidget().width()) <= 1
+    window.close()
+
+
+
+def test_recent_potential_load_rebuilds_workflow_once(tmp_path, monkeypatch):
+    """Changing a recent position must not rebuild the loaded structure twice."""
+    application = QApplication.instance() or QApplication([])
+    gui, window = _workflow(tmp_path)
+    old_path = tmp_path / "old.pot"
+    other_path = tmp_path / "other.pot"
+    old_path.touch()
+    other_path.touch()
+    gui.recent_files.remember("structure", old_path)
+    gui.recent_files.remember("structure", other_path)
+
+    atoms = Atoms("Fe", cell=(3, 3, 3), pbc=True)
+    monkeypatch.setattr(
+        workflow_module.file_flows.Potential, "is_cluster_file",
+        staticmethod(lambda _path: False),
+    )
+
+    def load_candidate(_path, _parent, *, reader, on_loaded):
+        candidate = SimpleNamespace(atoms=atoms)
+        on_loaded(candidate)
+        return candidate
+
+    monkeypatch.setattr(
+        workflow_module.file_flows, "load_structure_candidate", load_candidate,
+    )
+
+    rendered = []
+    for widget in (window._structure_actions, window._actions):
+        original = widget.set_plan
+
+        def count(plan, *, original=original):
+            rendered.append(plan)
+            original(plan)
+
+        monkeypatch.setattr(widget, "set_plan", count)
+
+    window._continue_recent("structure", str(old_path))
+    assert gui.controller.atoms is atoms
+    assert gui.recent_files.paths("structure")[0] == str(old_path)
+    assert len(rendered) == 2  # One refresh, two action columns.
+
+    window.close()
+
+
+def test_recent_history_still_refreshes_empty_workspace(tmp_path, monkeypatch):
+    application = QApplication.instance() or QApplication([])
+    gui, window = _workflow(tmp_path)
+    rendered = []
+    original = window._structure_actions.set_plan
+
+    def count(plan):
+        rendered.append(plan)
+        original(plan)
+
+    monkeypatch.setattr(window._structure_actions, "set_plan", count)
+    gui.recent_files.remember("structure", tmp_path / "earlier.xyz")
+    assert len(rendered) == 1
     window.close()
 
 
