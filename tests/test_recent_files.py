@@ -130,3 +130,17 @@ def test_recent_path_label_defaults_to_current_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     assert recent_path_label(target) == str(Path("results") / "Fe.out")
+
+def test_recent_menu_labels_do_not_touch_filesystem(tmp_path, monkeypatch):
+    from ase2sprkkr_gui.gui.recent_presentation import recent_menu_items
+
+    path = tmp_path / "missing" / "calculation.inp"
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("menu labels must not probe the filesystem")
+
+    monkeypatch.setattr(Path, "resolve", unexpected)
+    monkeypatch.setattr(Path, "exists", unexpected)
+    items = recent_menu_items((str(path),), base=tmp_path)
+    assert len(items) == 1
+    assert items[0].label == "missing/calculation.inp"
+    assert items[0].tooltip == str(path)

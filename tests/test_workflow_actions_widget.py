@@ -254,13 +254,22 @@ def test_single_recent_input_group_opens_flat_menu():
             ),
         ),
     ))
-    button = widget.findChild(QToolButton)
+    card = widget.findChild(QPushButton)
+    assert card is not None
+    widget.resize(350, 200)
+    widget.show()
+    _app().processEvents()
+    button = card.findChild(QToolButton, "repeatCalculationMenuButton")
     assert button is not None
+    assert button.width() >= 68
+    assert button.height() == card.height()
+    assert button.text() == ""
+    assert button.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
     assert [a.text() for a in button.menu().actions()] == ["first.inp"]
     emitted = []
     widget.commandRequested.connect(emitted.append)
     button.menu().actions()[0].trigger()
-    button.click()
+    card.click()
     assert emitted == [command, command]
     widget.close()
 

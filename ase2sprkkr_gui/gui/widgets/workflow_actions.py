@@ -118,8 +118,8 @@ class _ShortcutActionButton(QPushButton):
         self._update_hint_visibility()
 
 
-class _ContinueActionButton(QPushButton):
-    """Continue card with two full-width, half-height recent-file selectors."""
+class _RecentActionButton(QPushButton):
+    """Action card with generously sized recent-file dropdowns."""
 
     MENU_WIDTH = 76
 
@@ -129,10 +129,11 @@ class _ContinueActionButton(QPushButton):
 
     def add_recent_menu(self, name: str, icon: QIcon, menu: QMenu) -> None:
         button = QToolButton(self)
-        button.setObjectName(
-            "continueStructuresMenuButton" if name == "Structures"
-            else "continueResultsMenuButton"
-        )
+        button.setObjectName({
+            "Structures": "continueStructuresMenuButton",
+            "Results": "continueResultsMenuButton",
+            "Inputs": "repeatCalculationMenuButton",
+        }[name])
         button.setIcon(icon)
         button.setIconSize(QSize(20, 20))
         # InstantPopup already renders Qt's native down-arrow indicator.
@@ -146,9 +147,8 @@ class _ContinueActionButton(QPushButton):
         button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         border = self.palette().color(QPalette.ColorRole.Mid).name()
         corner = (
-            f"border-top-right-radius: {PANEL_RADIUS}px;"
-            if name == "Structures" else
-            f"border-bottom-right-radius: {PANEL_RADIUS}px;"
+            (f"border-top-right-radius: {PANEL_RADIUS}px;" if name != "Results" else "")
+            + (f"border-bottom-right-radius: {PANEL_RADIUS}px;" if name != "Structures" else "")
         )
         button.setStyleSheet(
             f"QToolButton {{ background: transparent; border: none; "
@@ -329,8 +329,11 @@ class WorkflowActionsWidget(QWidget):
         parent: QWidget,
     ) -> QPushButton | QToolButton:
         shortcut = _shortcut_for_command(action.command)
-        if isinstance(action.command, ContinueRecent) and len(action.menu) == 2:
-            button = _ContinueActionButton(parent)
+        if (
+            isinstance(action.command, ContinueRecent) and len(action.menu) == 2
+            or isinstance(action.command, RepeatRecentInput) and len(action.menu) == 1
+        ):
+            button = _RecentActionButton(parent)
             icon_size = None
             minimum_height = 68
             menu_button = False
@@ -365,7 +368,7 @@ class WorkflowActionsWidget(QWidget):
             menu_button=menu_button,
             subtle=action.category == "neutral",
         )
-        if isinstance(button, _ContinueActionButton):
+        if isinstance(button, _RecentActionButton):
             layout = button.layout()
             margins = layout.contentsMargins()
             layout.setContentsMargins(
@@ -375,6 +378,7 @@ class WorkflowActionsWidget(QWidget):
             for group in action.menu:
                 icon = self._icon(
                     ActionIcon.BULK_CRYSTAL if group.title == "Structures"
+                    else ActionIcon.FILE if group.title == "Inputs"
                     else ActionIcon.RESULT
                 )
                 button.add_recent_menu(
