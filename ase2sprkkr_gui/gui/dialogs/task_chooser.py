@@ -11,7 +11,7 @@ from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
     supported_task_names, effective_preferred, task_ui_name, native_task_names,
 )
 from ase2sprkkr_gui.gui.misc.icons import task_icon
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
@@ -187,10 +187,12 @@ class TaskChooserDialog(QDialog):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSortingEnabled(False)
         self.table.verticalHeader().hide()
+        self.table.verticalHeader().setDefaultSectionSize(30)
+        self.table.setIconSize(QSize(24, 24))
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(0, 32)
+        self.table.setColumnWidth(0, 30)
         header.setSectionResizeMode(self._fields.index("info"), QHeaderView.ResizeMode.Stretch)
         header.setSortIndicatorShown(False)
         header.sectionClicked.connect(self._sort_by_column)

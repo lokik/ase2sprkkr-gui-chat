@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QPushButton,
@@ -53,13 +53,15 @@ class PreferredTasksPage(QFrame):
         self.available.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.available.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.available.verticalHeader().hide()
+        self.available.verticalHeader().setDefaultSectionSize(30)
+        self.available.setIconSize(QSize(24, 24))
         self.available.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
         self.available.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Fixed
         )
-        self.available.setColumnWidth(0, 32)
+        self.available.setColumnWidth(0, 30)
         self.available.horizontalHeader().setSectionResizeMode(
             5, QHeaderView.ResizeMode.Stretch
         )
@@ -83,13 +85,15 @@ class PreferredTasksPage(QFrame):
         self.preferred.setObjectName("orderedPreferredTasks")
         self.preferred.horizontalHeader().hide()
         self.preferred.verticalHeader().hide()
+        self.preferred.verticalHeader().setDefaultSectionSize(30)
+        self.preferred.setIconSize(QSize(24, 24))
         self.preferred.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.preferred.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.preferred.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.preferred.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Fixed
         )
-        self.preferred.setColumnWidth(0, 32)
+        self.preferred.setColumnWidth(0, 30)
         self.preferred.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch
         )
