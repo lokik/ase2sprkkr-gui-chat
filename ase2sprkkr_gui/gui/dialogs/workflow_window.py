@@ -100,7 +100,8 @@ class WorkflowWindow(QMainWindow):
         self.project_repository = project_repository
         self._workflow_planner = WorkflowPlanner(settings=settings)
         self.controller.structureChanged.connect(self._on_structure_changed)
-        self.controller.resultChanged.connect(lambda _result: self._refresh())
+        # Results have their own presenter; they do not change workflow
+        # availability unless the controller also emits structureChanged.
         self.recent_history.changed.connect(self._refresh_recent_history)
         self._build_ui()
         self._refresh()
