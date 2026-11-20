@@ -364,16 +364,22 @@ def load_all_recent_outputs(
         return ()
 
     imported: list[Path] = []
+    potential_entries: list[tuple[RecentKind, Path]] = []
     selected_id = None
     for path, result in loaded:
         try:
             adoption = controller.adopt_external_result(result)
             if adoption.record is not None:
                 selected_id = adoption.record.id
+            if adoption.potential_path is not None and adoption.potential_error is None:
+                potential_entries.append(("structure", adoption.potential_path))
             imported.append(path)
         except Exception as exc:  # noqa: BLE001 - continue with independent results
             failures.append((path.name, str(exc)))
 
+    # The outputs are already in recent history: preserve their order and
+    # selected kind while registering reusable potentials in one notification.
+    recent_files.remember_many(potential_entries, preserve_last_kind=True)
     if selected_id is not None:
         controller.resultSelectionRequested.emit(selected_id)
     if failures:
@@ -428,10 +434,15 @@ def load_output_directory(
 
     imported = []
     for index, (path, result) in enumerate(loaded):
-        controller.adopt_external_result(
+        adoption = controller.adopt_external_result(
             result, select_result=index == len(loaded) - 1
         )
-        recent_files.remember("output", path)
+        recent_files.remember_result(
+            path,
+            potential_path=(
+                adoption.potential_path if adoption.potential_error is None else None
+            ),
+        )
         imported.append(path)
 
     if failures:
@@ -491,7 +502,12 @@ def _finish_output_load(
     *,
     show_potential_warning: bool = True,
 ) -> None:
-    recent_files.remember("output", file_path)
+    recent_files.remember_result(
+        file_path,
+        potential_path=(
+            adoption.potential_path if adoption.potential_error is None else None
+        ),
+    )
     if show_potential_warning:
         _show_potential_warning(adoption, parent)
     _show_input_parameters_warning(adoption, parent)
