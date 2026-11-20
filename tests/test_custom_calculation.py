@@ -366,12 +366,18 @@ def test_file_input_keeps_working_dialog_until_editor_is_prepared(tmp_path, monk
         events.append("edit")
         return True
 
+    def refresh():
+        waiting = parent.findChild(_ModalTaskDialog)
+        assert waiting is not None and waiting.isVisible()
+        events.append("refresh")
+
+    recent.changed.connect(refresh)
     monkeypatch.setattr(custom_flow.InputParameters, "from_file", staticmethod(read))
     monkeypatch.setattr(custom_flow, "_custom_input_dialog", build)
     monkeypatch.setattr(custom_flow, "edit_custom_parameters", edit)
 
     assert custom_flow.load_custom_input(controller, recent, parent, path)
-    assert events == ["read", "build", "edit"]
+    assert events == ["read", "build", "refresh", "edit"]
     assert recent.paths("input") == (str(path),)
 
 
