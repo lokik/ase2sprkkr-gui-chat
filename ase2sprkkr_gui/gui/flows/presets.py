@@ -1,4 +1,4 @@
-"""Shared native-preset actions for Guided and Expert input editors."""
+"""Shared preset actions for Guided and Expert input editors."""
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -68,10 +68,12 @@ def load_preset(
             apply(candidate)
             session.replace_parameters(
                 candidate, text=f"Replace with preset {name}", source_page="preset",
+                preserve_explicit=True,
             )
         else:
             session.mutate(
                 apply, text=f"Merge preset {name}", source_page="preset",
+                preserve_explicit=True,
             )
     except Exception as exc:
         QMessageBox.critical(parent, "Load preset failed", str(exc))

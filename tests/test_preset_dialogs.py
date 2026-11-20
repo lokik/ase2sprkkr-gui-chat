@@ -1,4 +1,4 @@
-"""Guided and Expert expose the same native input preset workflow."""
+"""Guided and Expert share the YAML input preset workflow."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -104,9 +104,37 @@ def test_save_preset_does_not_change_editor_history(tmp_path, monkeypatch):
                         lambda *_args, **_kwargs: ("saved", True))
 
     assert preset_flows.save_preset(session, None)
-    assert (tmp_path / "input_parameters" / "dos" / "saved.inp").is_file()
+    assert (tmp_path / "input_parameters" / "dos" / "saved.yaml").is_file()
     assert session.undo_stack.count() == 0
     assert not session.is_modified()
+
+
+def test_merge_and_resave_preserves_explicit_false_at_default(tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QInputDialog
+    from ase2sprkkr.input_parameters.presets import PresetStore
+    from ase2sprkkr_gui.gui.flows import presets as preset_flows
+    from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
+
+    app = QApplication.instance() or QApplication([])
+    store = PresetStore(tmp_path)
+    source = InputParameters.for_task("DOS")
+    source.CONTROL.NOSYM = False
+    source.save_preset("with_symmetry", store=store)
+    session = InputParametersSession(InputParameters.for_task("DOS"))
+    monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
+    monkeypatch.setattr(QInputDialog, "getItem",
+                        lambda *_args, **_kwargs: ("with_symmetry", True))
+
+    assert preset_flows.load_preset(session, None, clear_first=False)
+    assert session.result().CONTROL.NOSYM.is_set()
+    session.undo_stack.undo()
+    assert not session.result().CONTROL.NOSYM.is_set()
+    session.undo_stack.redo()
+    session.result().save_preset("resaved", store=store)
+    target = InputParameters.for_task("DOS")
+    target.CONTROL.NOSYM = True
+    target.load_preset("resaved", clear_first=False, store=store)
+    assert target.CONTROL.NOSYM() is False
 
 
 def test_guided_bsf_preset_can_switch_task_on_replace(tmp_path, monkeypatch):
@@ -181,17 +209,20 @@ def test_guided_rejects_task_outside_supported_family(tmp_path, monkeypatch):
     source.save_preset("task:bsfek.ek", store=store)
     original = InputParameters.for_task("BSFKK")
     session = InputParametersSession(original)
-    errors = []
+    messages = []
     monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
-    monkeypatch.setattr(QInputDialog, "getItem",
-                        lambda *_args, **_kwargs: ("task:bsfek.ek", True))
-    monkeypatch.setattr(QMessageBox, "critical",
-                        lambda *_args: errors.append(_args[-1]))
+
+    def unexpected_picker(*_args, **_kwargs):
+        raise AssertionError("An incompatible preset must not appear in the picker")
+
+    monkeypatch.setattr(QInputDialog, "getItem", unexpected_picker)
+    monkeypatch.setattr(QMessageBox, "information",
+                        lambda *_args: messages.append(_args[-1]))
 
     assert not preset_flows.load_preset(
         session, None, compatible_tasks=("bsfkk",),
     )
-    assert errors
+    assert messages == ["No saved BSF presets."]
     assert session.undo_stack.count() == 0
     assert session.result().task_name == "BSFKK"
 
