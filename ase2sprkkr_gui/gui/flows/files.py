@@ -24,6 +24,7 @@ from ase2sprkkr_gui.gui.application.result_loading import (
     load_companion_scf_result,
 )
 from ase2sprkkr_gui.gui.application.workspace_controller import ResultAdoption, WorkspaceController
+from ase2sprkkr_gui.gui.flows.input_parameters import save_input_parameters_to_path
 from ase2sprkkr_gui.gui.flows.structure_candidates import (
     load_structure_candidate,
     structure_open_filter,
@@ -848,7 +849,10 @@ def save_input_parameters(
     if not file_path:
         return False
     try:
-        parameters.to_file(Path(file_path).resolve())
+        save_input_parameters_to_path(
+            parameters.copy(copy_values=True), file_path,
+            atoms=controller.atoms, directory=controller.directory,
+        )
     except Exception as exc:  # noqa: BLE001 - backend writers vary
         QMessageBox.critical(
             parent,

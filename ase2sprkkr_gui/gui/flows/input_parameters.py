@@ -93,6 +93,9 @@ def load_input_parameters(
 def choose_and_save_input_parameters(
     parameters: InputParameters,
     parent: QWidget | None,
+    *,
+    atoms=None,
+    directory: str | Path | None = None,
 ) -> bool:
     """Save a detached input snapshot, independently of the workspace and run."""
     file_path, _ = QFileDialog.getSaveFileName(
@@ -104,11 +107,28 @@ def choose_and_save_input_parameters(
     if not file_path:
         return False
     try:
-        parameters.to_file(Path(file_path).expanduser())
+        save_input_parameters_to_path(
+            parameters, file_path, atoms=atoms, directory=directory,
+        )
     except Exception as exc:  # noqa: BLE001 - native serializers have diverse failures
         QMessageBox.critical(parent, "Save Input Failed", str(exc))
         return False
     return True
+
+
+def save_input_parameters_to_path(
+    parameters: InputParameters,
+    file_path: str | Path,
+    *,
+    atoms=None,
+    directory: str | Path | None = None,
+) -> None:
+    """Write a detached input snapshot for the intended calculation directory."""
+    path = Path(file_path).expanduser()
+    parameters.directory = directory or parameters.directory or path.absolute().parent
+    parameters.save_to_file(
+        path, atoms=atoms if atoms is not None else False, validate="set",
+    )
 
 
 def edit_input_parameters_file(

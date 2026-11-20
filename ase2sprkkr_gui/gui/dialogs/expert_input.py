@@ -1,6 +1,7 @@
 """Modal workflow for editing an isolated copy of ``InputParameters``."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 from ase2sprkkr import InputParameters
@@ -9,6 +10,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QStackedWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -25,12 +28,15 @@ from ase2sprkkr_gui.gui.input_parameters.session import (
     InputParametersSession,
     create_input_parameters_session,
 )
+from ase2sprkkr_gui.gui.input_parameters.specs.schema import TaskDialogSpec
+from ase2sprkkr_gui.gui.input_parameters.specs.shared import file_source_page
 from ase2sprkkr_gui.gui.input_parameters.validation import (
     InputParametersValidationError,
     validate_setup,
 )
 from ase2sprkkr_gui.gui.widgets.input_parameters.dataset import DatasetEditor
 from ase2sprkkr_gui.gui.widgets.input_parameters.expert_tree import ExpertInputTreeEditor
+from ase2sprkkr_gui.gui.widgets.input_parameters.form import GuidedFormRenderer
 
 
 class InputParametersDialog(QDialog):
@@ -45,8 +51,12 @@ class InputParametersDialog(QDialog):
         atoms: Any = None,
         calculation_mode: bool = False,
         calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
+        file_source_directory=None,
+        directory: str | Path | None = None,
     ) -> None:
         super().__init__(parent)
+        self.atoms = atoms
+        self.directory = directory or file_source_directory
         self._calculation_mode = calculation_mode
         self._calculation_unavailable_reason = calculation_unavailable_reason
         if isinstance(parameters, InputParametersSession):
@@ -63,8 +73,8 @@ class InputParametersDialog(QDialog):
         )
         root = QVBoxLayout(self)
 
-        self.dataset_editor = DatasetEditor(self.session, self)
-        root.addWidget(self.dataset_editor)
+        self.file_source_form = None
+        self.dataset_editor = None
 
         self.tree_editor = ExpertInputTreeEditor(
             self.session,
@@ -72,7 +82,22 @@ class InputParametersDialog(QDialog):
             show_changed_only=show_changed_only,
             parent=self,
         )
-        root.addWidget(self.tree_editor, 1)
+        if file_source_directory is None:
+            self.dataset_editor = DatasetEditor(self.session, self)
+            root.addWidget(self.dataset_editor)
+            root.addWidget(self.tree_editor, 1)
+        else:
+            tabs = QTabWidget(self)
+            pages = QStackedWidget(tabs)
+            page = file_source_page(file_source_directory)
+            self.file_source_form = GuidedFormRenderer(
+                self.session, TaskDialogSpec(page.title, (page,)), pages,
+                select_page=lambda _page_id: tabs.setCurrentWidget(pages),
+            )
+            self.file_source_form.statusChanged.connect(self._update_calculation_availability)
+            tabs.addTab(pages, page.title)
+            tabs.addTab(self.tree_editor, "Input parameters")
+            root.addWidget(tabs, 1)
 
         self._validation_error = QLabel(self)
         self._validation_error.setWordWrap(True)
@@ -125,6 +150,8 @@ class InputParametersDialog(QDialog):
             )
         except (InputParametersValidationError, ValueError) as error:
             reason = str(error)
+        if self.file_source_form is not None and self.file_source_form.errors:
+            reason = "Correct the highlighted input values before calculating."
         self.ok_btn.setEnabled(not reason)
         self.ok_btn.setToolTip(
             reason or "Run a calculation with the current input parameters"
@@ -135,36 +162,40 @@ class InputParametersDialog(QDialog):
             self.tree_editor.set_show_changed_only(True)
 
     def _edit_input_file(self) -> None:
-        self.dataset_editor.commit()
-        if not self.tree_editor.commit_pending():
-            return
-        edit_input_parameters_file(self.session, self)
+        if self._commit_pending():
+            edit_input_parameters_file(self.session, self)
 
     def _save_input(self) -> None:
-        self.dataset_editor.commit()
-        if not self.tree_editor.commit_pending():
-            return
-        choose_and_save_input_parameters(self.session.result(), self)
+        if self._commit_pending():
+            choose_and_save_input_parameters(
+                self.session.result(), self, atoms=self.atoms, directory=self.directory,
+            )
+
+    def _commit_pending(self) -> bool:
+        if self.dataset_editor is not None:
+            self.dataset_editor.commit()
+        if self.file_source_form is not None:
+            for view in self.file_source_form.field_views:
+                view.editor.commit()
+            if self.file_source_form.errors:
+                return False
+        return self.tree_editor.commit_pending()
 
     def _replace_preset(self) -> None:
-        self.dataset_editor.commit()
-        if self.tree_editor.commit_pending():
+        if self._commit_pending():
             preset_flows.load_preset(self.session, self, clear_first=True)
 
     def _merge_preset(self) -> None:
-        self.dataset_editor.commit()
-        if self.tree_editor.commit_pending():
+        if self._commit_pending():
             preset_flows.load_preset(self.session, self, clear_first=False)
 
     def _save_preset(self) -> None:
-        self.dataset_editor.commit()
-        if self.tree_editor.commit_pending():
+        if self._commit_pending():
             preset_flows.save_preset(self.session, self)
 
     def _on_ok(self) -> None:
         self._validation_error.hide()
-        self.dataset_editor.commit()
-        if not self.tree_editor.commit_pending():
+        if not self._commit_pending():
             return
         try:
             validate_setup(self.session.working_parameters)
@@ -190,6 +221,7 @@ def edit_input_parameters(
     *,
     show_changed_only: bool = False,
     atoms: Any = None,
+    directory: str | Path | None = None,
 ) -> InputParameters | None:
     """Open the expert editor and return its accepted isolated draft."""
     session = create_input_parameters_session(params)
@@ -198,6 +230,7 @@ def edit_input_parameters(
         parent=parent,
         show_changed_only=show_changed_only,
         atoms=atoms,
+        directory=directory,
     )
     if accepted is None:
         return None
@@ -210,6 +243,7 @@ def edit_input_parameters_session(
     *,
     show_changed_only: bool = False,
     atoms: Any = None,
+    directory: str | Path | None = None,
 ) -> InputParametersSession | None:
     """Run Expert over an isolated fork and return the fork only on Accept."""
     dialog = InputParametersDialog(
@@ -217,6 +251,7 @@ def edit_input_parameters_session(
         parent=parent,
         show_changed_only=show_changed_only,
         atoms=atoms,
+        directory=directory,
     )
     code = dialog.exec()
     if code == QDialog.DialogCode.Accepted:
@@ -230,6 +265,7 @@ def select_input_parameters(
     task: str = 'scf',
     *,
     dataset_default_mode: str,
+    directory: str | Path | None = None,
 ) -> InputParameters | None:
     """Create fresh parameters for a task and open the expert editor."""
     from importlib import import_module
@@ -240,4 +276,4 @@ def select_input_parameters(
     params_def = task_module.input_parameters()
     params = params_def.create_object()
     apply_default_dataset(params, dataset_default_mode, atoms)
-    return edit_input_parameters(params, parent=parent, atoms=atoms)
+    return edit_input_parameters(params, parent=parent, atoms=atoms, directory=directory)

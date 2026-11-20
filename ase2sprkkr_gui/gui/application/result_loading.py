@@ -16,6 +16,18 @@ class PotentialVersionChanged(RuntimeError):
 
 
 @dataclass(frozen=True)
+class FileBackedInput:
+    """A parsed native input and every source version verified at launch."""
+
+    atoms: Any
+    input_versions: tuple[PotentialFileVersion, ...]
+
+    @property
+    def potential_version(self) -> PotentialFileVersion:
+        return self.input_versions[-1]
+
+
+@dataclass(frozen=True)
 class LoadedResult:
     """A result whose filesystem references have already been interpreted.
 
@@ -38,6 +50,8 @@ class LoadedResult:
     input_parameters: Any | None = None
     input_parameters_error: Exception | None = None
     persistent_ref: str | None = None
+    file_backed_input: FileBackedInput | None = None
+    output_potential_version: PotentialFileVersion | None = None
 
 
 def load_potential_atoms(file_path: str | Path, *, embedding_host=None) -> Any:

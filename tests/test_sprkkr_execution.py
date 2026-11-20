@@ -67,6 +67,141 @@ def _request(tmp_path, *, restart_scf: bool = False, clear_cache: bool = False) 
     )
 
 
+def test_file_based_submission_uses_geometry_from_validated_launch_files(tmp_path, monkeypatch):
+    from pathlib import Path
+    from shutil import copyfile
+
+    import ase2sprkkr
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.sprkkr.input_sources import load_existing_potential_input
+    from kkrunner.backends.contracts import SubmissionNotStarted
+    from kkrunner.files import FileManifest
+
+    path = tmp_path / "host.pot"
+    examples = Path(ase2sprkkr.__file__).parent / "potentials" / "examples"
+    copyfile(examples / "Fe3CoFe3.host.pot", path)
+    parameters = InputParameters.for_task("SCF")
+    parameters.CONTROL.POTFIL = str(path)
+    source = load_existing_potential_input(parameters, tmp_path)
+    manifest = FileManifest(input_versions=source.versions)
+    request = CalculationRequest(
+        Atoms("Cu"), parameters, str(tmp_path), None, None,
+        potential=False, file_source=source,
+    )
+    execution = SprkkrExecution(request, _Cancellation())
+    launched = []
+
+    def submit(*, validate_inputs):
+        validate_inputs(manifest)
+        launched.append(True)
+
+    monkeypatch.setattr(
+        execution, "_create_runner", lambda _calculator: SimpleNamespace(submit=submit),
+    )
+    execution._submit(object())
+    assert set(execution._file_backed_input.atoms.get_chemical_symbols()) == {"Fe"}
+    assert execution._file_backed_input.input_versions == source.versions
+
+    path.write_text("changed after staging")
+    with pytest.raises(SubmissionNotStarted, match="does not match the launch input"):
+        execution._submit(object())
+    assert launched == [True]
+
+
+def test_embedded_submission_keeps_both_input_versions(tmp_path, native_embedded_potentials):
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.sprkkr.input_sources import load_existing_potential_input
+    from kkrunner.backends.contracts import SubmissionNotStarted
+    from kkrunner.files import FileManifest
+
+    params = InputParameters.for_task("DOS")
+    params.CONTROL.CLUTYPE = "embedded"
+    params.CONTROL.POTFIL = "host.pot"
+    params.CONTROL.POTFIL_CLU = "cluster.pot"
+    source = load_existing_potential_input(params, tmp_path)
+    request = CalculationRequest(
+        source.potential.atoms, source.parameters, str(tmp_path), None, None,
+        potential=False, file_source=source,
+    )
+    execution = SprkkrExecution(request, _Cancellation())
+    execution._validate_file_input(FileManifest(input_versions=source.versions))
+    assert execution._file_backed_input.input_versions == source.versions
+    assert execution._file_backed_input.potential_version.path == tmp_path / "cluster.pot"
+    with pytest.raises(SubmissionNotStarted, match="does not match the launch input"):
+        execution._validate_file_input(FileManifest(input_versions=(source.versions[0],)))
+
+    # The source may remain unchanged locally while the remote staging target
+    # contains different bytes (for example under a CHANGED synchronization policy).
+    from kkrunner.files import FileVersion
+    different_staged_cluster = FileVersion(
+        source.versions[1].path, fingerprint=None, digest="0" * 64,
+    )
+    assert source.versions[1].is_current()
+    with pytest.raises(SubmissionNotStarted, match="does not match the launch input"):
+        execution._validate_file_input(
+            FileManifest(input_versions=(source.versions[0], different_staged_cluster)),
+        )
+
+
+
+
+def test_embedded_source_round_trips_through_backend_file_manifest(tmp_path, native_embedded_potentials):
+    """Real calculator execution spec stages both potential files unchanged."""
+    from dataclasses import replace
+    from ase2sprkkr import InputParameters, SPRKKR
+    from ase2sprkkr.sprkkr.input_sources import load_existing_potential_input
+    from ase2sprkkr.sprkkr.profile import SPRKKRProfile
+    from kkrunner.client import EndpointClient
+    from kkrunner.files import FileManifest
+    from kkrunner.runs.files import snapshot_file_entries
+    from kkrunner.backends.contracts import SubmissionNotStarted
+
+    parameters = InputParameters.for_task("DOS")
+    parameters.CONTROL.CLUTYPE = "embedded"
+    parameters.CONTROL.POTFIL = "host.pot"
+    parameters.CONTROL.POTFIL_CLU = "cluster.pot"
+    source = load_existing_potential_input(parameters, tmp_path)
+
+    calculator = SPRKKR(profile=SPRKKRProfile(mpi=False))
+    prepared = calculator.prepare(
+        atoms=source.potential.atoms,
+        input_parameters=source.parameters, potential=False,
+        directory=tmp_path, input_file="dos.inp", output_file=False,
+        empty_spheres=False,
+    )
+    runner = None
+    try:
+        runner = prepared.create_run(
+            result_context=calculator, profile=calculator.profile,
+            executor=EndpointClient(),
+        )
+        # This comes from the actual SPRKKR -> KKRunner execution spec, not
+        # a test-authored SimpleNamespace with manually selected input paths.
+        manifest = FileManifest.from_spec(runner.spec)
+        for expected in source.versions:
+            assert str(expected.path) in manifest.input_files
+
+        staged = replace(
+            manifest, input_versions=snapshot_file_entries(manifest.input_entries),
+        )
+        request = CalculationRequest(
+            source.potential.atoms, source.parameters, str(tmp_path),
+            None, None, potential=False, file_source=source,
+        )
+        execution = SprkkrExecution(request, _Cancellation())
+        execution._validate_file_input(staged)
+        assert execution._file_backed_input.input_versions == source.versions
+
+        (tmp_path / "host.pot").write_text("overwritten after staging")
+        with pytest.raises(SubmissionNotStarted, match="does not match the launch input"):
+            execution._validate_file_input(staged)
+    finally:
+        if runner is None:
+            prepared.close()
+        else:
+            runner.close()
+
+
 def test_execution_constructs_sprkkr_with_selected_profile(monkeypatch, tmp_path):
     captured = {}
 

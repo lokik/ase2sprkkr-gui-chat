@@ -6,8 +6,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
-from pathlib import Path
-
+from ase import Atoms
 from ase2sprkkr import InputParameters
 from PyQt6.QtWidgets import QApplication
 
@@ -80,7 +79,7 @@ def test_save_commits_current_draft_without_accepting_or_mutating_source(monkeyp
     saved = []
     monkeypatch.setattr(
         gui_input, "choose_and_save_input_parameters",
-        lambda params, parent: saved.append((params, parent)) or True,
+        lambda params, parent, **_options: saved.append((params, parent)) or True,
     )
     assert dialog.session.set_value(("SCF", "NITER"), 314)
     dialog.save_input_button.click()
@@ -96,24 +95,29 @@ def test_save_commits_current_draft_without_accepting_or_mutating_source(monkeyp
 
 def test_save_input_uses_native_serializer_and_cancel_is_noop(monkeypatch, tmp_path):
     parameters = InputParameters.create("scf")
+    directory = tmp_path / "calculations" / "run"
+    directory.mkdir(parents=True)
+    parameters.CONTROL.POTFIL = str(directory / "input.pot")
     path = tmp_path / "test.inp"
-    writes = []
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         input_flows.QFileDialog, "getSaveFileName",
         lambda *_args, **_kwargs: (str(path), ""),
     )
-    monkeypatch.setattr(
-        type(parameters), "to_file",
-        lambda self, name: writes.append((self, Path(name))),
+    atoms = Atoms("Fe", cell=(3, 3, 3), pbc=(True, True, False))
+    assert input_flows.choose_and_save_input_parameters(
+        parameters, None, atoms=atoms, directory=directory,
     )
-    assert input_flows.choose_and_save_input_parameters(parameters, None)
-    assert writes == [(parameters, path)]
+    saved = path.read_text()
+    assert "POTFIL=input.pot" in saved
+    assert "NKTAB2D" in saved
+    assert "KKRMODE=TB" in saved
     monkeypatch.setattr(
         input_flows.QFileDialog, "getSaveFileName",
         lambda *_args, **_kwargs: ("", ""),
     )
     assert not input_flows.choose_and_save_input_parameters(parameters, None)
-    assert writes == [(parameters, path)]
+    assert path.read_text() == saved
 
 
 def test_calculate_disabled_with_reason_and_restores_after_session_edit(monkeypatch):

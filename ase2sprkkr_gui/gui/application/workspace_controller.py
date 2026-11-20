@@ -90,6 +90,7 @@ class CalculationRequest:
     # An explicit host Potential can be used without rebuilding it from a copy
     # of its atoms (which would lose its native SCFSTATUS).
     potential: Any | None = None
+    file_source: Any | None = None
 
 
 @dataclass(frozen=True)

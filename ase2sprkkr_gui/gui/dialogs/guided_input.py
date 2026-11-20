@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ase2sprkkr import InputParameters
@@ -38,6 +39,7 @@ from ase2sprkkr_gui.gui.input_parameters.specs.schema import (
     PageSpec,
     TaskDialogSpec,
 )
+from ase2sprkkr_gui.gui.input_parameters.specs.shared import with_file_source_page
 from ase2sprkkr_gui.gui.input_parameters.tasks import guided_task_definition
 from ase2sprkkr_gui.gui.input_parameters.validation import (
     InputParametersValidationError,
@@ -84,16 +86,21 @@ class GuidedInputParametersDialog(QDialog):
         *,
         atoms: Any = None,
         calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
+        file_source_directory=None,
+        directory: str | Path | None = None,
     ) -> None:
         super().__init__(parent)
         self._calculation_unavailable_reason = calculation_unavailable_reason
         self.task = task.lower()
         self.atoms = atoms
+        self.directory = directory or file_source_directory
         definition = guided_task_definition(self.task)
         self._compatible_backend_tasks = definition.backend_tasks
         self.spec: TaskDialogSpec = definition.build_spec(
             is_2d=detect_structure_kind(atoms) == "2d",
         )
+        if file_source_directory is not None:
+            self.spec = with_file_source_page(self.spec, file_source_directory)
         expected_task = InputParameters.is_task_name(
             definition.backend_task
         )
@@ -495,6 +502,7 @@ class GuidedInputParametersDialog(QDialog):
             parent=self,
             show_changed_only=False,
             atoms=self.atoms,
+            directory=self.directory,
         )
         if accepted is None:
             return
@@ -541,7 +549,9 @@ class GuidedInputParametersDialog(QDialog):
                 self, "Cannot Save Input", "Correct the highlighted input value before saving."
             )
             return
-        choose_and_save_input_parameters(self.session.result(), self)
+        choose_and_save_input_parameters(
+            self.session.result(), self, atoms=self.atoms, directory=self.directory,
+        )
 
     def parameters(self) -> InputParameters:
         """Return a detached copy of the currently edited parameters."""
@@ -556,6 +566,7 @@ def select_guided_input_parameters(
     dataset_default_mode: str,
     dataset_prefix: str | None = None,
     calculation_unavailable_reason: Callable[[InputParameters], str | None] | None = None,
+    directory: str | Path | None = None,
 ) -> InputParameters | None:
     definition = guided_task_definition(task)
     if not InputParameters.is_task_name(definition.backend_task):
@@ -581,6 +592,7 @@ def select_guided_input_parameters(
         parent=parent,
         atoms=atoms,
         calculation_unavailable_reason=calculation_unavailable_reason,
+        directory=directory,
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None

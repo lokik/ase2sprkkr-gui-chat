@@ -4,13 +4,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from ase2sprkkr import InputParameters
+from ase2sprkkr.sprkkr.input_sources import existing_potential_files, load_existing_potential_input
+from ase2sprkkr.sprkkr.executables import resolve_task_executable, task_system_error
+from ase2sprkkr.sprkkr.sprkkr_atoms import system_kind_for_atoms
 from PyQt6.QtWidgets import QDialog, QFileDialog, QMessageBox, QWidget
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
-from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
+from ase2sprkkr_gui.gui.application.workspace_controller import (
+    CalculationRequest, WorkspaceController,
+)
 from ase2sprkkr_gui.gui.dialogs.expert_input import InputParametersDialog
 from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
-from ase2sprkkr_gui.gui.dialogs.task_chooser import TaskChooserDialog, applicability
+from ase2sprkkr_gui.gui.dialogs.task_chooser import TaskChooserDialog
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 from ase2sprkkr_gui.gui.input_parameters.dataset import apply_default_dataset
 from ase2sprkkr_gui.gui.input_parameters.tasks import is_guided_task
@@ -22,17 +27,27 @@ _INPUT_FILTER = "SPR-KKR input files (*.inp *.in *.txt);;All files (*)"
 def calculation_unavailable_reason(
     controller: WorkspaceController,
     parameters: InputParameters,
+    *,
+    file_source_directory: Path | None = None,
 ) -> str | None:
     """Check geometry/readiness without banning unsupported input editing."""
-    if controller.atoms is None:
-        return "Load or create a structure before running a calculation."
     task = parameters.task_definition
     if task is None:
         return "The input does not resolve to a registered SPR-KKR task."
-    status, reason = applicability(task, controller.structure_kind(), atoms=controller.atoms)
-    if status == "No":
+    if controller.atoms is None:
+        try:
+            resolve_task_executable(task, parameters)
+            existing_potential_files(
+                parameters, file_source_directory or controller.directory or Path.cwd(),
+            )
+        except (OSError, ValueError) as error:
+            return str(error)
+        return None
+    kind = system_kind_for_atoms(controller.atoms)
+    reason = task_system_error(task, kind)
+    if reason:
         return reason
-    if controller.structure_kind() == "0d":
+    if kind == "embedded":
         if not controller.can_run_embedding():
             return "Attach a native host potential before running an embedded calculation."
         if controller.embedding_host_scf_status() == "START":
@@ -48,31 +63,63 @@ def edit_custom_parameters(
     parent: QWidget,
     parameters: InputParameters,
     *,
+    input_directory: Path | None = None,
     track_launch_monitor=None,
     project_repository=None,
 ) -> bool:
     """Edit an isolated input file, then optionally submit a single run."""
     expected_generation = controller.structure_generation
+    source_directory = None
+    if controller.atoms is None:
+        source_directory = Path(input_directory or controller.directory or Path.cwd()).resolve()
+    directory = source_directory or controller.directory or input_directory
     task = parameters.task_name
-    explanation = lambda candidate: calculation_unavailable_reason(controller, candidate)
+
+    def explanation(candidate):
+        return calculation_unavailable_reason(
+            controller, candidate, file_source_directory=source_directory,
+        )
+
     if task is not None and is_guided_task(task):
         dialog = GuidedInputParametersDialog(
             task, parameters, parent=parent, atoms=controller.atoms,
             calculation_unavailable_reason=explanation,
+            file_source_directory=source_directory,
+            directory=directory,
         )
     else:
         dialog = InputParametersDialog(
             parameters, parent=parent, atoms=controller.atoms,
             calculation_mode=True,
             calculation_unavailable_reason=explanation,
+            file_source_directory=source_directory,
+            directory=directory,
         )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return True  # The file may have been saved even if running was cancelled.
 
-    request = calculation_flow._one_off_task_request(
-        controller, dialog.parameters(),
-        expected_structure_generation=expected_generation, parent=parent,
-    )
+    parameters = dialog.parameters()
+    if source_directory is None:
+        request = calculation_flow._one_off_task_request(
+            controller, parameters,
+            expected_structure_generation=expected_generation, parent=parent,
+        )
+    else:
+        try:
+            source = load_existing_potential_input(parameters, source_directory)
+            parameters = source.parameters
+        except Exception as exc:  # noqa: BLE001 - native potential parsers expose varied errors
+            QMessageBox.critical(parent, "Cannot Use Input Potentials", str(exc))
+            return False
+        request = CalculationRequest(
+            atoms=source.potential.atoms,
+            input_parameters=parameters,
+            directory=str(source_directory),
+            structure_id=None,
+            state_id=None,
+            potential=False,
+            file_source=source,
+        )
     if request is None:
         return False
     calculation_flow.run_calculation(
@@ -104,6 +151,7 @@ def load_custom_input(
     recent_files.remember("input", path)
     return edit_custom_parameters(
         controller, recent_files, parent, parameters,
+        input_directory=path.parent,
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
     )

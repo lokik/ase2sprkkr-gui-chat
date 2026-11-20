@@ -2,15 +2,21 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from shutil import copyfile
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
+from ase import Atoms
+import ase2sprkkr
 from ase2sprkkr import InputParameters
-from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
+import pytest
+from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox, QTabWidget
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
+from ase2sprkkr_gui.gui.application.sprkkr_execution import SprkkrExecution
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.dialogs import expert_input
@@ -98,7 +104,7 @@ def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatc
         task_chooser.InputParameters, "input_parameters_registry",
         SimpleNamespace(definition_for_task=lambda _task: schema),
     )
-    monkeypatch.setattr(task_chooser, "detect_structure_kind", lambda _atoms: "3d")
+    monkeypatch.setattr(task_chooser, "system_kind_for_atoms", lambda _atoms: "3d")
 
     chooser = TaskChooserDialog(object())
     info_col = chooser._fields.index("info")
@@ -136,8 +142,8 @@ def test_info_falls_back_to_first_sentence_when_short_summary_is_missing(monkeyp
 
 def test_applicability_is_not_conflated_with_execution_readiness():
     task = SimpleNamespace(name="TEST", executable="kkrgen", supports={"3d"})
-    assert applicability(task, "0d")[0] == "No"
-    assert "free clusters" in applicability(task, "0d")[1]
+    assert applicability(task, "cluster")[0] == "No"
+    assert "free clusters" in applicability(task, "cluster")[1]
     assert applicability(task, "2d")[0] == "No"
     assert applicability(task, "3d")[0] == "Yes"
 
@@ -146,14 +152,18 @@ def test_applicability_is_not_conflated_with_execution_readiness():
     task.supports = {"2d"}
     assert applicability(task, "3d")[0] == "No"
 
-    # Only 0D atoms with a host are an embedded cluster.
     task.supports = {"3d", "embedded"}
-    embedded = SimpleNamespace(embedding_host=object())
-    assert applicability(task, "0d", atoms=embedded)[0] == "Yes"
-    assert applicability(task, "0d")[0] == "No"
+    assert applicability(task, "embedded")[0] == "Yes"
+    assert applicability(task, "cluster")[0] == "No"
     task.supports = {"3d", "cluster"}
-    assert applicability(task, "0d")[0] == "Yes"
-    assert applicability(task, "0d", atoms=embedded)[0] == "No"
+    assert applicability(task, "cluster")[0] == "Yes"
+    assert applicability(task, "embedded")[0] == "No"
+
+
+def test_custom_calculation_rejects_unsupported_free_cluster():
+    controller = WorkspaceController(WorkspaceState(atoms=Atoms("Fe")))
+    error = custom_flow.calculation_unavailable_reason(controller, InputParameters.for_task("SCF"))
+    assert "free clusters without a host" in error
 
 
 def test_task_chooser_filters_sorts_and_keeps_unsupported_selectable(monkeypatch):
@@ -234,9 +244,87 @@ def test_custom_input_is_available_without_structure_and_does_not_publish_ipd(
     assert edited == [(controller, history, "SCF")]
     assert controller.input_parameters is None
     assert controller.atoms is None
-    assert "Load or create a structure" in custom_flow.calculation_unavailable_reason(
+    assert "CONTROL.POTFIL" in custom_flow.calculation_unavailable_reason(
         controller, InputParameters.for_task("SCF"),
     )
+
+
+@pytest.mark.parametrize(("guided", "embedded"), [(True, False), (False, True)])
+def test_file_input_prepares_without_workspace_structure(tmp_path, monkeypatch, guided, embedded):
+    _app()
+    controller = WorkspaceController(WorkspaceState())
+    history = RecentFiles(tmp_path / "recent.json")
+    source = tmp_path / "Fe.pot"
+    cluster = tmp_path / "Fe3CoFe3.clupot"
+    examples = Path(ase2sprkkr.__file__).parent / "potentials" / "examples"
+    copyfile(examples / "Fe3CoFe3.host.pot", source)
+    if embedded:
+        copyfile(examples / "Fe3CoFe3.clu.pot", cluster)
+    original = {path: path.read_bytes() for path in (source, cluster) if path.is_file()}
+    run_path = tmp_path / "run"
+    run_path.mkdir()
+    monkeypatch.setattr(custom_flow, "is_guided_task", lambda _task: guided)
+    dialog_type = (
+        custom_flow.GuidedInputParametersDialog if guided
+        else custom_flow.InputParametersDialog
+    )
+
+    def configure(dialog):
+        if guided:
+            assert dialog.navigation.item(0).text() == "Input files"
+        else:
+            assert dialog.findChild(QTabWidget).tabText(0) == "Input files"
+        assert not dialog.calculate_button.isEnabled()
+        if embedded:
+            assert dialog.session.set_value(("CONTROL", "CLUTYPE"), "embedded")
+        assert dialog.session.set_value(("CONTROL", "POTFIL"), source.name)
+        if embedded:
+            assert not dialog.calculate_button.isEnabled()
+            assert dialog.session.set_value(("CONTROL", "POTFIL_CLU"), cluster.name)
+        assert dialog.session.set_value(("CONTROL", "ADSI"), "")
+        assert dialog.calculate_button.isEnabled()
+        return QDialog.DialogCode.Accepted
+
+    prepared_files = []
+    prepare_files = SprkkrExecution.prepare_files
+
+    def prepare(execution):
+        request = execution.request
+        assert request.directory == str(run_path)
+        assert request.potential is False
+        assert request.structure_id is None
+        assert request.state_id is None
+        assert request.input_parameters.CONTROL.DATASET() == ("CoFe6" if embedded else "Fe")
+        files = prepare_files(execution)
+        _, input_file, host_file, _ = files
+        prepared_files.append(input_file)
+        saved = InputParameters.from_file(input_file)
+        assert Path(host_file) == source
+        assert saved.CONTROL.POTFIL() == "../Fe.pot"
+        if embedded:
+            assert saved.CONTROL.POTFIL_CLU() == "../Fe3CoFe3.clupot"
+        assert saved.CONTROL.ADSI() == ""
+        return files
+
+    def select_profile(_parent, *, directory, **_options):
+        assert directory == str(tmp_path)
+        return True, None, None, str(run_path), None, True, False
+
+    monkeypatch.setattr(dialog_type, "exec", configure)
+    monkeypatch.setattr(custom_flow.calculation_flow, "_select_profile", select_profile)
+    monkeypatch.setattr(SprkkrExecution, "prepare_files", prepare)
+    monkeypatch.setattr(QMessageBox, "information", lambda *_args: None)
+    monkeypatch.setattr(
+        QMessageBox, "critical", lambda _parent, _title, message: pytest.fail(message),
+    )
+    assert custom_flow.edit_custom_parameters(
+        controller, history, None, InputParameters.for_task("SCF"),
+        input_directory=tmp_path,
+    )
+    assert len(prepared_files) == 1
+    assert controller.atoms is None
+    assert controller.input_parameters is None
+    assert all(path.read_bytes() == content for path, content in original.items())
 
 
 def test_cli_input_uses_standalone_editor_and_not_workspace_document(tmp_path, monkeypatch):
@@ -272,7 +360,7 @@ def test_expert_input_supports_independent_save_and_calculation_reason(monkeypat
     monkeypatch.setattr(dialog.tree_editor, "commit_pending", lambda: True)
     monkeypatch.setattr(
         expert_input, "choose_and_save_input_parameters",
-        lambda params, parent: saved.append((params, parent)) or True,
+        lambda params, parent, **_options: saved.append((params, parent)) or True,
     )
     dialog.save_btn.click()
     assert len(saved) == 1
@@ -312,9 +400,10 @@ def test_expert_schema_load_accepts_task_switch_but_guided_restricts_it(
 
 
 def test_native_2d_applicability_uses_registered_task_metadata():
-    from ase import Atoms
+    from ase2sprkkr.sprkkr.build import semiinfinite_system
 
-    layer = Atoms("Fe", cell=[2.8, 2.8, 12], pbc=[True, True, False])
+    bulk = Atoms("Fe", cell=[2.8, 2.8, 2.8], pbc=True)
+    layer = semiinfinite_system(bulk, repeat=2)
     surface_choices = {row.name: row for row in task_chooser.task_choices(layer)}
     for name in ("SCF", "DOS", "JXC", "BSFEK", "ARPES"):
         assert surface_choices[name].applicable == "Yes"
@@ -322,7 +411,6 @@ def test_native_2d_applicability_uses_registered_task_metadata():
                  "BONDING", "PLOT2DRHO"):
         assert surface_choices[name].applicable == "No"
 
-    bulk = Atoms("Fe", cell=[2.8, 2.8, 2.8], pbc=True)
     bulk_choices = {row.name: row for row in task_chooser.task_choices(bulk)}
     assert bulk_choices["CHILANDAU"].applicable == "Yes"
     assert bulk_choices["BONDING"].applicable == "No"

@@ -145,8 +145,18 @@ def run_calculation(
     # Guided actions are not the only entry point (Expert Mode also calls this
     # function). Never submit an embedded run against a START periodic host.
     # A partially converged host is permitted only after explicit confirmation.
-    if (request_override is None or request_override.potential is None) and controller.structure_kind() == "0d" and controller.can_run_embedding():
-        host_status = controller.embedding_host_scf_status()
+    check_host = False
+    host_status = None
+    if request_override is not None and request_override.potential is False:
+        host = getattr(request_override.atoms, "embedding_host", None)
+        if host is not None:
+            check_host = True
+            host_status = host.SCF_INFO.SCFSTATUS()
+    elif request_override is None or request_override.potential is None:
+        check_host = controller.structure_kind() == "0d" and controller.can_run_embedding()
+        if check_host:
+            host_status = controller.embedding_host_scf_status()
+    if check_host:
         if host_status == "START":
             QMessageBox.information(
                 parent, "Host SCF Required",
@@ -177,20 +187,21 @@ def run_calculation(
     if select_profile:
         # Resolve the directory only after input-parameter editing. Cancelling
         # execution setup must not change the workspace.
-        if (
-            controller.atoms is None
-            or (controller.input_parameters is None and request_override is None)
-            or controller.structure_id is None
-            or controller.state_id is None
+        if request_override is None and (
+            controller.atoms is None or controller.input_parameters is None
+            or controller.structure_id is None or controller.state_id is None
         ):
             return None
         directory_generation = controller.directory_generation
         project_generation = controller.active_project_generation
+        initial_directory = controller.directory
+        if request_override is not None and not restore_run_directory:
+            initial_directory = request_override.directory or initial_directory
         selection = _select_profile(
             parent,
             input_parameters=(request_override.input_parameters if request_override is not None
                               else controller.input_parameters),
-            directory=controller.directory,
+            directory=initial_directory,
             project_repository=project_repository,
             active_project_id=project_id,
             position_like_window=position_like_window,
@@ -218,7 +229,7 @@ def run_calculation(
             return None
 
     try:
-        request = (replace(request_override, directory=controller.directory)
+        request = (replace(request_override, directory=controller.directory or request_override.directory)
                    if request_override is not None
                    else controller.create_calculation_request())
     except CalculationNotReady:
@@ -380,6 +391,7 @@ def configure_and_run_task(
             parent=parent,
             atoms=atoms,
             dataset_default_mode=dataset_default_mode,
+            directory=controller.directory,
         )
     except GuidedTaskUnavailable as exc:
         QMessageBox.critical(
@@ -456,6 +468,7 @@ def configure_and_run_host_scf(
             "scf", parent=parent, atoms=host.atoms,
             dataset_default_mode=dataset_default_mode,
             dataset_prefix="host_",
+            directory=controller.directory,
         )
     except GuidedTaskUnavailable as exc:
         QMessageBox.critical(parent, "Task Unavailable", str(exc))
@@ -604,13 +617,16 @@ def recompute_result(
             parameters,
             parent=parent,
             atoms=atoms,
+            directory=controller.directory,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return None
         parameters = dialog.parameters()
         position_like_window = "guided-input"
     else:
-        edited = edit_input_parameters(parameters, parent=parent, atoms=atoms)
+        edited = edit_input_parameters(
+            parameters, parent=parent, atoms=atoms, directory=controller.directory,
+        )
         if edited is None:
             return None
         parameters = edited
