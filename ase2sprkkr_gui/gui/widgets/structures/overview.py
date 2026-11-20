@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 import numpy as np
 from ase.data.colors import jmol_colors
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSignalBlocker, Qt
 from PyQt6.QtWidgets import (
     QBoxLayout,
     QButtonGroup,
@@ -224,8 +224,11 @@ class StructureOverviewWidget(QFrame):
         # Keep the selected source while the same kind of structure is
         # refreshed. With no host, return to the ordinary structure preview.
         self._view_selector.setVisible(has_host)
-        if not has_host:
-            self.cluster_radio.setChecked(True)
+        if not has_host and not self.cluster_radio.isChecked():
+            # Checking Cluster toggles both radio buttons. Ignore the two
+            # intermediate notifications; _render_preview() runs once below.
+            with QSignalBlocker(self.host_radio), QSignalBlocker(self.cluster_radio):
+                self.cluster_radio.setChecked(True)
         self.preview.setVisible(atoms is not None)
         self._render_preview()
 
