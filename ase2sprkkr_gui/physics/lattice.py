@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import numpy as np
-from ase2sprkkr import SPRKKRAtoms
+from ase2sprkkr.sprkkr.sprkkr_atoms import system_kind_for_atoms
 
 from ase2sprkkr_gui.ase.copy import copy_for_edit
 
@@ -13,22 +13,10 @@ StructureKind = Literal["0d", "2d", "3d", "unknown"]
 
 def detect_structure_kind(atoms: Any | None) -> StructureKind | None:
     """Classify structures supported by the bulk and layered workflows."""
-    if atoms is None:
-        return None
-    # An embedded cluster is finite even though its *host* can be periodic.
-    if ("sprkkr_embedding" in getattr(atoms, "arrays", {})
-            and getattr(atoms, "info", {}).get("sprkkr_embedding_host") is not None):
+    kind = system_kind_for_atoms(atoms)
+    if kind == "embedded":
         return "0d"
-    periodic = sum(atoms.get_pbc())
-    if periodic == 3:
-        return "3d"
-    if (
-        periodic == 2
-        and isinstance(atoms, SPRKKRAtoms)
-        and {"left", "central", "right"}.issubset(atoms.regions)
-    ):
-        return "2d"
-    return "unknown"
+    return "unknown" if kind == "cluster" else kind
 
 
 def scale_lattice_to_lengths(lattice, lengths):

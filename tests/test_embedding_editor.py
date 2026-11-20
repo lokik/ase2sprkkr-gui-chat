@@ -831,14 +831,16 @@ def test_editor_requires_approval_to_drop_calculated_radial_data(monkeypatch):
     assert cluster.sites[0].occupation.to_dict(True) == {"Cu": 1.0}
 
 
-def test_radial_data_reset_requires_explicit_authorization(monkeypatch):
+def test_radial_data_reset_requires_explicit_authorization():
     parent = host()
     base = EmbeddingDraft(parent)
     base.include([base.center])
     cluster = base.to_atoms()
+    atomic_type = cluster.sites[0].atomic_type(0)
+    atomic_type.charge = np.ones(len(atomic_type.mesh))
     edit = EmbeddingDraft(parent, cluster)
     edit.set_occupation([edit.center], {"Fe": 1.0})
-    monkeypatch.setattr(edit, "would_discard_radial_data", lambda: True)
+    assert edit.would_discard_radial_data()
     with pytest.raises(ValueError, match="allow_radial_reset"):
         edit.to_atoms()
     changed = edit.to_atoms(allow_radial_reset=True)
@@ -2405,7 +2407,8 @@ def test_expansion_preview_uses_only_the_gete_transition_region(gete_host):
     assert not dialog.draft.entries
 
 
-def test_calculated_cluster_edit_keeps_radial_starting_density_and_embedded_tab(tmp_path):
+@pytest.mark.parametrize("edit", ["center", "displacement"])
+def test_calculated_cluster_edit_keeps_radial_starting_density_and_embedded_tab(tmp_path, edit):
     """An edited cluster can restart from its old radial data without convergence."""
     from pathlib import Path
     import ase2sprkkr
@@ -2423,9 +2426,12 @@ def test_calculated_cluster_edit_keeps_radial_starting_density_and_embedded_tab(
     parent = Potential.from_file(host_file)
     original = Potential.from_file(cluster_file, host=parent).atoms
     draft = EmbeddingDraft(parent, original)
-    key = next(iter(draft.entries))
-    old_displacement = draft.entries[key].displacement.copy()
-    draft.set_displacement([key], old_displacement + [0.02, 0.0, 0.0])
+    if edit == "center":
+        draft.set_center(next(key for key in draft.entries if key != draft.center))
+    else:
+        key = next(iter(draft.entries))
+        old_displacement = draft.entries[key].displacement.copy()
+        draft.set_displacement([key], old_displacement + [0.02, 0.0, 0.0])
 
     assert not draft.would_discard_radial_data()
     edited = draft.to_atoms()

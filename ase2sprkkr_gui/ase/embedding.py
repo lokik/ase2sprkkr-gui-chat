@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from ase.data import atomic_numbers
@@ -17,6 +17,11 @@ from ase2sprkkr import Potential, SPRKKRAtoms
 
 from ase2sprkkr_gui.ase.copy import copy_for_edit
 from ase2sprkkr.sprkkr.embedding import embedding_data, host_atoms, host_dimension
+from ase2sprkkr.sprkkr.embedding_edits import (
+    EmbeddedSiteParameters,
+    embedded_edit_discards_radial_data,
+    rebuild_embedded_cluster,
+)
 from ase2sprkkr.sprkkr.embedding_geometry import (
     EmbeddingSymmetry,
     HostSite,
@@ -24,20 +29,6 @@ from ase2sprkkr.sprkkr.embedding_geometry import (
     embedding_sites_within_radius,
     embedding_sites_within_shells,
 )
-
-
-@dataclass(eq=False)
-class EmbeddedSiteDraft:
-    occupation: dict[str, float]
-    displacement: np.ndarray = field(default_factory=lambda: np.zeros(3))
-    magnetisation: np.ndarray = field(default_factory=lambda: np.zeros(2))
-
-    def __eq__(self, other):
-        if not isinstance(other, EmbeddedSiteDraft):
-            return NotImplemented
-        return (self.occupation == other.occupation
-                and np.array_equal(self.displacement, other.displacement)
-                and np.array_equal(self.magnetisation, other.magnetisation))
 
 
 # GUI metadata travels with one embedded Atoms object, not with its host or
@@ -50,7 +41,7 @@ class EmbeddingDraftState:
     """Detached editable state; contains no host or original radial data."""
 
     center: HostSite
-    entries: dict[HostSite, EmbeddedSiteDraft]
+    entries: dict[HostSite, EmbeddedSiteParameters]
 
 
 def cluster_center(host, cluster: SPRKKRAtoms) -> HostSite:
@@ -260,9 +251,9 @@ class EmbeddingDraft:
         if not allowed:
             raise ValueError("The host has no sites available for embedding")
         self.allowed = frozenset(allowed)
-        self.entries: dict[HostSite, EmbeddedSiteDraft] = {}
+        self.entries: dict[HostSite, EmbeddedSiteParameters] = {}
         self.original_cluster = cluster
-        self._original_entries: dict[HostSite, EmbeddedSiteDraft] = {}
+        self._original_entries: dict[HostSite, EmbeddedSiteParameters] = {}
         self.center = HostSite(allowed[0], (0,) * self.dimension)
         if cluster is not None:
             if cluster.embedding_host is not host:
@@ -271,7 +262,7 @@ class EmbeddingDraft:
                 host_site = HostSite(int(row[0]), tuple(int(v) for v in row[1:])).canonical(host)
                 if host_site.original_site not in self.allowed or host_site in self.entries:
                     raise ValueError("Invalid or duplicate embedded host site")
-                self.entries[host_site] = EmbeddedSiteDraft(
+                self.entries[host_site] = EmbeddedSiteParameters(
                     occupation=dict(site.occupation.to_dict(True)),
                     displacement=np.asarray(site.embedding.displacement, dtype=float).copy(),
                     magnetisation=np.asarray(site.magnetisation, dtype=float).copy(),
@@ -337,83 +328,10 @@ class EmbeddingDraft:
         """Convert a displayed vector back before recording an Undoable edit."""
         return np.asarray(value, dtype=float) @ self._to_source
 
-    def _radial_sources(self):
-        """Find calculated atomic types by embedded identity and by element.
-
-        Matching an original site is preferred. A different site containing
-        the same element is also a valid *initial guess*, not a converged
-        result. Never transplant radial data between different elements.
-        """
-        by_site, by_element = {}, {}
-        if self.original_cluster is None:
-            return by_site, by_element
-        for row, site in zip(embedding_data(self.original_cluster),
-                             self.original_cluster.sites):
-            key = HostSite(int(row[0]), tuple(int(v) for v in row[1:])).canonical(self.host)
-            types = {atomic_type.symbol: atomic_type for atomic_type in site.occupation}
-            by_site[key] = types
-            for symbol, atomic_type in types.items():
-                if atomic_type.has_converged_data():
-                    by_element.setdefault(symbol, atomic_type)
-        # New substitutions can also start from the converged host density
-        # of the same chemical element. Ordinary ASE hosts have no such data.
-        reference = host_atoms(self.host)
-        if (isinstance(reference, SPRKKRAtoms)
-                and reference.are_sites_inited()):
-            for site in reference.sites:
-                for atomic_type in site.occupation:
-                    if atomic_type.has_converged_data():
-                        by_element.setdefault(atomic_type.symbol, atomic_type)
-        return by_site, by_element
-
-    @staticmethod
-    def _initial_radial_types(key, entry, by_site, by_element):
-        """Return a complete, mesh-compatible initial density or None.
-
-        Native ITERATING CLUPOT files require a full radial triplet for every
-        cluster type. Partial density cannot be silently advertised as a
-        restart. Keep the source data intact in either case.
-        """
-        local_types = by_site.get(key, {})
-        sources = {}
-        for symbol in entry.occupation:
-            atomic_type = local_types.get(symbol)
-            if atomic_type is None or not atomic_type.has_converged_data():
-                atomic_type = by_element.get(symbol)
-            if atomic_type is None:
-                return None
-            sources[symbol] = atomic_type
-        if not sources:
-            return None
-        mesh = next(iter(sources.values())).mesh
-        if mesh is None:
-            return None
-        signature = (mesh.to_tuple(), mesh.fullpot_tuple())
-        if any(
-            atom_type.mesh is None
-            or (atom_type.mesh.to_tuple(), atom_type.mesh.fullpot_tuple()) != signature
-            for atom_type in sources.values()
-        ):
-            return None
-        return sources
-
     def would_discard_radial_data(self) -> bool:
-        """Warn only when a physical edit cannot retain a native restart."""
-        if self.original_cluster is None or self._physical_data_unchanged():
-            return False
-        has_radial = any(
-            atomic_type.potential is not None
-            or atomic_type.charge is not None
-            or atomic_type.moments is not None
-            for site in self.original_cluster.sites
-            for atomic_type in site.occupation
-        )
-        if not has_radial:
-            return False
-        by_site, by_element = self._radial_sources()
-        return any(
-            self._initial_radial_types(key, entry, by_site, by_element) is None
-            for key, entry in self.entries.items()
+        """Ask whether a physical edit would lose native restart data."""
+        return not self._physical_data_unchanged() and embedded_edit_discards_radial_data(
+            self.original_cluster, self.entries
         )
 
     def canonical(self, site: HostSite) -> HostSite:
@@ -455,10 +373,10 @@ class EmbeddingDraft:
             return self.equivalents(sites)
         return tuple(sorted({self.canonical(site) for site in sites}))
 
-    def _entry(self, site: HostSite) -> EmbeddedSiteDraft:
+    def _entry(self, site: HostSite) -> EmbeddedSiteParameters:
         site = self.canonical(site)
         if site not in self.entries:
-            self.entries[site] = EmbeddedSiteDraft(occupation=site.occupation(self.geometry_host))
+            self.entries[site] = EmbeddedSiteParameters(occupation=site.occupation(self.geometry_host))
         return self.entries[site]
 
     def include(self, sites) -> int:
@@ -529,67 +447,21 @@ class EmbeddingDraft:
         return self.include(self.sites_within_shells(shells))
 
     def to_atoms(self, *, allow_radial_reset=False, shallow=False) -> SPRKKRAtoms:
-        """Build independent atoms without silently losing radial results.
+        """Materialize the edited cluster without silently losing radial results.
 
         Existing radial data can only be reset after explicit caller approval.
         An unchanged cluster is returned as is, including its native potential.
         """
-        if self.would_discard_radial_data() and not allow_radial_reset:
-            raise ValueError(
-                "Editing this cluster would discard existing radial data. "
-                "Pass allow_radial_reset=True only after explicit confirmation."
-            )
         if self.is_unchanged():
             return self.original_cluster
-        if not self.entries:
-            raise ValueError("The cluster must contain at least one site")
         if self._physical_data_unchanged():
             # Only the GUI centre changed: retain all native radial/SCF data
             # and leave the source atoms untouched until outer Apply.
-            atoms = copy_for_edit(self.original_cluster)
+            atoms = self.original_cluster.copy(shallow=shallow)
         else:
-            ordered = sorted(self.entries.items())
-            atoms = SPRKKRAtoms.from_embedding(
-                self.host,
-                [(key.original_site, key.cell_index, entry.occupation)
-                 for key, entry in ordered],
-            )
-            by_site, by_element = self._radial_sources()
-            # Each new cluster owns its type/mesh containers. Preview-only
-            # materialization may share radial arrays; accepted edits own their
-            # arrays so subsequent calculations cannot mutate the source.
-            meshes, types = {}, {}
-            complete_restart = self.original_cluster is not None
-            for (key, entry), site in zip(ordered, atoms.sites):
-                sources = self._initial_radial_types(
-                    key, entry, by_site, by_element
-                )
-                if sources is None:
-                    complete_restart = False
-                else:
-                    source_mesh = next(iter(sources.values())).mesh
-                    target_mesh = meshes.setdefault(
-                        id(source_mesh), source_mesh.copy()
-                    )
-                    site.site_type.mesh = target_mesh
-                    occupation = {}
-                    for symbol, fraction in entry.occupation.items():
-                        source_type = sources[symbol]
-                        type_key = (id(source_type), id(target_mesh))
-                        if type_key not in types:
-                            types[type_key] = source_type.copy(
-                                for_mesh=target_mesh, shallow=shallow
-                            )
-                        occupation[types[type_key]] = fraction
-                    site.occupation = occupation
-                site.embedding.displacement = entry.displacement.copy()
-                site.magnetisation = entry.magnetisation.copy()
-
-            # Reusing an old density is an unconverged restart. The native
-            # CLUPOT writer serializes complete radial data for ITERATING;
-            # START would silently omit them.
-            atoms.info["sprkkr_embedding_scf_status"] = (
-                "ITERATING" if complete_restart else "START"
+            atoms = rebuild_embedded_cluster(
+                self.host, self.entries, original=self.original_cluster,
+                allow_radial_reset=allow_radial_reset, shallow=shallow,
             )
         set_cluster_center(atoms, self.center)
         return atoms
