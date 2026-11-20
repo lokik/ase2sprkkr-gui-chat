@@ -267,8 +267,12 @@ def run_calculation(
         return None
 
     def adoption_completed(adoption) -> None:
-        if adoption.output_path is not None:
-            recent_files.remember("output", adoption.output_path)
+        recent_files.remember_result(
+            adoption.output_path,
+            potential_path=(
+                adoption.potential_path if adoption.potential_error is None else None
+            ),
+        )
         if adoption.potential_error is not None:
             QMessageBox.warning(
                 parent,
