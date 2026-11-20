@@ -59,6 +59,39 @@ def test_modal_task_returns_result_or_reraises_worker_error(fail):
         assert modal_task.run_modal_task(parent, operation) is value
 
 
+def test_modal_task_prepares_on_gui_thread_before_hiding_wait_dialog():
+    app = _app()
+    parent = QWidget()
+    called = []
+
+    def read():
+        assert QThread.currentThread() is not app.thread()
+        return 21
+
+    def prepare(value):
+        assert QThread.currentThread() is app.thread()
+        dialog = parent.findChild(_ModalTaskDialog)
+        assert dialog is not None and dialog.isVisible()
+        called.append(value)
+        return 2 * value
+
+    assert modal_task.run_modal_task(parent, read, on_success=prepare) == 42
+    assert called == [21]
+
+
+def test_modal_task_preparation_error_is_reported_to_caller():
+    _app()
+    parent = QWidget()
+    error = ValueError("editor preparation failed")
+
+    def prepare(_value):
+        raise error
+
+    with pytest.raises(ValueError) as caught:
+        modal_task.run_modal_task(parent, lambda: 21, on_success=prepare)
+    assert caught.value is error
+
+
 @pytest.mark.parametrize("fail", [False, True])
 def test_modal_task_shutdown_does_not_require_another_gui_event(fail, monkeypatch):
     app = _app()
