@@ -28,7 +28,8 @@ class EmbeddingPreview(QWidget):
     pointSelected = pyqtSignal(int)
 
     def __init__(self, parent=None, *, selectable=False, controls_on_right=False,
-                 controls_header: QWidget | None = None, compact=False,
+                 controls_header: QWidget | None = None,
+                 controls_footer: QWidget | None = None, compact=False,
                  show_bulk_opacity=False):
         super().__init__(parent)
         self._press = None
@@ -76,6 +77,8 @@ class EmbeddingPreview(QWidget):
         self.fit_button = QPushButton("Fit")
         self.fit_button.clicked.connect(self._fit)
         controls.addWidget(self.fit_button)
+        if controls_footer is not None:
+            controls.addWidget(controls_footer)
         self.bulk_opacity_slider = None
         self.bulk_opacity_label = None
         if show_bulk_opacity:
@@ -101,6 +104,8 @@ class EmbeddingPreview(QWidget):
             control.setFixedWidth(control_width)
         if self.bulk_opacity_slider is not None:
             self.bulk_opacity_slider.setFixedWidth(control_width)
+        if controls_footer is not None:
+            controls_footer.setFixedWidth(control_width)
 
         self.site_numbers = None
         if selectable:
