@@ -42,12 +42,14 @@ from ase2sprkkr_gui.gui.flows import structures as structure_flows
 from ase2sprkkr_gui.gui.flows import visualization as visualization_flow
 from ase2sprkkr_gui.gui.recent_presentation import RecentLaunchKind, recent_menu_items
 from ase2sprkkr_gui.gui.style import (
+    PANEL_RADIUS,
     SPACE_SM,
     SPACE_XL,
     SPACE_XS,
     SPACE_XXL,
     button_stylesheet,
     heading_font,
+    palette_tint,
     secondary_text_stylesheet,
 )
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
@@ -103,7 +105,8 @@ class _RecentFooterButton(QToolButton):
         self._recent_path: str | None = None
         self._base_tooltip = ""
         self.setText(title)
-        self.setMaximumWidth(220)
+        # Keep the action name on one line; only the path may be elided.
+        self.setFixedWidth(194)
 
     def set_recent_path(self, path: str | None) -> None:
         self._recent_path = path
@@ -120,7 +123,7 @@ class _RecentFooterButton(QToolButton):
     def _refresh_label(self) -> None:
         if self._recent_path:
             # Reserve space for the icon and the enlarged menu split control.
-            available = max(32, self.width() - 76)
+            available = max(45, self.width() - 82)
             short_path = self.fontMetrics().elidedText(
                 self._recent_path, Qt.TextElideMode.ElideMiddle, available
             )
@@ -333,8 +336,16 @@ class WorkflowWindow(QMainWindow):
             group.setObjectName(object_name)
             group_layout = QHBoxLayout(group)
             inset = SPACE_SM if object_name == "workflowResultsNavigation" else 0
-            group_layout.setContentsMargins(inset, SPACE_XS, inset, 0)
+            group_layout.setContentsMargins(inset, SPACE_XS, inset, SPACE_XS)
             group_layout.setSpacing(SPACE_XS)
+            background = palette_tint(
+                self.palette(), self.palette().mid().color(),
+                light_amount=.08, dark_amount=.18,
+            )
+            group.setStyleSheet(
+                f"QWidget#{object_name} {{ background-color: {background.name()}; "
+                f"border-radius: {PANEL_RADIUS}px; }}"
+            )
             column.layout().addWidget(group)
             return group
 
@@ -354,13 +365,15 @@ class WorkflowWindow(QMainWindow):
             if not recent_menu:
                 button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(20, 20))
+            button.setIconSize(QSize(18, 18))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedHeight(48)
-            # Navigation is a compact toolbar, not another row of action cards.
-            button.setMinimumWidth(0)
+            button.setFixedHeight(44)
+            # Fixed/natural widths keep this a toolbar rather than stretched
+            # workflow cards. Recent buttons reserve room for their two lines.
+            if not recent_menu:
+                button.setMinimumWidth(82)
             button.setSizePolicy(
-                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
             mid = self.palette().mid().color().name()
             button.setStyleSheet(
@@ -398,6 +411,7 @@ class WorkflowWindow(QMainWindow):
         )
         self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
         add_separator(structure_navigation)
+        structure_navigation.layout().addStretch(1)
         self._start_over_button = add_navigation_button(
             structure_navigation,
             "Start from Scratch",
@@ -418,6 +432,7 @@ class WorkflowWindow(QMainWindow):
         calculation_navigation = navigation_group(
             content, "workflowCalculationNavigation"
         )
+        calculation_navigation.layout().addStretch(1)
         self._repeat_button = add_navigation_button(
             calculation_navigation,
             "Repeat Calculation",

@@ -243,7 +243,6 @@ class ResultActionsWidget(QWidget):
         record_actions_layout.addWidget(self._recompute_button)
         record_actions_layout.addStretch(1)
         self._record_actions.hide()
-        layout.addWidget(self._record_actions)
 
         self._result_file_warning = QLabel("", self)
         self._result_file_warning.setWordWrap(True)
@@ -258,7 +257,14 @@ class ResultActionsWidget(QWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self._container = QWidget(self._scroll)
-        self._grid = QGridLayout(self._container)
+        value_layout = QVBoxLayout(self._container)
+        value_layout.setContentsMargins(0, 0, 0, 0)
+        value_layout.setSpacing(4)
+        self._grid = QGridLayout()
+        value_layout.addLayout(self._grid)
+        self._record_actions.setParent(self._container)
+        value_layout.addWidget(self._record_actions)
+        value_layout.addStretch(1)
         self._grid.setContentsMargins(0, 0, 0, 0)
         self._grid.setHorizontalSpacing(8)
         self._grid.setVerticalSpacing(6)
@@ -297,7 +303,10 @@ class ResultActionsWidget(QWidget):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
         bottom_row.addWidget(check_slot, 1)
-        layout.addWidget(self._bottom_controls)
+        # Keep state/assignment controls directly below the result tree,
+        # never below the selected result's potentially long values list.
+        layout.insertWidget(layout.indexOf(self._selector) + 1, self._bottom_controls)
+        self._bottom_controls.hide()
 
     @property
     def has_rows(self) -> bool:
@@ -361,6 +370,7 @@ class ResultActionsWidget(QWidget):
             self._selector.blockSignals(False)
 
         self._selector.setVisible(bool(model.roots))
+        self._bottom_controls.setVisible(bool(model.roots))
         self._update_assignment_controls()
         self.set_result(model.selected)
 

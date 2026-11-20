@@ -644,7 +644,12 @@ def test_workflow_navigation_has_three_compact_column_footers(
         3, 3, 3,
     ]
     assert footers[0].layout().itemAt(1).widget().frameShape() == QFrame.Shape.VLine
-    assert footers[2].layout().itemAt(2).widget().frameShape() == QFrame.Shape.VLine
+    assert footers[2].layout().itemAt(3).widget().frameShape() == QFrame.Shape.VLine
+    # Global actions stay at the outer edges; the context actions face inward.
+    assert footers[0].layout().itemAt(2).spacerItem() is not None
+    assert footers[1].layout().itemAt(0).spacerItem() is not None
+    assert footers[1].layout().itemAt(4).spacerItem() is not None
+    assert footers[2].layout().itemAt(2).spacerItem() is not None
 
     buttons = [button for footer in footers for button in footer.findChildren(QToolButton)]
     assert buttons == [
@@ -664,15 +669,17 @@ def test_workflow_navigation_has_three_compact_column_footers(
         "Recent Results", "Project Browser", "Close",
     ]
     assert all(not button.icon().isNull() for button in buttons)
-    assert all(button.height() == 48 for button in buttons)
+    assert all(button.height() == 44 for button in buttons)
     assert all(
         button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         for button in buttons
     )
-    assert all(button.iconSize().width() == 20 for button in buttons)
+    assert all(button.iconSize().width() == 18 for button in buttons)
     assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
     assert footers[2].layout().contentsMargins().left() == 8
     assert footers[2].layout().contentsMargins().right() == 8
+    assert window._repeat_button.width() <= 194
+    assert window._recent_structures_button.minimumWidth() == 194
 
     assert all(
         "border-left: 6px" not in button.styleSheet()
@@ -683,7 +690,7 @@ def test_workflow_navigation_has_three_compact_column_footers(
         for button in buttons
     )
     assert all(
-        button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Preferred
+        button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
         for button in buttons
     )
     assert window._start_over_button.isHidden()
