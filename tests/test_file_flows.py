@@ -80,6 +80,54 @@ def test_input_flow_keeps_independent_structure_change(tmp_path, monkeypatch):
     assert history.paths("input") == (str(path),)
 
 
+
+def test_input_refresh_finishes_before_working_dialog_closes(tmp_path, monkeypatch):
+    path = tmp_path / "Fe.inp"
+    controller = WorkspaceController()
+    recent = RecentFiles(tmp_path / "recent.json")
+    events = []
+
+    monkeypatch.setattr(
+        file_flows.InputParameters, "from_file", staticmethod(lambda _path: object()),
+    )
+    controller.inputParametersChanged.connect(lambda _params: events.append("parameters"))
+    recent.changed.connect(lambda: events.append("actions"))
+
+    def modal(_parent, operation, *, on_success, **_kwargs):
+        result = operation()
+        prepared = on_success(result)
+        events.append("working closed")
+        return prepared
+
+    monkeypatch.setattr(file_flows, "run_modal_task", modal)
+    assert file_flows.load_input_parameters(controller, recent, path, object())
+    assert events == ["parameters", "actions", "working closed"]
+
+
+def test_structure_actions_refresh_before_working_dialog_closes(tmp_path, monkeypatch):
+    from ase2sprkkr_gui.gui.flows import structure_candidates
+
+    path = tmp_path / "Fe.xyz"
+    atoms = Atoms("Fe", cell=(3, 3, 3), pbc=True)
+    controller = WorkspaceController()
+    recent = RecentFiles(tmp_path / "recent.json")
+    events = []
+
+    monkeypatch.setattr(file_flows, "_read_structure_file", lambda _path: atoms)
+    controller.structureChanged.connect(lambda _atoms: events.append("structure"))
+    recent.changed.connect(lambda: events.append("actions"))
+
+    def modal(_parent, operation, *, on_success, **_kwargs):
+        result = operation()
+        prepared = on_success(result)
+        events.append("working closed")
+        return prepared
+
+    monkeypatch.setattr(structure_candidates, "run_modal_task", modal)
+    assert file_flows.load_structure(controller, recent, path, object())
+    assert events == ["structure", "actions", "working closed"]
+
+
 def test_structure_save_uses_published_atoms_and_updates_history(tmp_path, monkeypatch):
     structure_path = tmp_path / "Fe.xyz"
     atoms = Atoms("Fe")
@@ -156,8 +204,6 @@ def test_loaded_structure_is_clean_until_edited(tmp_path, monkeypatch):
 
 def test_loading_host_as_structure_replaces_an_existing_cluster(tmp_path, monkeypatch):
     """Opening a periodic host must never silently attach it to the old cluster."""
-    from types import SimpleNamespace
-
     cluster = Atoms("Fe", positions=[[0, 0, 0]], pbc=False)
     cluster.embedding_host = object()
     host_atoms = Atoms("Cu", cell=(3.6, 3.6, 3.6), pbc=True)
@@ -173,10 +219,7 @@ def test_loading_host_as_structure_replaces_an_existing_cluster(tmp_path, monkey
     monkeypatch.setattr(
         file_flows.Potential, "is_cluster_file", staticmethod(lambda _path: False)
     )
-    monkeypatch.setattr(
-        file_flows, "load_structure_candidate",
-        lambda *_args, **_kwargs: SimpleNamespace(atoms=host_atoms),
-    )
+    monkeypatch.setattr(file_flows, "_read_structure_file", lambda _path: host_atoms)
 
     assert file_flows.load_host_potential(controller, history, object())
     assert controller.atoms is host_atoms
