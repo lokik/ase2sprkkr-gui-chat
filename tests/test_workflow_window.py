@@ -165,7 +165,6 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     assert window._structure_title.text() == "Structure"
     assert not window._structure_overview.isHidden()
     assert "Edit Structure" in names(window._structure_actions)
-    assert "Visualize Structure" in names(window._structure_actions)
     assert "Save Structure" in names(window._structure_actions)
     assert window._actions.has_actions
     assert window._custom_button.text() == "Custom Calculation"
@@ -201,31 +200,10 @@ def test_column_headings_align_and_results_resize_both_action_columns(tmp_path):
     assert len({heading.font().pointSizeF() for heading in headings}) == 1
     assert len({heading.mapTo(window, QPoint(0, 0)).y() for heading in headings}) == 1
 
-    # The sections and their first action cards must share a top baseline,
-    # not just the three top-level column titles.
-    create_heading = next(
-        label
-        for label in window._structure_actions.findChildren(QLabel, "workflowActionGroupLabel")
-        if label.text() == "Create structure"
-    )
-    custom_heading = next(
-        label
-        for label in window._actions.findChildren(QLabel, "workflowActionGroupLabel")
-        if label.text() == "Custom"
-    )
-    assert create_heading.mapTo(window, QPoint(0, 0)).y() == custom_heading.mapTo(window, QPoint(0, 0)).y()
-
-    create_card = next(
-        card
-        for card in window._structure_actions.findChildren(QAbstractButton)
-        if card.accessibleName() == "Create a 3D Structure"
-    )
-    custom_card = next(
-        card
-        for card in window._actions.findChildren(QAbstractButton)
-        if card.accessibleName() == "Custom input file"
-    )
-    assert create_card.mapTo(window, QPoint(0, 0)).y() == custom_card.mapTo(window, QPoint(0, 0)).y()
+    # The initial calculation column now contains only its empty-state notice;
+    # the former Custom and Repeat cards are in the common bottom toolbar.
+    assert not window._actions.has_actions
+    assert window._calculate_notice.isVisible()
 
     splitter = window._layout_splitter
     assert isinstance(splitter, QSplitter)
