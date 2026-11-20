@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMess
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.dialogs import workflow_window as workflow_module
-from ase2sprkkr_gui.gui.widgets.action_card import action_card_accent
 from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
@@ -665,32 +664,29 @@ def test_workflow_navigation_has_three_compact_column_footers(
         "Recent Results", "Project Browser", "Close",
     ]
     assert all(not button.icon().isNull() for button in buttons)
-    assert all(button.height() == 56 for button in buttons)
+    assert all(button.height() == 48 for button in buttons)
     assert all(
         button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         for button in buttons
     )
-    assert all(button.iconSize().width() == 24 for button in buttons)
+    assert all(button.iconSize().width() == 20 for button in buttons)
     assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
     assert footers[2].layout().contentsMargins().left() == 8
     assert footers[2].layout().contentsMargins().right() == 8
 
-    for button, category in (
-        (window._settings_button, "neutral"),
-        (window._start_over_button, "destructive"),
-        (window._recent_structures_button, "structure"),
-        (window._repeat_button, "calculation"),
-        (window._load_input_button, "calculation"),
-        (window._custom_button, "calculation"),
-        (window._recent_results_button, "results"),
-        (window._project_browser_button, "results"),
-        (window._close_button, "neutral"),
-    ):
-        accent = action_card_accent(button.palette(), category).name()
-        assert f"border-left: 6px solid {accent}" in button.styleSheet()
-        assert "background-color:" in button.styleSheet()
-    for button in (window._settings_button, window._close_button):
-        assert button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
+    assert all(
+        "border-left: 6px" not in button.styleSheet()
+        for button in buttons
+    )
+    assert all(
+        "background-color:" in button.styleSheet()
+        for button in buttons
+    )
+    assert all(
+        button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Preferred
+        for button in buttons
+    )
+    assert window._start_over_button.isHidden()
     assert not window._start_over_button.isEnabled()
     assert not window._recent_structures_button.isEnabled()
     assert not window._recent_results_button.isEnabled()
@@ -763,6 +759,14 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
     ):
         assert button.isEnabled()
         assert button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        assert button.text().split("\n", 1)[0] == {
+            "structure": "Recent Structures",
+            "input": "Repeat Calculation",
+            "output": "Recent Results",
+        }[kind]
+        assert "\n" in button.text()
+        assert str(paths[kind][1]) in button.toolTip()
+        assert "width: 28px" in button.styleSheet()
         button.click()
         button.menu().actions()[1].trigger()
 
@@ -790,6 +794,7 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
     gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
     application.processEvents()
     assert window._start_over_button.isEnabled()
+    assert not window._start_over_button.isHidden()
     assert window._custom_button.text() == "Custom Calculation"
     gui.controller.reset()
     window.close()

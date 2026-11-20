@@ -4,7 +4,7 @@ from threading import Thread
 from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QKeySequence
+from PyQt6.QtGui import QIcon, QKeySequence, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -46,11 +46,10 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XL,
     SPACE_XS,
     SPACE_XXL,
-    action_card_stylesheet,
+    button_stylesheet,
     heading_font,
     secondary_text_stylesheet,
 )
-from ase2sprkkr_gui.gui.widgets.action_card import action_card_accent
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
 from ase2sprkkr_gui.gui.widgets.structures.overview import StructureOverviewWidget
 from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
@@ -95,6 +94,47 @@ def _check_recent_files(snapshot: RecentFilesSnapshot, signals: _RecentValidatio
     signals.finished.emit(snapshot, find_missing_recent_paths(snapshot))
 
 
+class _RecentFooterButton(QToolButton):
+    """A split-menu navigation button showing the most recent path."""
+
+    def __init__(self, title: str, parent: QWidget):
+        super().__init__(parent)
+        self._title = title
+        self._recent_path: str | None = None
+        self._base_tooltip = ""
+        self.setText(title)
+        self.setMaximumWidth(220)
+
+    def set_recent_path(self, path: str | None) -> None:
+        self._recent_path = path
+        self._refresh_label()
+
+    def set_base_tooltip(self, tooltip: str) -> None:
+        self._base_tooltip = tooltip
+        self._refresh_label()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._refresh_label()
+
+    def _refresh_label(self) -> None:
+        if self._recent_path:
+            # Reserve space for the icon and the enlarged menu split control.
+            available = max(32, self.width() - 76)
+            short_path = self.fontMetrics().elidedText(
+                self._recent_path, Qt.TextElideMode.ElideMiddle, available
+            )
+            label = f"{self._title}\n{short_path}"
+            tooltip = f"{self._base_tooltip}\n{self._recent_path}"
+        else:
+            label = self._title
+            tooltip = self._base_tooltip
+        if self.text() != label:
+            self.setText(label)
+        if self.toolTip() != tooltip:
+            self.setToolTip(tooltip)
+
+
 class WorkflowWindow(QMainWindow):
     """Primary task-oriented Ase2sprkkr application window."""
 
@@ -128,6 +168,9 @@ class WorkflowWindow(QMainWindow):
         # Results have their own presenter; they do not change workflow
         # availability unless the controller also emits structureChanged.
         self.recent_history.changed.connect(self._refresh_recent_history)
+        self.controller.inputParametersChanged.connect(
+            lambda _parameters: self._update_navigation(self.recent_history.read_snapshot())
+        )
         self._build_ui()
         self._refresh()
         self._validate_recent_files_async()
@@ -302,32 +345,33 @@ class WorkflowWindow(QMainWindow):
             tooltip: str,
             callback: Callable[[], None],
             *,
-            category: str,
             recent_menu: bool = False,
-            utility: bool = False,
         ) -> QToolButton:
-            button = QToolButton(group)
-            button.setText(label)
+            button = (
+                _RecentFooterButton(label, group)
+                if recent_menu else QToolButton(group)
+            )
+            if not recent_menu:
+                button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(24, 24))
+            button.setIconSize(QSize(20, 20))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedHeight(56)
-            # Utility buttons use their natural width, leaving the remaining
-            # space to the context-specific actions in the same column.
+            button.setFixedHeight(48)
+            # Navigation is a compact toolbar, not another row of action cards.
+            button.setMinimumWidth(0)
             button.setSizePolicy(
-                QSizePolicy.Policy.Fixed if utility else QSizePolicy.Policy.Ignored,
-                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
             )
+            mid = self.palette().mid().color().name()
             button.setStyleSheet(
-                action_card_stylesheet(
-                    button.palette(),
-                    action_card_accent(button.palette(), category),
-                    "QToolButton",
-                    subtle=utility,
-                )
-                + "QToolButton { padding: 4px 8px; }"
+                button_stylesheet(self.palette(), selector="QToolButton")
+                + "QToolButton { padding: 3px 6px; } "
+                + f"QToolButton::menu-button {{ width: 28px; border-left: 1px solid {mid}; }}"
             )
-            button.setToolTip(tooltip)
+            if recent_menu:
+                button.set_base_tooltip(tooltip)
+            else:
+                button.setToolTip(tooltip)
             button.setAccessibleName(label)
             if recent_menu:
                 button.setPopupMode(
@@ -335,7 +379,7 @@ class WorkflowWindow(QMainWindow):
                 )
                 button.setMenu(QMenu(button))
             button.clicked.connect(callback)
-            group.layout().addWidget(button, 0 if utility else 1)
+            group.layout().addWidget(button)
             return button
 
         def add_separator(group: QWidget) -> None:
@@ -350,7 +394,7 @@ class WorkflowWindow(QMainWindow):
         self._settings_button = add_navigation_button(
             structure_navigation,
             "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
-            self._open_settings, category="neutral", utility=True,
+            self._open_settings,
         )
         self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
         add_separator(structure_navigation)
@@ -359,7 +403,7 @@ class WorkflowWindow(QMainWindow):
             "Start from Scratch",
             self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
             "Clear the current workspace; existing results are kept",
-            self._start_over, category="destructive",
+            self._start_over,
         )
         self._recent_structures_button = add_navigation_button(
             structure_navigation,
@@ -367,8 +411,9 @@ class WorkflowWindow(QMainWindow):
             QIcon(str(icon_path("bulk_crystal.png"))),
             "Open the latest structure or choose another",
             lambda: self._open_recent("structure"),
-            recent_menu=True, category="structure",
+            recent_menu=True,
         )
+        structure_navigation.layout().addStretch(1)
 
         calculation_navigation = navigation_group(
             content, "workflowCalculationNavigation"
@@ -379,7 +424,7 @@ class WorkflowWindow(QMainWindow):
             QIcon(str(icon_path("system-run.svg"))),
             "Repeat the most recent input or choose another",
             lambda: self._open_recent("input"),
-            recent_menu=True, category="calculation",
+            recent_menu=True,
         )
         self._load_input_button = add_navigation_button(
             calculation_navigation,
@@ -389,15 +434,16 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
             ),
             "Load, edit, save or calculate from an SPR-KKR input file",
-            self._load_input_file, category="calculation",
+            self._load_input_file,
         )
         self._custom_button = add_navigation_button(
             calculation_navigation,
             "Custom Input File",
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
             "Choose a registered SPR-KKR task and configure its parameters",
-            self._custom_task, category="calculation",
+            self._custom_task,
         )
+        calculation_navigation.layout().addStretch(1)
 
         results_navigation = navigation_group(
             side, "workflowResultsNavigation"
@@ -408,7 +454,7 @@ class WorkflowWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
             "Open the latest result or choose another",
             lambda: self._open_recent("output"),
-            recent_menu=True, category="results",
+            recent_menu=True,
         )
         self._project_browser_button = add_navigation_button(
             results_navigation,
@@ -418,8 +464,9 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
             ),
             "Browse projects and past calculations",
-            lambda: self.projectBrowserRequested.emit(), category="results",
+            lambda: self.projectBrowserRequested.emit(),
         )
+        results_navigation.layout().addStretch(1)
         add_separator(results_navigation)
         self._close_button = add_navigation_button(
             results_navigation,
@@ -429,7 +476,7 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton),
             ),
             "Close Ase2sprkkr (Ctrl+Q)",
-            self.close, category="neutral", utility=True,
+            self.close,
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
 
@@ -447,9 +494,13 @@ class WorkflowWindow(QMainWindow):
     def _update_navigation(self, snapshot: RecentFilesSnapshot) -> None:
         """Refresh button availability and rebuild menus only for changed history."""
         has_structure = self.controller.atoms is not None
-        self._start_over_button.setEnabled(
-            has_structure or self.controller.unresolved_cluster_path is not None
+        has_workspace = (
+            has_structure
+            or self.controller.unresolved_cluster_path is not None
+            or self.controller.input_parameters is not None
         )
+        self._start_over_button.setVisible(has_workspace)
+        self._start_over_button.setEnabled(has_workspace)
         label = "Custom Calculation" if has_structure else "Custom Input File"
         self._custom_button.setText(label)
         self._custom_button.setAccessibleName(label)
@@ -464,6 +515,7 @@ class WorkflowWindow(QMainWindow):
         ):
             paths = snapshot.paths(kind)
             button.setEnabled(bool(paths))
+            button.set_recent_path(paths[0] if paths else None)
             menu = button.menu()
             menu.clear()
             for item in recent_menu_items(paths):

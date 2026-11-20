@@ -155,8 +155,9 @@ class ResultActionsWidget(QWidget):
         self._selector.structureDoubleClicked.connect(self.newCalculationRequested)
         self._selector.itemSelectionChanged.connect(self._update_assignment_controls)
         self._selector.hide()
-        assignment_row = QHBoxLayout()
-        self.select_all_button = QPushButton("Select all", self)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
+        self.select_all_button = QPushButton("Select All", self)
         self.select_all_button.setIcon(
             QIcon.fromTheme(
                 "edit-select-all",
@@ -164,7 +165,7 @@ class ResultActionsWidget(QWidget):
             )
         )
         self.select_all_button.clicked.connect(self._select_all_results)
-        self.assign_project_button = QPushButton("Assign", self)
+        self.assign_project_button = QPushButton("Assign to Project", self)
         self.assign_project_button.setToolTip("Assign selected results to a project")
         self.assign_project_button.setIcon(
             QIcon.fromTheme(
@@ -188,22 +189,6 @@ class ResultActionsWidget(QWidget):
         self.load_result_button.clicked.connect(
             lambda _checked=False: self.loadResultRequested.emit()
         )
-        # An equally divided toolbar remains usable in the narrow Guided
-        # sidebar. Ignored horizontal size hints allow all three buttons to
-        # shrink together instead of the longest label dominating the row.
-        for button in (
-            self.select_all_button, self.assign_project_button,
-            self.load_result_button,
-        ):
-            button.setSizePolicy(
-                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
-            )
-            assignment_row.addWidget(button, 1)
-        layout.addLayout(assignment_row)
-
-        # Keep the original three equal-width result actions. A separate
-        # compact row avoids squeezing four captions into the narrow sidebar.
-        options_row = QHBoxLayout()
         self.import_directory_button = QPushButton("Import Directory…", self)
         self.import_directory_button.setObjectName("resultsImportDirectoryButton")
         self.import_directory_button.setIcon(
@@ -219,8 +204,17 @@ class ResultActionsWidget(QWidget):
         self.import_directory_button.clicked.connect(
             lambda _checked=False: self.importDirectoryRequested.emit()
         )
-        options_row.addWidget(self.import_directory_button)
-        options_row.addStretch(1)
+        # Three equal-width controls above the result browser.
+        for button in (
+            self.select_all_button, self.load_result_button,
+            self.import_directory_button,
+        ):
+            button.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
+            top_row.addWidget(button, 1)
+        layout.addLayout(top_row)
+
         self.show_all_values_checkbox = QCheckBox("Show all values", self)
         self.show_all_values_checkbox.setObjectName("resultsShowAllValues")
         self.show_all_values_checkbox.setToolTip(
@@ -228,8 +222,6 @@ class ResultActionsWidget(QWidget):
         )
         self.show_all_values_checkbox.setChecked(show_values_without_actions)
         self.show_all_values_checkbox.toggled.connect(self._toggle_all_values)
-        options_row.addWidget(self.show_all_values_checkbox)
-        layout.addLayout(options_row)
         layout.addWidget(self._selector)
         self._assignment_controls = (self.select_all_button, self.assign_project_button)
         if not show_assignment_controls:
@@ -240,15 +232,6 @@ class ResultActionsWidget(QWidget):
         self._record_actions = QWidget(self)
         record_actions_layout = QHBoxLayout(self._record_actions)
         record_actions_layout.setContentsMargins(0, 0, 0, 0)
-        self._use_state_button = QPushButton("Use this potential", self._record_actions)
-        self._use_state_button.setIcon(
-            QIcon.fromTheme(
-                "dialog-ok-apply",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),
-            )
-        )
-        self._use_state_button.clicked.connect(self._use_selected_state)
-        record_actions_layout.addWidget(self._use_state_button)
         self._recompute_button = QPushButton("Recompute", self._record_actions)
         self._recompute_button.setIcon(
             QIcon.fromTheme(
@@ -283,6 +266,38 @@ class ResultActionsWidget(QWidget):
         self._grid.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll, 1)
+
+        # Selection-dependent actions follow the browser; the last slot is a
+        # checkbox, aligned with the three equally wide toolbar buttons.
+        self._bottom_controls = QWidget(self)
+        bottom_row = QHBoxLayout(self._bottom_controls)
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        bottom_row.setSpacing(top_row.spacing())
+        self._use_state_button = QPushButton("Use this structure", self)
+        self._use_state_button.setIcon(
+            QIcon.fromTheme(
+                "dialog-ok-apply",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),
+            )
+        )
+        self._use_state_button.clicked.connect(self._use_selected_state)
+        self._use_state_button.setEnabled(False)
+        for button in (self._use_state_button, self.assign_project_button):
+            button.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
+            bottom_row.addWidget(button, 1)
+        check_slot = QWidget(self._bottom_controls)
+        check_layout = QHBoxLayout(check_slot)
+        check_layout.setContentsMargins(0, 0, 0, 0)
+        check_layout.addWidget(
+            self.show_all_values_checkbox, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+        check_slot.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        bottom_row.addWidget(check_slot, 1)
+        layout.addWidget(self._bottom_controls)
 
     @property
     def has_rows(self) -> bool:
@@ -369,7 +384,7 @@ class ResultActionsWidget(QWidget):
         self._clear()
         self._result_file_warning.hide()
         if presentation is None:
-            self._record_actions.hide()
+            self._refresh_record_actions(ResultActionAvailability())
             self._show_empty(self._empty_text)
             return
 
@@ -432,13 +447,16 @@ class ResultActionsWidget(QWidget):
     def _refresh_record_actions(self, actions: ResultActionAvailability) -> None:
         use_state = actions.use_state
         recompute = actions.recompute
-        self._use_state_button.setVisible(use_state is not None)
-        if use_state is not None:
-            self._use_state_button.setText(use_state.label)
+        self._use_state_button.setEnabled(use_state is not None)
+        self._use_state_button.setText(
+            "Use current potential" if use_state and len(use_state.label) > 27
+            else use_state.label if use_state else "Use this structure"
+        )
+        self._use_state_button.setToolTip(use_state.label if use_state else "")
         self._recompute_button.setVisible(recompute is not None)
         if recompute is not None:
             self._recompute_button.setText(recompute.label)
-        self._record_actions.setVisible(use_state is not None or recompute is not None)
+        self._record_actions.setVisible(recompute is not None)
 
     def _use_selected_state(self) -> None:
         result_id = self.selected_result_id
@@ -511,7 +529,9 @@ class ResultActionsWidget(QWidget):
     def _show_empty(self, text: str) -> None:
         self._empty_label.setText(text)
         self._empty_label.show()
-        self._scroll.hide()
+        # Keep the empty results viewport occupying its space so the
+        # persistent selection controls stay at the bottom of the column.
+        self._scroll.show()
 
     def _clear(self) -> None:
         while self._grid.count():
