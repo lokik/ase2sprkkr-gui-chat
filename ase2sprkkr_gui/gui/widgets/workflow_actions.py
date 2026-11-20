@@ -185,9 +185,11 @@ class WorkflowActionsWidget(QWidget):
         parent: QWidget | None = None,
         *,
         column: Literal["structure", "calculate"] | None = None,
+        excluded_commands: tuple[type, ...] = (),
     ) -> None:
         super().__init__(parent)
         self._column = column
+        self._excluded_commands = excluded_commands
         self._plan: WorkflowPlan | None = None
         self._action_buttons: list[QAbstractButton] = []
         self._natural_card_height = 68
@@ -216,7 +218,8 @@ class WorkflowActionsWidget(QWidget):
     ) -> tuple[AvailableAction, ...]:
         return tuple(
             action for action in actions
-            if self._column is None or _action_column(action) == self._column
+            if (self._column is None or _action_column(action) == self._column)
+            and not isinstance(action.command, self._excluded_commands)
         )
 
     def set_plan(self, plan: WorkflowPlan) -> None:
