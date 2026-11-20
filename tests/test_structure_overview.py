@@ -81,6 +81,11 @@ def test_overview_shows_separate_host_and_cluster_information(application):
     assert widget.preview.layout().itemAt(1).layout() is not None
     assert widget.preview.projection.currentText() == "3D"
     assert widget.preview.fit_button.text() == "Fit"
+    controls = widget.preview.layout().itemAt(1).layout()
+    fit_index = next(i for i in range(controls.count())
+                     if controls.itemAt(i).widget() is widget.preview.fit_button)
+    assert controls.itemAt(fit_index + 1).widget() is widget.external_viewer_button
+    assert widget.external_viewer_button.toolTip() == "Open in external structure viewer"
 
     widget.host_radio.setChecked(True)
     assert not widget.cluster_radio.isChecked()
