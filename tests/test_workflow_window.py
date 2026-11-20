@@ -25,6 +25,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AttachHostPotential,
     CreateHostPotential,
     RunTask,
+    ReconvergeScf,
     CustomTask,
     SaveStructure,
     StartOver,
@@ -120,6 +121,7 @@ def test_action_columns_classify_embedded_and_restart_workflows():
         )
 
     assert column(RunTask("dos")) == "calculate"
+    assert column(ReconvergeScf()) == "calculate"
     assert column(UpdateEmptySpheres()) == "calculate"
     assert column(ConvergeHostScf()) == "calculate"
     assert column(ConvergeHostScf(restart_scf=True)) == "calculate"

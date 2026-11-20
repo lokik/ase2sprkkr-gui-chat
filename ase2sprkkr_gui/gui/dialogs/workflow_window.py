@@ -59,6 +59,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     RunTask,
+    ReconvergeScf,
     CustomTask,
     StartOver,
     UpdateEmptySpheres,
@@ -365,6 +366,9 @@ class WorkflowWindow(QMainWindow):
         if isinstance(command, RunTask):
             self._prepare_task(command.backend_task)
             return
+        if isinstance(command, ReconvergeScf):
+            self._prepare_task("scf", restart_scf=True)
+            return
         if isinstance(command, CustomTask):
             self._custom_task()
             return
@@ -527,7 +531,7 @@ class WorkflowWindow(QMainWindow):
             surface_mode=surface_mode,
         )
 
-    def _prepare_task(self, task: str) -> None:
+    def _prepare_task(self, task: str, *, restart_scf: bool = False) -> None:
         from ase2sprkkr_gui.gui.input_parameters.tasks import is_guided_task
         if not is_guided_task(task):
             from ase2sprkkr import InputParameters
@@ -549,6 +553,7 @@ class WorkflowWindow(QMainWindow):
             self,
             task,
             dataset_default_mode=self.settings.dataset_default_mode,
+            restart_scf=restart_scf,
             track_launch_monitor=self._track_launch_monitor,
             project_repository=self.project_repository,
         )

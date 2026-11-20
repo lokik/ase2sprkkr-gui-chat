@@ -31,6 +31,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     AttachHostPotential,
     CreateHostPotential,
     RunTask,
+    ReconvergeScf,
     SaveStructure,
     StartOver,
     UpdateEmptySpheres,
@@ -218,15 +219,40 @@ def test_calculation_order_follows_default_preferred_tasks():
             spheres_action=EmptySpheresAction.RECALCULATE,
         )
     )
-    expected = tuple(RunTask(name.lower()) for name in supported_task_names())
     assert _commands(before, WorkflowSection.CALCULATE) == (
-        UpdateEmptySpheres(), *expected,
+        UpdateEmptySpheres(), RunTask("scf"),
     )
+    assert ReconvergeScf() not in _commands(before, WorkflowSection.OTHER)
 
     after = WorkflowPlanner().for_workspace(
         Workspace(atoms=FormulaAtoms(), converged=True)
     )
-    assert _commands(after, WorkflowSection.CALCULATE) == expected
+    assert _commands(after, WorkflowSection.CALCULATE) == tuple(
+        RunTask(name.lower()) for name in supported_task_names() if name != "SCF"
+    )
+    assert ReconvergeScf() in _commands(after, WorkflowSection.OTHER)
+    assert UseForNewCalculation() in _commands(after, WorkflowSection.OTHER)
+
+
+def test_scf_readiness_precedes_preferred_task_selection():
+    from types import SimpleNamespace
+
+    def with_preference(name, converged):
+        settings = SimpleNamespace(effective_preferred_tasks=lambda: (name,))
+        return WorkflowPlanner(settings=settings).for_workspace(
+            Workspace(atoms=FormulaAtoms(), converged=converged)
+        )
+
+    # Choosing only DOS cannot hide the required SCF step.
+    assert _commands(
+        with_preference("DOS", converged=False), WorkflowSection.CALCULATE
+    ) == (RunTask("scf"),)
+
+    # Choosing only SCF cannot resurrect that action after convergence.
+    after = with_preference("SCF", converged=True)
+    commands = _commands(after, WorkflowSection.CALCULATE)
+    assert RunTask("scf") not in commands
+    assert RunTask("dos") in commands
 
 
 def test_registry_presentation_is_used_without_local_task_catalogue():
@@ -299,15 +325,11 @@ def test_interrupted_scf_preserves_exact_stage(status, description):
 
 
 @pytest.mark.parametrize("status", ("ITR", "ITERATING", "ITR-BULK"))
-def test_periodic_iteration_keeps_preferred_tasks_and_continue_scf(status):
-    from ase2sprkkr_gui.gui.input_parameters.task_preferences import supported_task_names
-
+def test_periodic_iteration_only_offers_continue_scf(status):
     plan = WorkflowPlanner().for_workspace(
         Workspace(atoms=FormulaAtoms(), status=status, kind="3d")
     )
-    assert _commands(plan, WorkflowSection.CALCULATE) == tuple(
-        RunTask(name.lower()) for name in supported_task_names()
-    )
+    assert _commands(plan, WorkflowSection.CALCULATE) == (RunTask("scf"),)
     assert _scf_action(plan).title == "Continue SCF"
 
 

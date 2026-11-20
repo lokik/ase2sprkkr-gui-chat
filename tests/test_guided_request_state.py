@@ -171,3 +171,36 @@ def test_one_off_embedded_task_still_requires_usable_host(monkeypatch, tmp_path)
     ) is None
     assert messages and messages[0][0] == "Host SCF Required"
     assert controller.input_parameters is None
+
+
+def test_reconverge_scf_uses_current_potential_without_resetting_workspace(
+    monkeypatch, tmp_path,
+):
+    controller = WorkspaceController(WorkspaceState(
+        atoms=Atoms("Fe", cell=[2.8, 2.8, 2.8], pbc=True),
+        directory=str(tmp_path),
+    ))
+    initial_state_id = controller.state_id
+    initial_generation = controller.structure_generation
+    parameters = InputParameters.create("SCF")
+    monkeypatch.setattr(
+        calculation_flow, "select_guided_input_parameters",
+        lambda *_args, **_kwargs: parameters,
+    )
+    captured = {}
+    monkeypatch.setattr(
+        calculation_flow, "run_calculation",
+        lambda *_args, **kwargs: captured.update(kwargs) or "run",
+    )
+
+    assert calculation_flow.configure_and_run_task(
+        controller, RecentFiles(tmp_path / "recent.json"), None,
+        "scf", dataset_default_mode="auto", restart_scf=True,
+    ) == "run"
+    request = captured["request_override"]
+    assert request.restart_scf is True
+    assert request.atoms is controller.atoms
+    assert request.state_id == initial_state_id
+    assert controller.structure_generation == initial_generation
+    assert not controller.restarted
+    assert controller.input_parameters is None

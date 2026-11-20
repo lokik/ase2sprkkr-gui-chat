@@ -339,6 +339,7 @@ def _one_off_task_request(
     *,
     expected_structure_generation,
     parent: QWidget,
+    restart_scf: bool = False,
 ) -> CalculationRequest | None:
     """Build a Guided request without creating an input document in workspace.
 
@@ -360,7 +361,7 @@ def _one_off_task_request(
         directory=controller.directory or "",
         structure_id=controller.structure_id,
         state_id=controller.state_id,
-        restart_scf=controller.restarted,
+        restart_scf=controller.restarted or restart_scf,
     )
 
 
@@ -371,6 +372,7 @@ def configure_and_run_task(
     task: str,
     *,
     dataset_default_mode: str,
+    restart_scf: bool = False,
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
 ) -> SprkkrRunWindow | None:
@@ -415,6 +417,7 @@ def configure_and_run_task(
     request = _one_off_task_request(
         controller, parameters,
         expected_structure_generation=structure_generation, parent=parent,
+        restart_scf=restart_scf,
     )
     if request is None:
         return None

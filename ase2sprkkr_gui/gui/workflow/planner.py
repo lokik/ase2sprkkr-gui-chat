@@ -5,7 +5,7 @@ from typing import Any, Protocol
 
 from ase2sprkkr import InputParameters
 from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
-    displayed_tasks, supported_task_names,
+    all_task_names, displayed_tasks, supported_task_names,
 )
 from ase2sprkkr_gui.gui.input_parameters.tasks import (
     WorkflowTaskRole, guided_task_definition, is_guided_task,
@@ -37,6 +37,7 @@ from ase2sprkkr_gui.gui.workflow.model import (
     Load,
     LoadKind,
     RunTask,
+    ReconvergeScf,
     CustomTask,
     StartOver,
     UpdateEmptySpheres,
@@ -345,10 +346,18 @@ class WorkflowPlanner:
                 "calculation", ActionIcon.RUN,
             ))
 
+        # Workflow readiness and preference are independent. Preserve the
+        # native embedded ITERATING exception, which also permits DOS.
+        if converged:
+            eligible = tuple(name for name in all_task_names() if name != "SCF")
+        elif is_cluster and progress is ScfProgress.ITERATING:
+            eligible = all_task_names()
+        else:
+            eligible = ("SCF",)
         kind = "embedded" if is_cluster else workspace.structure_kind()
         names = (
             () if invalid_cluster or host_needs_initial_scf
-            else displayed_tasks(kind, self._preferred())
+            else displayed_tasks(kind, self._preferred(), eligible=eligible)
         )
         for name in names:
             if is_guided_task(name):
@@ -500,6 +509,13 @@ class WorkflowPlanner:
                 ConvergeHostScf(restart_scf=True),
                 "Re-converge Host SCF",
                 "Restart the periodic host SCF from its current potential.",
+                "calculation", ActionIcon.NEW_CALCULATION,
+            ))
+        if converged:
+            other.append(_action(
+                ReconvergeScf(),
+                "Re-converge SCF",
+                "Restart SCF from the current converged potential without first resetting the workspace.",
                 "calculation", ActionIcon.NEW_CALCULATION,
             ))
         if progress is not ScfProgress.NOT_STARTED:

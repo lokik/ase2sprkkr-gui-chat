@@ -72,6 +72,11 @@ class RunTask:
 
 
 @dataclass(frozen=True)
+class ReconvergeScf:
+    """Start a new SCF cycle from the current converged potential."""
+
+
+@dataclass(frozen=True)
 class CustomTask:
     """Open the native task picker for standalone input or calculation."""
 
@@ -168,6 +173,7 @@ class StartOver:
 
 WorkflowCommand = Union[
     RunTask,
+    ReconvergeScf,
     CustomTask,
     ConvergeHostScf,
     UpdateEmptySpheres,

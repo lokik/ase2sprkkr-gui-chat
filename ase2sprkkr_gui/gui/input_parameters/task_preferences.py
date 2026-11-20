@@ -5,6 +5,8 @@ the backend permits the current structure. These are separate properties.
 """
 from __future__ import annotations
 
+from typing import Collection
+
 from ase2sprkkr import InputParameters
 from ase2sprkkr.sprkkr.executables import task_system_error
 
@@ -105,13 +107,17 @@ def displayed_tasks(
     preferred: tuple[str, ...],
     *,
     maximum_fallback: int = 8,
+    eligible: Collection[str] | None = None,
 ) -> tuple[str, ...]:
     """First nonempty group: preferred, guided, ordinary, experimental.
 
     Preferred order is user-defined; fallback groups are alphabetical. Too
     many tasks in a fallback group suppress cards, not the Custom task action.
+    ``eligible`` enforces workflow readiness before preferred/fallback grouping.
     """
     possible = set(applicable_task_names(system_kind))
+    if eligible is not None:
+        possible.intersection_update(eligible)
     if not possible:
         return ()
     chosen = tuple(name for name in preferred if name in possible)
