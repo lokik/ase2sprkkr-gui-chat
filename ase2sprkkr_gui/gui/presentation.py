@@ -18,7 +18,7 @@ def structure_kind_label(kind: StructureKind | None) -> str | None:
 
 
 ActionCategory = Literal[
-    "structure", "load", "calculation", "destructive", "neutral"
+    "structure", "load", "calculation", "destructive", "results", "neutral"
 ]
 
 

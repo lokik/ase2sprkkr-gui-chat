@@ -31,6 +31,7 @@ def action_card_accent(
         "structure": QColor("#3979b8"),
         "load": QColor("#527f9f"),
         "calculation": QColor("#398552"),
+        "results": QColor("#7864a8"),
         "destructive": QColor("#b34444"),
         "neutral": palette.color(QPalette.ColorRole.Mid),
     }[category]
