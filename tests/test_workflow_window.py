@@ -293,6 +293,29 @@ def test_recent_potential_load_rebuilds_workflow_once(tmp_path, monkeypatch):
     window.close()
 
 
+
+def test_hostless_recent_cluster_refreshes_only_once(tmp_path, monkeypatch):
+    application = QApplication.instance() or QApplication([])
+    gui, window = _workflow(tmp_path)
+    rendered = []
+    original = window._structure_actions.set_plan
+
+    def count(plan):
+        rendered.append(plan)
+        original(plan)
+
+    monkeypatch.setattr(window._structure_actions, "set_plan", count)
+    path = tmp_path / "without-host.clu.pot"
+    gui.controller.load_unresolved_cluster(object(), path)
+    assert len(rendered) == 1
+    assert gui.controller.unresolved_cluster_path == path.resolve()
+
+    # This read-only plan has no recent-file menu to update.
+    gui.recent_files.remember("structure", path)
+    assert len(rendered) == 1
+    window.close()
+
+
 def test_recent_history_still_refreshes_empty_workspace(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
