@@ -176,6 +176,7 @@ class WorkspaceController(QObject):
             directory=str(path.parent),
             expected_structure_generation=expected_structure_generation,
             expected_directory_generation=expected_directory_generation,
+            emit_structure_changed=False,
         )
         if change is DocumentChange.APPLIED:
             self._unresolved_cluster = potential
@@ -514,6 +515,7 @@ class WorkspaceController(QObject):
         expected_structure_generation: Generation | None = None,
         expected_directory_generation: Generation | None = None,
         restarted: bool = False,
+        emit_structure_changed: bool = True,
     ) -> DocumentChange:
         checks = [(
             "structure",
@@ -569,7 +571,8 @@ class WorkspaceController(QObject):
         # A successfully loaded regular structure replaces the read-only CLUPOT.
         self._unresolved_cluster = None
         self._unresolved_cluster_path = None
-        self.structureChanged.emit(atoms)
+        if emit_structure_changed:
+            self.structureChanged.emit(atoms)
         return DocumentChange.APPLIED
 
     def apply_structure_edit(
