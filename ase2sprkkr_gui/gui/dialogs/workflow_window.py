@@ -4,7 +4,7 @@ from threading import Thread
 from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QKeySequence, QResizeEvent
+from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -33,6 +33,7 @@ from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometr
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
 from ase2sprkkr_gui.gui.dialogs.settings import edit_settings
+from ase2sprkkr_gui.gui.misc.colors import blend
 from ase2sprkkr_gui.gui.misc.icons import settings_icon
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
@@ -42,16 +43,15 @@ from ase2sprkkr_gui.gui.flows import structures as structure_flows
 from ase2sprkkr_gui.gui.flows import visualization as visualization_flow
 from ase2sprkkr_gui.gui.recent_presentation import RecentLaunchKind, recent_menu_items
 from ase2sprkkr_gui.gui.style import (
-    PANEL_RADIUS,
     SPACE_SM,
     SPACE_XL,
     SPACE_XS,
     SPACE_XXL,
-    button_stylesheet,
+    action_card_stylesheet,
     heading_font,
-    palette_tint,
     secondary_text_stylesheet,
 )
+from ase2sprkkr_gui.gui.widgets.action_card import action_card_accent
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
 from ase2sprkkr_gui.gui.widgets.structures.overview import StructureOverviewWidget
 from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
@@ -338,14 +338,8 @@ class WorkflowWindow(QMainWindow):
             inset = SPACE_SM if object_name == "workflowResultsNavigation" else 0
             group_layout.setContentsMargins(inset, SPACE_XS, inset, SPACE_XS)
             group_layout.setSpacing(SPACE_XS)
-            background = palette_tint(
-                self.palette(), self.palette().mid().color(),
-                light_amount=.08, dark_amount=.18,
-            )
-            group.setStyleSheet(
-                f"QWidget#{object_name} {{ background-color: {background.name()}; "
-                f"border-radius: {PANEL_RADIUS}px; }}"
-            )
+            # No painted group background: the three separate tints would
+            # form misaligned patches when the splitter widths change.
             column.layout().addWidget(group)
             return group
 
@@ -356,6 +350,7 @@ class WorkflowWindow(QMainWindow):
             tooltip: str,
             callback: Callable[[], None],
             *,
+            category: str,
             recent_menu: bool = False,
         ) -> QToolButton:
             button = (
@@ -375,12 +370,24 @@ class WorkflowWindow(QMainWindow):
             button.setSizePolicy(
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
-            mid = self.palette().mid().color().name()
+            palette = button.palette()
+            accent = action_card_accent(palette, category)
+            # Retain the card vocabulary without making the footer as loud
+            # as a full-height action card: a narrower, softer accent and
+            # tinted button background, never a stretched button width.
+            soft_accent = blend(
+                palette.color(QPalette.ColorRole.Button), accent, .60
+            )
+            mid = palette.color(QPalette.ColorRole.Mid).name()
             button.setStyleSheet(
-                button_stylesheet(self.palette(), selector="QToolButton")
+                action_card_stylesheet(
+                    palette, soft_accent, "QToolButton", accent_width=3,
+                )
                 + "QToolButton { padding: 3px 6px; } "
                 + f"QToolButton::menu-button {{ width: 28px; border-left: 1px solid {mid}; }}"
+                + f"QToolButton:disabled {{ color: {palette.color(QPalette.ColorRole.PlaceholderText).name()}; }}"
             )
+            button.setProperty("navigationCategory", category)
             if recent_menu:
                 button.set_base_tooltip(tooltip)
             else:
@@ -407,7 +414,7 @@ class WorkflowWindow(QMainWindow):
         self._settings_button = add_navigation_button(
             structure_navigation,
             "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
-            self._open_settings,
+            self._open_settings, category="neutral",
         )
         self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
         add_separator(structure_navigation)
@@ -417,7 +424,7 @@ class WorkflowWindow(QMainWindow):
             "Start from Scratch",
             self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
             "Clear the current workspace; existing results are kept",
-            self._start_over,
+            self._start_over, category="destructive",
         )
         self._recent_structures_button = add_navigation_button(
             structure_navigation,
@@ -425,7 +432,7 @@ class WorkflowWindow(QMainWindow):
             QIcon(str(icon_path("bulk_crystal.png"))),
             "Open the latest structure or choose another",
             lambda: self._open_recent("structure"),
-            recent_menu=True,
+            category="structure", recent_menu=True,
         )
         structure_navigation.layout().addStretch(1)
 
@@ -439,7 +446,7 @@ class WorkflowWindow(QMainWindow):
             QIcon(str(icon_path("system-run.svg"))),
             "Repeat the most recent input or choose another",
             lambda: self._open_recent("input"),
-            recent_menu=True,
+            category="calculation", recent_menu=True,
         )
         self._load_input_button = add_navigation_button(
             calculation_navigation,
@@ -449,14 +456,14 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
             ),
             "Load, edit, save or calculate from an SPR-KKR input file",
-            self._load_input_file,
+            self._load_input_file, category="calculation",
         )
         self._custom_button = add_navigation_button(
             calculation_navigation,
             "Custom Input File",
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
             "Choose a registered SPR-KKR task and configure its parameters",
-            self._custom_task,
+            self._custom_task, category="calculation",
         )
         calculation_navigation.layout().addStretch(1)
 
@@ -469,7 +476,7 @@ class WorkflowWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
             "Open the latest result or choose another",
             lambda: self._open_recent("output"),
-            recent_menu=True,
+            category="results", recent_menu=True,
         )
         self._project_browser_button = add_navigation_button(
             results_navigation,
@@ -479,7 +486,7 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
             ),
             "Browse projects and past calculations",
-            lambda: self.projectBrowserRequested.emit(),
+            lambda: self.projectBrowserRequested.emit(), category="results",
         )
         results_navigation.layout().addStretch(1)
         add_separator(results_navigation)
@@ -491,7 +498,7 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton),
             ),
             "Close Ase2sprkkr (Ctrl+Q)",
-            self.close,
+            self.close, category="neutral",
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
 

@@ -681,14 +681,18 @@ def test_workflow_navigation_has_three_compact_column_footers(
     assert window._repeat_button.width() <= 194
     assert window._recent_structures_button.minimumWidth() == 194
 
+    assert all(not footer.styleSheet() for footer in footers)
     assert all(
-        "border-left: 6px" not in button.styleSheet()
+        "border-left: 3px solid" in button.styleSheet()
+        and "border-radius: 6px" in button.styleSheet()
+        and "background-color:" in button.styleSheet()
         for button in buttons
     )
-    assert all(
-        "background-color:" in button.styleSheet()
-        for button in buttons
-    )
+    assert [button.property("navigationCategory") for button in buttons] == [
+        "neutral", "destructive", "structure",
+        "calculation", "calculation", "calculation",
+        "results", "results", "neutral",
+    ]
     assert all(
         button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
         for button in buttons
