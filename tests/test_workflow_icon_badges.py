@@ -16,7 +16,7 @@ def test_recent_and_scf_badges_have_distinct_drawings():
     base = QIcon(str(icon_path("calculation-gear.svg")))
     assert not base.isNull()
     images = {}
-    for symbol in ("recent", "reconverge", "new"):
+    for symbol in ("recent", "reconverge", "new", "load"):
         icon = badge_icon(base, symbol)
         assert not icon.isNull()
         for pixels in (24, 26, 48):
@@ -40,3 +40,23 @@ def test_recent_structure_retains_original_crystal_icon():
     original_image = original.pixmap(42, 42).toImage()
     recent_image = decorated.pixmap(48, 48).toImage()
     assert original_image.pixelColor(12, 12) == recent_image.pixelColor(13, 13)
+
+
+def test_load_import_subjects_and_badges_are_distinct():
+    _app = QApplication.instance() or QApplication([])
+    images = []
+    for filename in (
+        "input-parameters.svg",
+        "result-graph.svg",
+        "results-folder.svg",
+    ):
+        subject = QIcon(str(icon_path(filename)))
+        assert not subject.isNull()
+        icon = badge_icon(subject, "load")
+        assert not icon.isNull()
+        for pixels in (24, 26, 48):
+            assert not icon.pixmap(pixels, pixels).toImage().isNull()
+        images.append(icon.pixmap(48, 48).toImage())
+    assert images[0] != images[1]
+    assert images[0] != images[2]
+    assert images[1] != images[2]
