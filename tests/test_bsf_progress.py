@@ -25,8 +25,8 @@ def test_bsf_ek_info_reports_energy_indices_without_fabricated_progress():
     )
     window._append_output(stdout[:51], "out")
     window._append_output(stdout[51:], "out")
-    assert "energy 151/200" in window._bsf_progress.last_info.text()
-    assert "151/200" in window._bsf_progress.events.toPlainText()
+    assert "energy index 151 (NE=200)" in window._bsf_progress.last_info.text()
+    assert "NE=200" in window._bsf_progress.events.toPlainText()
     assert window._output.toPlainText().strip() == stdout.strip()
     window.close()
 
