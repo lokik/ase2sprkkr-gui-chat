@@ -1128,6 +1128,11 @@ def test_external_structure_viewer_lives_under_preview_fit(tmp_path, monkeypatch
     assert controls.itemAt(fit_index + 1).widget() is (
         window._structure_overview.external_viewer_button
     )
+    viewer = window._structure_overview.external_viewer_button
+    assert viewer.text() == "Viewer"
+    assert viewer.toolTip() == "External viewer"
+    assert viewer.height() == 68
+    assert window._structure_overview.frameShape() == QFrame.Shape.NoFrame
     calls = []
     monkeypatch.setattr(
         workflow_module.visualization_flow, "visualize_structure",
