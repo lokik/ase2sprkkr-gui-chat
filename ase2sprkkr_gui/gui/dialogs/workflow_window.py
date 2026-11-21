@@ -122,7 +122,8 @@ class _RecentFooterButton(CenteredIconToolButton):
         self._title = title
         self._recent_path: str | None = None
         self._base_tooltip = ""
-        self._icon_only = False
+        self._display_mode = "full"
+        self._short_title = title
         self.setText(title)
 
     def set_recent_path(self, path: str | None) -> None:
@@ -133,45 +134,38 @@ class _RecentFooterButton(CenteredIconToolButton):
         self._base_tooltip = tooltip
         self._refresh_label()
 
-    def set_icon_only(self, compact: bool) -> None:
-        if self._icon_only != compact:
-            self._icon_only = compact
-            self._refresh_label()
+    def set_short_title(self, title: str) -> None:
+        self._short_title = title
+        self._refresh_label()
+
+    def set_display_mode(self, mode: str) -> None:
+        self._display_mode = mode
+        self._refresh_label()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._refresh_label()
 
     def _refresh_label(self) -> None:
-        if self._recent_path:
-            # The folder prefix carries no useful information in a small
-            # button. Keep the filename's end, including its extension.
-            filename = Path(self._recent_path).name
-            # Keep the full suffix in the logical label; the centered painter
-            # elides it to the actual text area, excluding the menu arrow.
-            label = (
-                self._title if self._icon_only
-                else f"{self._title}\n…/{filename}"
-            )
-            caption = (
-                "Recent Calculation"
-                if self._icon_only and self._title == "Repeat Calculation"
-                else self._title
-            )
-            tooltip = (
-                f"{caption}\n{self._recent_path}"
-                if self._icon_only
-                else f"{self._base_tooltip}\n{self._recent_path}"
-            )
-        else:
-            label = self._title
-            tooltip = (
-                self._title if self._icon_only else self._base_tooltip
-            )
+        mode = self._display_mode
+        title = self._short_title if mode == "short" else self._title
+        # Display only the basename. The complete path remains in the tooltip
+        # and in the menu, so dropping the ornamental ellipsis loses nothing.
+        label = title
+        if self._recent_path and mode != "icon":
+            label += "\n" + Path(self._recent_path).name
+        tooltip = (
+            f"{self._title}\n{self._recent_path}"
+            if mode == "icon" and self._recent_path else
+            self._title if mode == "icon" else
+            f"{self._base_tooltip}\n{self._recent_path}"
+            if self._recent_path else self._base_tooltip
+        )
         if self.text() != label:
             self.setText(label)
         if self.toolTip() != tooltip:
             self.setToolTip(tooltip)
+
 
 
 class _HeaderActionBar(QWidget):
@@ -180,6 +174,7 @@ class _HeaderActionBar(QWidget):
     # Horizontal navigation buttons are deliberately wide and low; retain
     # the header height so only the buttons' silhouette changes.
     FULL_WIDTH = 200
+    SHORT_WIDTH = 140
     BUTTON_HEIGHT = 58
     COMPACT_SIZE = BUTTON_HEIGHT  # Square icon-only main button.
     MENU_EXTRA_WIDTH = 22
@@ -196,9 +191,10 @@ class _HeaderActionBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self._buttons: list[QAbstractButton] = []
         self._labels: dict[QAbstractButton, str] = {}
+        self._short_labels: dict[QAbstractButton, str] = {}
         self._tooltips: dict[QAbstractButton, str] = {}
         self._styles: dict[QAbstractButton, str] = {}
-        self._compact = False
+        self._mode = "full"
         self._mode_applied = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -212,11 +208,14 @@ class _HeaderActionBar(QWidget):
         layout.addLayout(self._button_row)
         layout.addStretch(1)
 
-    def register(self, button: QAbstractButton) -> None:
+    def register(self, button: QAbstractButton, *, short_title: str) -> None:
         self._buttons.append(button)
         self._labels[button] = button.text()
+        self._short_labels[button] = short_title
         self._tooltips[button] = button.toolTip()
         self._styles[button] = button.styleSheet()
+        if isinstance(button, _RecentFooterButton):
+            button.set_short_title(short_title)
         self.layout().removeWidget(button)
         self._button_row.addWidget(
             button, 0, Qt.AlignmentFlag.AlignVCenter
@@ -233,16 +232,11 @@ class _HeaderActionBar(QWidget):
     def set_button_label(self, button: QAbstractButton, title: str) -> None:
         self._labels[button] = title
         button.setAccessibleName(title)
-        # Icon-only tool buttons keep their logical text/accessible name;
-        # the painter suppresses the label without losing it for testing.
-        if isinstance(button, QToolButton) or not self._compact:
-            button.setText(title)
-        if self._compact:
-            button.setToolTip(f"{title}\n{self._tooltips[button]}")
+        # Reapply the current presentation even when its width has not changed.
+        self._mode_applied = False
         self.refresh()
 
     def minimumSizeHint(self) -> QSize:
-        # The buttons' full text must not fix the window's minimum width.
         return QSize(0, self.BAR_HEIGHT)
 
     def sizeHint(self) -> QSize:
@@ -252,58 +246,69 @@ class _HeaderActionBar(QWidget):
         super().resizeEvent(event)
         self.refresh()
 
-    def needs_compact(self) -> bool:
+    def required_mode(self) -> str:
         visible = sum(not button.isHidden() for button in self._buttons)
         if not visible:
-            return False
-        required = (
-            visible * self.FULL_WIDTH
-            + (visible - 1) * self._button_row.spacing()
-        )
-        return self.width() < required
+            return "full"
+        gaps = (visible - 1) * self._button_row.spacing()
+        if self.width() >= visible * self.FULL_WIDTH + gaps:
+            return "full"
+        if self.width() >= visible * self.SHORT_WIDTH + gaps:
+            return "short"
+        return "icon"
 
     def refresh(self) -> None:
         self.layoutChanged.emit()
 
-    def set_compact(self, compact: bool) -> None:
-        self._compact = compact
+    def set_mode(self, mode: str) -> None:
+        self._mode = mode
         self._mode_applied = True
         for button in self._buttons:
-            if compact:
-                width = self.COMPACT_SIZE + (
+            width = (
+                self.FULL_WIDTH if mode == "full" else
+                self.SHORT_WIDTH if mode == "short" else
+                self.COMPACT_SIZE + (
                     self.MENU_EXTRA_WIDTH
                     if isinstance(button, _RecentFooterButton) else 0
                 )
-            else:
-                width = self.FULL_WIDTH
+            )
             if button.width() != width or button.minimumWidth() != width:
                 button.setFixedWidth(width)
+
             if isinstance(button, _RecentFooterButton):
-                button.set_icon_only(compact)
                 button.setToolButtonStyle(
-                    Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                    Qt.ToolButtonStyle.ToolButtonIconOnly if mode == "icon"
                     else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
                 )
+                button.set_display_mode(mode)
                 style = self._styles[button]
-                if compact:
+                if mode == "icon":
                     style += "QToolButton::menu-button { width: 22px; }"
                 button.setStyleSheet(style)
             elif isinstance(button, QToolButton):
                 button.setToolButtonStyle(
-                    Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                    Qt.ToolButtonStyle.ToolButtonIconOnly if mode == "icon"
                     else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
                 )
-                button.setText(self._labels[button])
+                button.setText(
+                    self._short_labels[button] if mode == "short"
+                    else self._labels[button]
+                )
                 button.setToolTip(
                     f"{self._labels[button]}\n{self._tooltips[button]}"
-                    if compact else self._tooltips[button]
+                    if mode == "icon" else self._tooltips[button]
                 )
             elif isinstance(button, QPushButton):
-                button.setText("" if compact else self._labels[button])
+                button.setText(
+                    "" if mode == "icon" else
+                    self._short_labels[button] if mode == "short" else
+                    self._labels[button]
+                )
                 button.setToolTip(
                     f"{self._labels[button]}\n{self._tooltips[button]}"
-                    if compact else self._tooltips[button]
+                    if mode == "icon" else self._tooltips[button]
                 )
+
 
 
 class WorkflowWindow(QMainWindow):
@@ -379,6 +384,7 @@ class WorkflowWindow(QMainWindow):
             tooltip: str,
             callback: Callable[[], None],
             *,
+            short_title: str,
             recent_menu: bool = False,
         ) -> QToolButton:
             button = (
@@ -411,7 +417,7 @@ class WorkflowWindow(QMainWindow):
                 button.setToolTip(tooltip)
             button.setAccessibleName(label)
             button.clicked.connect(callback)
-            group.register(button)
+            group.register(button, short_title=short_title)
             return button
 
         # Exactly three equal, non-draggable columns. Keep the normal gaps
@@ -579,6 +585,7 @@ class WorkflowWindow(QMainWindow):
             QIcon(str(icon_path("bulk_crystal.png"))),
             "Open the latest structure or choose another",
             lambda: self._open_recent("structure"),
+            short_title="Recent",
             recent_menu=True,
         )
         self._start_over_button = navigation_button(
@@ -587,6 +594,7 @@ class WorkflowWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
             "Clear the current workspace; existing results are kept",
             self._start_over,
+            short_title="Start",
         )
 
         self._repeat_button = navigation_button(
@@ -595,6 +603,7 @@ class WorkflowWindow(QMainWindow):
             QIcon(str(icon_path("system-run.svg"))),
             "Repeat the most recent input or choose another",
             lambda: self._open_recent("input"),
+            short_title="Repeat",
             recent_menu=True,
         )
         self._load_input_button = navigation_button(
@@ -606,6 +615,7 @@ class WorkflowWindow(QMainWindow):
             ),
             "Load, edit, save or calculate from an SPR-KKR input file",
             self._load_input_file,
+            short_title="Load",
         )
         self._custom_button = navigation_button(
             content_navigation,
@@ -613,6 +623,7 @@ class WorkflowWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
             "Choose a registered SPR-KKR task and configure its parameters",
             self._custom_task,
+            short_title="Custom",
         )
 
         self._recent_results_button = navigation_button(
@@ -621,6 +632,7 @@ class WorkflowWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
             "Open the latest result or choose another",
             lambda: self._open_recent("output"),
+            short_title="Recent",
             recent_menu=True,
         )
         self._result_actions_widget.move_import_controls_to(
@@ -633,7 +645,13 @@ class WorkflowWindow(QMainWindow):
             button.setStyleSheet(
                 _navigation_button_stylesheet(button.palette(), "QPushButton")
             )
-            side_navigation.register(button)
+            side_navigation.register(
+                button,
+                short_title=(
+                    "Load" if button is self._result_actions_widget.load_result_button
+                    else "Import"
+                ),
+            )
 
         # Keep the Results-only utility toolbar at its original height and
         # distance from the window edge, without an enclosing ruler.
@@ -723,10 +741,14 @@ class WorkflowWindow(QMainWindow):
             return
         self._syncing_headers = True
         try:
-            compact = any(bar.needs_compact() for bar in self._header_bars)
+            modes = ("full", "short", "icon")
+            mode = max(
+                (bar.required_mode() for bar in self._header_bars),
+                key=modes.index,
+            )
             for bar in self._header_bars:
-                if bar._compact != compact or not bar._mode_applied:
-                    bar.set_compact(compact)
+                if bar._mode != mode or not bar._mode_applied:
+                    bar.set_mode(mode)
         finally:
             self._syncing_headers = False
 
