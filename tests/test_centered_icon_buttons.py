@@ -118,3 +118,39 @@ def test_compact_and_footer_icons_are_centered_in_their_own_body():
         x, _, pixmap = painter.icons[0]
         icon_width = round(pixmap.width() / max(1.0, pixmap.devicePixelRatioF()))
         assert abs(x + icon_width / 2 - main_rect.center().x()) <= 2
+
+
+def test_two_line_header_wraps_label_below_centered_icon():
+    button = _button(
+        "Start from Scratch", Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
+    )
+    button.setProperty("twoLineUnderIcon", True)
+    painter = _PainterRecorder()
+    area = QRect(0, 0, 112, 68)
+    _draw_content(painter, button, area, under=True, two_line=True)
+
+    assert len(painter.icons) == 1
+    assert len(painter.labels) == 2
+    icon_x, icon_y, icon = painter.icons[0]
+    ratio = max(1.0, icon.devicePixelRatioF())
+    assert abs(icon_x + icon.width() / (2 * ratio) - area.center().x()) <= 2
+    assert painter.labels[0][0].top() >= icon_y + icon.height() / ratio
+    assert painter.labels[-1][0].bottom() <= area.bottom()
+
+
+def test_recent_header_shows_title_and_filename_in_two_rows():
+    button = _button(
+        "Recent Results\\nFe2_SCF.out",
+        Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
+    )
+    button.setProperty("twoLineUnderIcon", True)
+    painter = _PainterRecorder()
+    # The separate dropdown control occupies the space after this main rect.
+    area = QRect(0, 0, 140, 68)
+    _draw_content(painter, button, area, under=True, two_line=True)
+
+    assert len(painter.icons) == 1
+    assert len(painter.labels) == 2
+    assert "Recent" in painter.labels[0][1]
+    assert "Fe2_SCF.out" in painter.labels[1][1]
+    assert all(rect.right() <= area.right() for rect, _, _ in painter.labels)
