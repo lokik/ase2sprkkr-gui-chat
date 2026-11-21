@@ -3,6 +3,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from PyQt6.QtCore import QThread
+from PyQt6.QtWidgets import QApplication, QWidget
+
+from ase2sprkkr_gui.gui.misc.modal_task import _ModalTaskDialog
+
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.result_loading import (
     LoadedResult,
@@ -87,7 +92,7 @@ def test_loading_dos_also_imports_scf_but_selects_dos(tmp_path, monkeypatch):
     potential = tmp_path / "Fe.pot_new"
     dos = _loaded(dos_path, potential=potential)
     scf = _loaded(scf_path, task="scf", potential=potential)
-    monkeypatch.setattr(file_flows, "_read_output", lambda *_: dos)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda *_: dos)
     monkeypatch.setattr(
         file_flows, "load_companion_scf_result", lambda _loaded: scf
     )
@@ -108,7 +113,7 @@ def test_companion_failure_does_not_prevent_primary_output(tmp_path, monkeypatch
     dos_path = tmp_path / "Fe_DOS.out"
     dos_path.write_text("dos")
     monkeypatch.setattr(
-        file_flows, "_read_output", lambda *_: _loaded(dos_path)
+        file_flows, "load_result_file", lambda *_: _loaded(dos_path)
     )
 
     def fail(_loaded):
@@ -122,3 +127,54 @@ def test_companion_failure_does_not_prevent_primary_output(tmp_path, monkeypatch
         controller, RecentFiles(tmp_path / "recent.json"), dos_path, None
     )
     assert [record.task_name for record in controller.result_store.results] == ["dos"]
+
+
+def test_result_working_dialog_covers_companion_search_and_publication(
+    tmp_path, monkeypatch,
+):
+    """Parsing belongs to worker; result and history signals run under Working."""
+    app = QApplication.instance() or QApplication([])
+    parent = QWidget()
+    dos_path = tmp_path / "Fe_DOS.out"
+    scf_path = tmp_path / "Fe_SCF.out"
+    dos_path.touch()
+    scf_path.touch()
+    potential = tmp_path / "Fe.pot_new"
+    dos = _loaded(dos_path, potential=potential)
+    scf = _loaded(scf_path, task="scf", potential=potential)
+    events = []
+
+    def read(_path):
+        assert QThread.currentThread() is not app.thread()
+        events.append("read")
+        return dos
+
+    def companion(loaded):
+        assert QThread.currentThread() is not app.thread()
+        assert loaded is dos
+        events.append("companion")
+        return scf
+
+    def assert_gui_and_working(label):
+        assert QThread.currentThread() is app.thread()
+        waiting = parent.findChild(_ModalTaskDialog)
+        assert waiting is not None and waiting.isVisible()
+        events.append(label)
+
+    monkeypatch.setattr(file_flows, "load_result_file", read)
+    monkeypatch.setattr(file_flows, "load_companion_scf_result", companion)
+    controller = WorkspaceController()
+    history = RecentFiles(tmp_path / "recent.json")
+    controller.resultChanged.connect(
+        lambda result: assert_gui_and_working(f"adopt:{result.task_name}")
+    )
+    history.changed.connect(lambda: assert_gui_and_working("history"))
+
+    assert file_flows.load_output(controller, history, dos_path, parent)
+    assert events == [
+        "read", "companion", "adopt:scf", "adopt:dos", "history",
+    ]
+    assert [record.task_name for record in controller.result_store.results] == [
+        "dos", "scf",
+    ]
+    parent.close()

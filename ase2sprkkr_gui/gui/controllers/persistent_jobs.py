@@ -780,6 +780,14 @@ class PersistentJobsController(QObject):
             or not self._source.supports_results
         ):
             return
+        def publish(result: Any) -> Any:
+            # All adoption and synchronous presentation signals run on the GUI
+            # thread, while the existing Working dialog is still visible.
+            self._ensure_current_result(job_id, job)
+            self._publish_result(job_id, result, select_result=True)
+            self.resultOpened.emit(job_id)
+            return result
+
         try:
             found, result = self._cached_result(job_id)
             if not found:
@@ -790,15 +798,14 @@ class PersistentJobsController(QObject):
                     if loading is not None and loading[0] == revision
                     else (lambda: self._source.load_result(job_id))
                 )
-                # Only file parsing runs in the worker; adoption belongs to Qt.
-                result = run_modal_task(
+                run_modal_task(
                     view, operation,
                     title="Loading Calculation Result",
                     label="Loading result files…",
+                    on_success=publish,
                 )
-                self._ensure_current_result(job_id, job)
-            self._publish_result(job_id, result, select_result=True)
-            self.resultOpened.emit(job_id)
+            else:
+                publish(result)
         except Exception as exc:  # noqa: BLE001 - persisted/backend data boundary
             QMessageBox.warning(view, "Result Load Failed", str(exc))
 
@@ -826,18 +833,22 @@ class PersistentJobsController(QObject):
                     )
             return self._source.load_result(job_id)
 
+        def publish(result: Any) -> Any:
+            self._ensure_current_result(job_id, job)
+            pending_load = self._loads.pop(job_id, None)
+            if pending_load is not None:
+                pending_load[1].cancel()
+            self._result_cache.store(job_id, _result_version(job), result)
+            self._set_result_in_views(job_id, result)
+            return result
+
         try:
-            result = run_modal_task(
+            run_modal_task(
                 view, reread,
                 title="Refreshing Calculation Result",
                 label="Reading result files…",
+                on_success=publish,
             )
-            self._ensure_current_result(job_id, job)
-            pending = self._loads.pop(job_id, None)
-            if pending is not None:
-                pending[1].cancel()
-            self._result_cache.store(job_id, _result_version(job), result)
-            self._set_result_in_views(job_id, result)
         except Exception as exc:  # noqa: BLE001 - persisted/backend data boundary
             self._load_errors[job_id] = (revision, str(exc))
             view.set_result_error(job_id, str(exc))

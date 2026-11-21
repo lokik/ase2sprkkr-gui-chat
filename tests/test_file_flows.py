@@ -331,7 +331,8 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
     calls = []
     def modal(parent, operation, **kwargs):
         calls.append(kwargs["title"])
-        return operation()
+        result = operation()
+        return kwargs["on_success"](result) if "on_success" in kwargs else result
 
     monkeypatch.setattr(file_flows, "load_result_file", load)
     monkeypatch.setattr(file_flows, "run_modal_task", modal)
@@ -378,8 +379,7 @@ def test_load_output_registers_reusable_potential_without_activating_it(
         directory=str(tmp_path),
         input_parameters=None,
     )
-    monkeypatch.setattr(file_flows, "_read_output", lambda *_args: loaded)
-    monkeypatch.setattr(file_flows, "_try_adopt_companion_scf", lambda *_args: None)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda *_args: loaded)
 
     original_atoms = Atoms("Cu", cell=(3, 3, 3), pbc=True)
     controller = WorkspaceController(WorkspaceState(atoms=original_atoms))
@@ -414,8 +414,7 @@ def test_load_output_does_not_remember_unreadable_potential(tmp_path, monkeypatc
         directory=str(tmp_path),
         input_parameters=None,
     )
-    monkeypatch.setattr(file_flows, "_read_output", lambda *_args: loaded)
-    monkeypatch.setattr(file_flows, "_try_adopt_companion_scf", lambda *_args: None)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda *_args: loaded)
     warnings = []
     monkeypatch.setattr(
         file_flows.QMessageBox, "warning",
@@ -457,7 +456,10 @@ def test_directory_import_adds_only_successfully_loaded_potentials(
 
     monkeypatch.setattr(file_flows, "load_result_file", load)
     monkeypatch.setattr(
-        file_flows, "run_modal_task", lambda _parent, operation, **_kw: operation(),
+        file_flows, "run_modal_task",
+        lambda _parent, operation, **kw: (
+            kw["on_success"](operation()) if "on_success" in kw else operation()
+        ),
     )
     monkeypatch.setattr(
         file_flows.QMessageBox, "information", lambda *_args: None,

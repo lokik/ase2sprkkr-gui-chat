@@ -353,35 +353,39 @@ def load_all_recent_outputs(
                 failures.append((path.name, str(exc)))
         return loaded, failures
 
+    def publish(read_results):
+        loaded, failures = read_results
+        imported: list[Path] = []
+        potential_entries: list[tuple[RecentKind, Path]] = []
+        selected_id = None
+        for path, result in loaded:
+            try:
+                adoption = controller.adopt_external_result(result)
+                if adoption.record is not None:
+                    selected_id = adoption.record.id
+                if adoption.potential_path is not None and adoption.potential_error is None:
+                    potential_entries.append(("structure", adoption.potential_path))
+                imported.append(path)
+            except Exception as exc:  # noqa: BLE001 - independent results
+                failures.append((path.name, str(exc)))
+
+        # Complete all synchronous Qt updates before dismissing Working.
+        recent_files.remember_many(potential_entries, preserve_last_kind=True)
+        if selected_id is not None:
+            controller.resultSelectionRequested.emit(selected_id)
+        return imported, failures
+
     try:
-        loaded, failures = run_modal_task(
+        imported, failures = run_modal_task(
             parent, read_all,
             title="Loading Recent Results",
             label="Reading recent SPR-KKR results…",
+            on_success=publish,
         )
-    except Exception as exc:  # noqa: BLE001 - reader error
+    except Exception as exc:  # noqa: BLE001 - reader or presentation error
         QMessageBox.critical(parent, "Loading Recent Results Failed", str(exc))
         return ()
 
-    imported: list[Path] = []
-    potential_entries: list[tuple[RecentKind, Path]] = []
-    selected_id = None
-    for path, result in loaded:
-        try:
-            adoption = controller.adopt_external_result(result)
-            if adoption.record is not None:
-                selected_id = adoption.record.id
-            if adoption.potential_path is not None and adoption.potential_error is None:
-                potential_entries.append(("structure", adoption.potential_path))
-            imported.append(path)
-        except Exception as exc:  # noqa: BLE001 - continue with independent results
-            failures.append((path.name, str(exc)))
-
-    # The outputs are already in recent history: preserve their order and
-    # selected kind while registering reusable potentials in one notification.
-    recent_files.remember_many(potential_entries, preserve_last_kind=True)
-    if selected_id is not None:
-        controller.resultSelectionRequested.emit(selected_id)
     if failures:
         summary = "\n".join(f"{name}: {reason}" for name, reason in failures[:8])
         QMessageBox.warning(
@@ -422,28 +426,32 @@ def load_output_directory(
                 failures.append((path.name, str(exc)))
         return loaded, failures
 
+    def publish(read_results):
+        loaded, failures = read_results
+        imported = []
+        for index, (path, result) in enumerate(loaded):
+            adoption = controller.adopt_external_result(
+                result, select_result=index == len(loaded) - 1
+            )
+            recent_files.remember_result(
+                path,
+                potential_path=(
+                    adoption.potential_path if adoption.potential_error is None else None
+                ),
+            )
+            imported.append(path)
+        return imported, failures
+
     try:
-        loaded, failures = run_modal_task(
+        imported, failures = run_modal_task(
             parent, read_all,
             title="Importing Results",
             label="Reading SPR-KKR outputs…",
+            on_success=publish,
         )
-    except Exception as exc:  # noqa: BLE001 - backend errors
+    except Exception as exc:  # noqa: BLE001 - backend or presentation errors
         QMessageBox.critical(parent, "Directory Import Failed", str(exc))
         return ()
-
-    imported = []
-    for index, (path, result) in enumerate(loaded):
-        adoption = controller.adopt_external_result(
-            result, select_result=index == len(loaded) - 1
-        )
-        recent_files.remember_result(
-            path,
-            potential_path=(
-                adoption.potential_path if adoption.potential_error is None else None
-            ),
-        )
-        imported.append(path)
 
     if failures:
         summary = "\n".join(
@@ -488,15 +496,40 @@ def choose_and_load_output_directory(
     )
 
 
-def _read_output(file_path: str | Path, parent: QWidget) -> LoadedResult | None:
+def _existing_scf_potentials(controller: WorkspaceController) -> frozenset[Path]:
+    """Snapshot GUI history before starting a worker; never read the store from it."""
+    return frozenset(
+        record.potential_path for record in controller.result_store.results
+        if record.task_name == "scf" and record.potential_path is not None
+    )
+
+
+def _read_output(
+    file_path: str | Path,
+    parent: QWidget,
+    *,
+    known_scf_potentials: frozenset[Path],
+    on_success,
+):
+    """Read result and optional SCF off-thread, then publish before Working closes."""
+    def read():
+        loaded = load_result_file(file_path)
+        companion = None
+        if loaded.potential_path not in known_scf_potentials:
+            try:
+                companion = load_companion_scf_result(loaded)
+            except Exception:  # noqa: BLE001 - companion history is best effort
+                pass
+        return loaded, companion
+
     try:
         return run_modal_task(
-            parent,
-            lambda: load_result_file(file_path),
+            parent, read,
             title="Loading Result",
             label="Parsing SPR-KKR output…",
+            on_success=lambda pair: on_success(*pair),
         )
-    except Exception as exc:  # noqa: BLE001 - backend readers vary
+    except Exception as exc:  # noqa: BLE001 - parser and adoption errors
         QMessageBox.critical(
             parent,
             "Load Error",
@@ -505,13 +538,8 @@ def _read_output(file_path: str | Path, parent: QWidget) -> LoadedResult | None:
         return None
 
 
-def _finish_output_load(
-    adoption: ResultAdoption,
-    recent_files: RecentFiles,
-    file_path: str | Path,
-    parent: QWidget,
-    *,
-    show_potential_warning: bool = True,
+def _remember_output_load(
+    adoption: ResultAdoption, recent_files: RecentFiles, file_path: str | Path,
 ) -> None:
     recent_files.remember_result(
         file_path,
@@ -519,26 +547,33 @@ def _finish_output_load(
             adoption.potential_path if adoption.potential_error is None else None
         ),
     )
+
+
+def _show_output_warnings(
+    adoption: ResultAdoption,
+    parent: QWidget,
+    *,
+    show_potential_warning: bool = True,
+) -> None:
     if show_potential_warning:
         _show_potential_warning(adoption, parent)
     _show_input_parameters_warning(adoption, parent)
 
 
-def _try_adopt_companion_scf(
-    controller: WorkspaceController,
-    loaded: LoadedResult,
+def _adopt_companion_scf(
+    controller: WorkspaceController, companion: LoadedResult | None,
 ) -> None:
-    """Import related SCF history if available; never block the selected output."""
+    """Adopt companion history on the GUI thread, at most once, without failing load."""
+    if companion is None:
+        return
     try:
         if any(
-            record.task_name == "scf" and record.potential_path == loaded.potential_path
+            record.task_name == "scf" and record.potential_path == companion.potential_path
             for record in controller.result_store.results
         ):
             return
-        companion = load_companion_scf_result(loaded)
-        if companion is not None:
-            controller.adopt_external_result(companion)
-    except Exception:  # noqa: BLE001 - this is strictly an optional import
+        controller.adopt_external_result(companion)
+    except Exception:  # noqa: BLE001 - optional import never blocks primary result
         pass
 
 
@@ -549,12 +584,20 @@ def load_output(
     parent: QWidget,
 ) -> bool:
     """Import an output into result history without changing the workspace."""
-    loaded = _read_output(file_path, parent)
-    if loaded is None:
+    def publish(loaded: LoadedResult, companion: LoadedResult | None):
+        _adopt_companion_scf(controller, companion)
+        adoption = controller.adopt_external_result(loaded, select_result=True)
+        _remember_output_load(adoption, recent_files, file_path)
+        return adoption
+
+    adoption = _read_output(
+        file_path, parent,
+        known_scf_potentials=_existing_scf_potentials(controller),
+        on_success=publish,
+    )
+    if adoption is None:
         return False
-    _try_adopt_companion_scf(controller, loaded)
-    adoption = controller.adopt_external_result(loaded, select_result=True)
-    _finish_output_load(adoption, recent_files, file_path, parent)
+    _show_output_warnings(adoption, parent)
     return True
 
 
@@ -564,74 +607,87 @@ def continue_output(
     file_path: str | Path,
     parent: QWidget,
 ) -> bool:
-    """Import or reuse an output and make its reusable calculation state active."""
+    """Restore an existing output; finish workspace changes under Working."""
     structure_generation = controller.structure_generation
     directory_generation = controller.directory_generation
-    loaded = _read_output(file_path, parent)
-    if loaded is None:
-        return False
 
-    _try_adopt_companion_scf(controller, loaded)
-    adoption = controller.adopt_external_result(loaded, select_result=True)
-    record = adoption.record
-    if record is None:
-        return False
+    def publish(loaded: LoadedResult, companion: LoadedResult | None):
+        _adopt_companion_scf(controller, companion)
+        adoption = controller.adopt_external_result(loaded, select_result=True)
+        record = adoption.record
+        if record is None:
+            return adoption, False, ("missing_record", None)
 
-    state = controller.result_store.state_for_result(record)
-    if state is None:
-        if adoption.potential_error is not None:
-            message = (
-                "Cannot continue calculation because the potential could not be loaded:\n"
-                f"{adoption.potential_error}\n\n"
-                "The result was imported into history, but no reusable "
-                "calculation state could be reconstructed."
-            )
-        else:
-            message = (
-                "The result was imported into history, but no reusable "
-                "calculation state could be reconstructed from it."
-            )
-        QMessageBox.warning(parent, "Cannot Continue Calculation", message)
-        # The potential error is already included in the explanation above.
-        _finish_output_load(
-            adoption, recent_files, file_path, parent,
-            show_potential_warning=False,
-        )
-        return False
+        state = controller.result_store.state_for_result(record)
+        if state is None:
+            _remember_output_load(adoption, recent_files, file_path)
+            return adoption, False, ("missing_state", None)
 
-    if controller.state_id != state.id:
-        try:
-            change = controller.use_result_state(
-                record.id,
-                expected_structure_generation=structure_generation,
+        if controller.state_id != state.id:
+            try:
+                change = controller.use_result_state(
+                    record.id,
+                    expected_structure_generation=structure_generation,
+                )
+            except (ValueError, PotentialVersionChanged) as exc:
+                _remember_output_load(adoption, recent_files, file_path)
+                return adoption, False, ("restore_error", str(exc))
+            if change is not DocumentChange.APPLIED:
+                _remember_output_load(adoption, recent_files, file_path)
+                return adoption, False, ("document_change", change)
+
+        if loaded.directory is not None:
+            change = controller.change_directory(
+                loaded.directory,
+                expected_directory_generation=directory_generation,
             )
-        except (ValueError, PotentialVersionChanged) as exc:
+            if change is not DocumentChange.APPLIED:
+                _remember_output_load(adoption, recent_files, file_path)
+                return adoption, False, ("document_change", change)
+
+        # A restored file-backed structure is a saved baseline, not an edit.
+        controller.mark_structure_saved(controller.structure_generation)
+        _remember_output_load(adoption, recent_files, file_path)
+        return adoption, True, None
+
+    outcome = _read_output(
+        file_path, parent,
+        known_scf_potentials=_existing_scf_potentials(controller),
+        on_success=publish,
+    )
+    if outcome is None:
+        return False
+    adoption, succeeded, problem = outcome
+    if problem is not None:
+        kind, detail = problem
+        if kind == "missing_state":
+            if adoption.potential_error is not None:
+                message = (
+                    "Cannot continue calculation because the potential could not be loaded:\n"
+                    f"{adoption.potential_error}\n\n"
+                    "The result was imported into history, but no reusable "
+                    "calculation state could be reconstructed."
+                )
+            else:
+                message = (
+                    "The result was imported into history, but no reusable "
+                    "calculation state could be reconstructed from it."
+                )
+            QMessageBox.warning(parent, "Cannot Continue Calculation", message)
+            _show_output_warnings(adoption, parent, show_potential_warning=False)
+            return False
+        if kind == "restore_error":
             QMessageBox.warning(
-                parent,
-                "Cannot Continue Calculation",
-                f"The selected result cannot be restored:\n{exc}",
+                parent, "Cannot Continue Calculation",
+                f"The selected result cannot be restored:\n{detail}",
             )
-            _finish_output_load(adoption, recent_files, file_path, parent)
-            return False
-        if not document_change_applied(parent, change):
-            _finish_output_load(adoption, recent_files, file_path, parent)
-            return False
-
-    if loaded.directory is not None and not document_change_applied(
-        parent,
-        controller.change_directory(
-            loaded.directory,
-            expected_directory_generation=directory_generation,
-        ),
-    ):
-        _finish_output_load(adoption, recent_files, file_path, parent)
+        elif kind == "document_change":
+            document_change_applied(parent, detail)
+        _show_output_warnings(adoption, parent)
         return False
-    # Continuing from an existing output restores a file-backed structure,
-    # not a new unsaved edit. Only commit its saved baseline once the entire
-    # continuation (including the working directory) succeeded.
-    controller.mark_structure_saved(controller.structure_generation)
-    _finish_output_load(adoption, recent_files, file_path, parent)
-    return True
+
+    _show_output_warnings(adoption, parent)
+    return succeeded
 
 
 def save_structure(

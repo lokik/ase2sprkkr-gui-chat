@@ -7,6 +7,7 @@ from threading import Event, get_ident
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
+from ase2sprkkr_gui.gui.misc.modal_task import _ModalTaskDialog
 from PyQt6.QtWidgets import QApplication
 
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob
@@ -125,7 +126,10 @@ def test_background_errors_are_not_cached_and_manual_loading_can_retry(monkeypat
     _spin_until(app, lambda: "Result unavailable:" in view.result_widget._empty_label.text())
     monkeypatch.setattr(
         "ase2sprkkr_gui.gui.controllers.persistent_jobs.run_modal_task",
-        lambda _view, operation, **_kwargs: operation(),
+        lambda _view, operation, **kwargs: (
+            kwargs["on_success"](operation())
+            if "on_success" in kwargs else operation()
+        ),
     )
     published = []
     monkeypatch.setattr(controller, "_publish_result", lambda *args, **kw: published.append((args, kw)))
@@ -151,7 +155,10 @@ def test_refresh_reparses_files_without_adopting_but_load_opens_cached_result(mo
     monkeypatch.setattr(view.result_widget, "set_result", shown.append)
     monkeypatch.setattr(
         "ase2sprkkr_gui.gui.controllers.persistent_jobs.run_modal_task",
-        lambda _view, operation, **_kw: operation(),
+        lambda _view, operation, **kwargs: (
+            kwargs["on_success"](operation())
+            if "on_success" in kwargs else operation()
+        ),
     )
     opened = []
     controller.resultOpened.connect(opened.append)
@@ -238,5 +245,45 @@ def test_unbinding_browser_stops_followup_preloads_and_displays():
     _spin_until(app, lambda: not controller._loads)
     assert not any(isinstance(result, dict) for result in shown)
 
+    view.close()
+    controller._executor.shutdown(wait=True, cancel_futures=True)
+
+
+def test_persistent_load_and_refresh_present_before_working_disappears(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    source = _Source()
+    source.release.set()
+    events = []
+    view = PersistentJobsWidget(lambda *_: None, auto_load_results=False)
+
+    def check(label):
+        from PyQt6.QtCore import QThread
+
+        assert QThread.currentThread() is app.thread()
+        dialog = view.findChild(_ModalTaskDialog)
+        assert dialog is not None and dialog.isVisible()
+        events.append(label)
+
+    controller = PersistentJobsController(
+        source, result_adopter=lambda *_args: check("adopt"),
+    )
+    controller.bind_view(view)
+    controller.resultOpened.connect(lambda _job_id: check("opened"))
+    original_set_result = view.set_result
+
+    def set_result(job_id, result):
+        check("present")
+        return original_set_result(job_id, result)
+
+    monkeypatch.setattr(view, "set_result", set_result)
+    controller._load_result_requested(view, "first")
+    assert "adopt" in events and "opened" in events and "present" in events
+    assert source.calls[0][1] != get_ident()
+
+    events.clear()
+    controller._refresh_result_requested(view, "first")
+    assert "present" in events
+    assert "adopt" not in events
+    assert [job for job, _thread in source.calls].count("first") == 2
     view.close()
     controller._executor.shutdown(wait=True, cancel_futures=True)

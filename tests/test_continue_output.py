@@ -3,12 +3,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from ase import Atoms
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QThread
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.flows import files as file_flows
+from ase2sprkkr_gui.gui.misc.modal_task import _ModalTaskDialog
 from ase2sprkkr_gui.gui.workflow.model import RunTask
 from ase2sprkkr_gui.main import GuiApplication
 
@@ -45,7 +47,7 @@ def test_continue_output_activates_state_and_reuses_same_result(tmp_path, monkey
     output = tmp_path / "SCF.out"
     output.write_text("first calculation", encoding="utf-8")
     loaded = _loaded_scf(output)
-    monkeypatch.setattr(file_flows, "_read_output", lambda _path, _parent: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
 
     controller = WorkspaceController()
     recent = RecentFiles(tmp_path / "recent.json")
@@ -72,7 +74,7 @@ def test_restart_after_continue_resets_effective_scf_status(tmp_path, monkeypatc
     output = tmp_path / "SCF.out"
     output.write_text("calculation", encoding="utf-8")
     loaded = _loaded_scf(output)
-    monkeypatch.setattr(file_flows, "_read_output", lambda _path, _parent: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
 
     controller = WorkspaceController()
     recent = RecentFiles(tmp_path / "recent.json")
@@ -93,7 +95,7 @@ def test_workflow_keeps_semantic_scf_action_after_continue_and_restart(
     output = tmp_path / "SCF.out"
     output.write_text("calculation", encoding="utf-8")
     loaded = _loaded_scf(output)
-    monkeypatch.setattr(file_flows, "_read_output", lambda _path, _parent: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
 
     gui = GuiApplication(
         recent_files_path=tmp_path / "recent.json",
@@ -147,7 +149,7 @@ def test_continue_output_reports_potential_error_once(tmp_path, monkeypatch):
         directory=str(tmp_path),
         input_parameters=None,
     )
-    monkeypatch.setattr(file_flows, "_read_output", lambda _path, _parent: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
     warnings = []
     monkeypatch.setattr(
         file_flows.QMessageBox,
@@ -186,7 +188,7 @@ def test_continue_output_without_reconstructable_structure_reports_one_warning(
         directory=str(tmp_path),
         input_parameters=None,
     )
-    monkeypatch.setattr(file_flows, "_read_output", lambda _path, _parent: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
     warnings = []
     monkeypatch.setattr(
         file_flows.QMessageBox,
@@ -200,3 +202,38 @@ def test_continue_output_without_reconstructable_structure_reports_one_warning(
     assert len(warnings) == 1
     assert "no reusable calculation state" in warnings[0][1]
     assert "potential could not be loaded" not in warnings[0][1]
+
+
+def test_continue_finishes_state_and_recent_history_under_working(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    parent = QWidget()
+    output = tmp_path / "SCF.out"
+    output.touch()
+    loaded = _loaded_scf(output)
+    controller = WorkspaceController()
+    recent = RecentFiles(tmp_path / "recent.json")
+    events = []
+
+    def read(path):
+        assert path == output
+        assert QThread.currentThread() is not app.thread()
+        events.append("read")
+        return loaded
+
+    def check(label):
+        assert QThread.currentThread() is app.thread()
+        dialog = parent.findChild(_ModalTaskDialog)
+        assert dialog is not None and dialog.isVisible()
+        events.append(label)
+
+    monkeypatch.setattr(file_flows, "load_result_file", read)
+    controller.resultChanged.connect(lambda *_args: check("result"))
+    controller.structureChanged.connect(lambda *_args: check("structure"))
+    recent.changed.connect(lambda: check("history"))
+
+    assert file_flows.continue_output(controller, recent, output, parent)
+    assert events[0] == "read"
+    assert "result" in events and "structure" in events and "history" in events
+    assert controller.atoms is not None
+    assert not controller.has_unsaved_structure
+    parent.close()
