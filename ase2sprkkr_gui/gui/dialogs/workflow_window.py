@@ -171,11 +171,11 @@ class _RecentFooterButton(CenteredIconToolButton):
 class _HeaderActionBar(QWidget):
     """Column header which uses the same compact mode as its peers."""
 
-    # Horizontal navigation buttons are deliberately wide and low; retain
-    # the header height so only the buttons' silhouette changes.
-    FULL_WIDTH = 200
-    SHORT_WIDTH = 140
-    BUTTON_HEIGHT = 58
+    # Taller, narrower buttons leave the original 93-pixel header unchanged.
+    # Two lines of text can fit below the icon without moving column titles.
+    FULL_WIDTH = 168
+    SHORT_WIDTH = 120
+    BUTTON_HEIGHT = 68
     COMPACT_SIZE = BUTTON_HEIGHT  # Square icon-only main button.
     MENU_EXTRA_WIDTH = 22
     VERTICAL_GAP = 12  # Also used by the unchanged Results utility footer.
@@ -224,6 +224,7 @@ class _HeaderActionBar(QWidget):
         )
         button.setIconSize(QSize(26, 26))
         button.setFixedHeight(self.BUTTON_HEIGHT)
+        button.setProperty("twoLineUnderIcon", True)
         button.setMinimumWidth(0)
         button.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
@@ -281,7 +282,7 @@ class _HeaderActionBar(QWidget):
             if isinstance(button, _RecentFooterButton):
                 button.setToolButtonStyle(
                     Qt.ToolButtonStyle.ToolButtonIconOnly if mode == "icon"
-                    else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                    else Qt.ToolButtonStyle.ToolButtonTextUnderIcon
                 )
                 button.set_display_mode(mode)
                 style = self._styles[button]
@@ -291,7 +292,7 @@ class _HeaderActionBar(QWidget):
             elif isinstance(button, QToolButton):
                 button.setToolButtonStyle(
                     Qt.ToolButtonStyle.ToolButtonIconOnly if mode == "icon"
-                    else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                    else Qt.ToolButtonStyle.ToolButtonTextUnderIcon
                 )
                 button.setText(
                     self._short_labels[button] if mode == "short"
@@ -400,7 +401,7 @@ class WorkflowWindow(QMainWindow):
                 button.setText(label)
             button.setIcon(icon)
             button.setIconSize(QSize(24, 24))
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
             button.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
