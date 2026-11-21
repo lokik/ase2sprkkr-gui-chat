@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import numpy as np
 from ase import Atoms
@@ -26,7 +26,9 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from pyxtal.symmetry import Group
+
+if TYPE_CHECKING:
+    from pyxtal.symmetry import Group
 
 from ase2sprkkr_gui.gui.widgets.matplotlib_preview import PreviewFigureCanvas as FigureCanvas
 from ase2sprkkr_gui.gui.plots.lattice import plot_lattice, plot_sites_in_lattice
@@ -300,6 +302,8 @@ class SpaceGroupSelectorDialog(QDialog):
 
     def _load_group(self, group: int) -> None:
         """Load one space group into the shared Wyckoff/lattice editor."""
+        from pyxtal.symmetry import Group
+
         self.selected_group = Group(group)
         wps = sorted(self.selected_group.Wyckoff_positions, key=lambda wp: wp.letter)
         self.wyckoff_positions = { wp.letter: WyckoffPosition(wp) for wp in wps}
@@ -478,8 +482,10 @@ class SpaceGroupSelectorDialog(QDialog):
 
     def _populate_table(self) -> None:
         """Populate the table widget with cached space-group metadata."""
-        # Build cache on first use
+        # Build cache on first use. Import pyxtal only when this dialog is used.
         if self._sg_cache is None:
+            from pyxtal.symmetry import Group
+
             cache: List[tuple] = []
             for i in range(1, 231):
                 g = Group(i)

@@ -1,4 +1,3 @@
-from pyxtal.symmetry import Group
 import math
 import re
 import numpy as np
