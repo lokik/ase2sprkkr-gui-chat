@@ -648,7 +648,7 @@ def test_workflow_navigation_has_three_aligned_top_toolbar_groups(
     assert [len(footer.findChildren(QToolButton)) for footer in footers] == [
         3, 3, 3,
     ]
-    assert footers[0].layout().itemAt(1).widget().width() == 1
+    assert footers[0].layout().itemAt(2).widget().width() == 1
     assert footers[2].layout().itemAt(2).widget().width() == 1
     # Navigation is compact and left aligned within each workflow column.
     assert all(
@@ -666,9 +666,9 @@ def test_workflow_navigation_has_three_aligned_top_toolbar_groups(
 
     buttons = [button for footer in footers for button in footer.findChildren(QToolButton)]
     assert buttons == [
-        window._settings_button,
         window._start_over_button,
         window._recent_structures_button,
+        window._settings_button,
         window._repeat_button,
         window._load_input_button,
         window._custom_button,
@@ -677,7 +677,7 @@ def test_workflow_navigation_has_three_aligned_top_toolbar_groups(
         window._close_button,
     ]
     assert [button.text() for button in buttons] == [
-        "Settings", "Start from Scratch", "Recent Structures",
+        "Start from Scratch", "Recent Structures", "Settings",
         "Repeat Calculation", "Load Input File", "Custom Input File",
         "Recent Results", "Project Browser", "Close",
     ]
@@ -697,7 +697,11 @@ def test_workflow_navigation_has_three_aligned_top_toolbar_groups(
     assert all(not footer.styleSheet() for footer in footers)
     # Every group starts from the left; the first button has matching
     # horizontal inset, even in Results.
-    assert len({buttons[0].x(), buttons[3].x(), buttons[6].x()}) == 1
+    assert len({
+        window._recent_structures_button.x(),
+        window._repeat_button.x(),
+        window._recent_results_button.x(),
+    }) == 1
     assert all(
         "border: 1px solid transparent" in button.styleSheet()
         and "background: transparent" in button.styleSheet()
