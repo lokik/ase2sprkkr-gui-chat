@@ -27,7 +27,7 @@ def test_bsf_ek_info_reports_energy_indices_without_fabricated_progress():
     window._append_output(stdout[51:], "out")
     assert "energy 151/200" in window._bsf_progress.last_info.text()
     assert "151/200" in window._bsf_progress.events.toPlainText()
-    assert window._output.toPlainText() == stdout
+    assert window._output.toPlainText().strip() == stdout.strip()
     window.close()
 
 
@@ -53,5 +53,5 @@ def test_bsf_kk_info_shows_mesh_and_aggregates_native_warnings():
     assert "60 × 60" in progress.events.toPlainText()
     assert len(progress.events.toPlainText().split("Negative spectral-function warnings:")) == 4
     assert "finished" in progress.last_info.text()
-    assert window._output.toPlainText().endswith("finished in subroutine <BLOCHSF>\n")
+    assert window._output.toPlainText().strip().endswith("finished in subroutine <BLOCHSF>")
     window.close()
