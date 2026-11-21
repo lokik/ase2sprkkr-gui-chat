@@ -777,8 +777,8 @@ def test_shared_footer_tracks_column_geometry_on_resize_and_splitter_move(tmp_pa
         for index, (column, footer) in enumerate(zip(columns, footers)):
             assert footer.x() == left
             assert footer.width() == column.width()
-            assert footer.y() == 0
-            assert footer.height() == panel.height()
+            assert footer.y() == panel.contentsRect().top()
+            assert footer.height() == panel.contentsRect().height()
             assert footer.x() + footer.width() <= panel.width()
             left += column.width()
             if index == 0:
