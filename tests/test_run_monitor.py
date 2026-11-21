@@ -200,7 +200,8 @@ def test_attached_scf_monitor_shows_info_and_accepts_replayed_iterations():
     assert window._scf_progress is not None
 
     line = " 5 ERR 0.211E-02 0.208E-01 EF 0.76199 0.00307 D 14.537 M 2.1740 0.0536\n"
-    window._append_output(line, "out")
-    assert window._scf_progress.tracker.iterations[0].number == 5
-    assert window._output.toPlainText().strip() == line.strip()
+    completed = line + " ETOT -42.5 SCF - cycle not converged - continue\n"
+    window._append_output(completed, "out")
+    assert window._scf_progress.tracker.iterations[0].iteration == 5
+    assert window._output.toPlainText().strip() == completed.strip()
     window.close()
