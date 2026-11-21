@@ -18,6 +18,7 @@ from ase2sprkkr_gui.gui.application.sprkkr_execution import SprkkrExecution
 from ase2sprkkr_gui.gui.application.workspace_controller import CalculationRequest
 from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow, RunMonitorWorker
 from ase2sprkkr_gui.gui.dialogs.run_conflict import SubmissionConflictDialog
+from ase2sprkkr_gui.gui.dialogs.scf_progress import scf_tolerance_from_parameters
 
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,9 @@ class SprkkrRunWindow(RunMonitorWindow):
             warning_title="MPI Not Detected",
             on_finished=on_finished,
             scf=str(getattr(getattr(request, "input_parameters", None), "task_name", "")).upper() == "SCF",
+            scf_tolerance=scf_tolerance_from_parameters(
+                getattr(request, "input_parameters", None)
+            ),
             autostart=False,
         )
         self._conflict_cancellation_pending = False
