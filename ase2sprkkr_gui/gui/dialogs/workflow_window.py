@@ -620,10 +620,7 @@ class WorkflowWindow(QMainWindow):
         self._load_input_button = navigation_button(
             content_navigation,
             "Load Input File",
-            QIcon.fromTheme(
-                "document-open",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
-            ),
+            badge_icon(QIcon(str(icon_path("input-parameters.svg"))), "load"),
             "Load, edit, save or calculate from an SPR-KKR input file",
             self._load_input_file,
             short_title="Load Input",
