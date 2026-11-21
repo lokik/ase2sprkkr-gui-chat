@@ -614,7 +614,7 @@ def test_cancel_new_2d_prompts_to_keep_or_discard_3d(tmp_path, monkeypatch, keep
     window.close()
 
 
-def test_workflow_navigation_has_three_compact_column_footers(
+def test_workflow_navigation_has_three_aligned_top_toolbar_groups(
     tmp_path, monkeypatch
 ):
     application = QApplication.instance() or QApplication([])
@@ -622,12 +622,12 @@ def test_workflow_navigation_has_three_compact_column_footers(
 
     root = window.centralWidget().layout()
     assert root.count() == 2
-    assert isinstance(root.itemAt(0).widget(), QSplitter)
     navigation = window.findChild(QFrame, "workflowNavigation")
     assert navigation is window._navigation_panel
-    assert root.itemAt(1).widget() is navigation
+    assert root.itemAt(0).widget() is navigation
+    assert isinstance(root.itemAt(1).widget(), QSplitter)
     assert "background-color:" in navigation.styleSheet()
-    assert "border-top: 1px" in navigation.styleSheet()
+    assert "border-bottom: 1px" in navigation.styleSheet()
 
     columns = (
         window.findChild(QWidget, "workflowStructureColumn"),
@@ -649,15 +649,20 @@ def test_workflow_navigation_has_three_compact_column_footers(
         3, 3, 3,
     ]
     assert footers[0].layout().itemAt(1).widget().width() == 1
-    assert footers[2].layout().itemAt(3).widget().width() == 1
+    assert footers[2].layout().itemAt(2).widget().width() == 1
     # Navigation is compact and left aligned within each workflow column.
     assert all(
         item.spacerItem() is None
         for group in footers[:2]
         for item in (group.layout().itemAt(i) for i in range(group.layout().count()))
     )
-    # Only Close is separated to the right edge.
-    assert footers[2].layout().itemAt(2).spacerItem() is not None
+    # Results starts on the same left margin as the other groups;
+    # no stretch may push its buttons toward the right edge.
+    assert all(
+        footer.layout().itemAt(i).spacerItem() is None
+        for footer in footers
+        for i in range(footer.layout().count())
+    )
 
     buttons = [button for footer in footers for button in footer.findChildren(QToolButton)]
     assert buttons == [
@@ -677,19 +682,22 @@ def test_workflow_navigation_has_three_compact_column_footers(
         "Recent Results", "Project Browser", "Close",
     ]
     assert all(not button.icon().isNull() for button in buttons)
-    assert all(button.height() == 46 for button in buttons)
+    assert all(button.height() == 56 for button in buttons)
     assert all(
         button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         for button in buttons
     )
     assert all(button.iconSize().width() == 20 for button in buttons)
     assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
-    assert footers[2].layout().contentsMargins().left() == 16
-    assert footers[2].layout().contentsMargins().right() == 16
-    assert window._repeat_button.width() <= 194
-    assert window._recent_structures_button.minimumWidth() == 194
+    assert len({footer.layout().contentsMargins().left() for footer in footers}) == 1
+    assert len({footer.layout().contentsMargins().right() for footer in footers}) == 1
+    assert window._repeat_button.width() == 202
+    assert window._recent_structures_button.minimumWidth() == 202
 
     assert all(not footer.styleSheet() for footer in footers)
+    # Every group starts from the left; the first button has matching
+    # horizontal inset, even in Results.
+    assert len({buttons[0].x(), buttons[3].x(), buttons[6].x()}) == 1
     assert all(
         "border: 1px solid transparent" in button.styleSheet()
         and "background: transparent" in button.styleSheet()
@@ -758,7 +766,7 @@ def test_dynamic_cards_are_not_wrapped_in_extra_panels(tmp_path):
     window.close()
 
 
-def test_shared_footer_tracks_column_geometry_on_resize_and_splitter_move(tmp_path):
+def test_top_toolbar_tracks_column_geometry_on_resize_and_splitter_move(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
     window.showNormal()
@@ -799,6 +807,7 @@ def test_shared_footer_tracks_column_geometry_on_resize_and_splitter_move(tmp_pa
         ).x() < panel.width()
 
     assert_aligned()
+    assert panel.mapTo(window, QPoint(0, 0)).y() < columns[0].mapTo(window, QPoint(0, 0)).y()
     window._layout_splitter.moveSplitter(850, 1)
     application.processEvents()
     assert_aligned()
@@ -845,6 +854,11 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
         assert "\n" in button.text()
         assert str(paths[kind][1]) in button.toolTip()
         assert "width: 28px" in button.styleSheet()
+        # The label is the actual filename, without a clipped path prefix.
+        assert button.text().split("\\n", 1)[1] == paths[kind][1].name
+        # The painter keeps the title and basename to the left of the
+        # 28 px menu control (plus an explicit gutter).
+        assert button.width() - button.MENU_WIDTH - 14 > 36
         button.click()
         button.menu().actions()[1].trigger()
 
