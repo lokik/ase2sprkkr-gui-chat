@@ -901,7 +901,7 @@ class WorkflowWindow(QMainWindow):
         self._update_navigation(snapshot)
         if atoms is None:
             self._calculate_notice.setText(
-                "First, create a structure or load a structure or potential."
+                "First, create a structure or load an existing structure or potential."
             )
         else:
             self._calculate_notice.setText(
