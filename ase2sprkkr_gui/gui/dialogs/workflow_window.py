@@ -128,9 +128,9 @@ class _RecentFooterButton(QToolButton):
         # Retain the readable text for accessibility and button inspection,
         # while paintEvent provides proper per-line styling and wrapping.
         filename = Path(self._recent_path).name if self._recent_path else ""
-        label = f"{self._title}\\n{filename}" if filename else self._title
+        label = f"{self._title}\n{filename}" if filename else self._title
         tooltip = (
-            f"{self._base_tooltip}\\n{self._recent_path}"
+            f"{self._base_tooltip}\n{self._recent_path}"
             if self._recent_path else self._base_tooltip
         )
         if self.text() != label:
@@ -146,6 +146,9 @@ class _RecentFooterButton(QToolButton):
         # Qt's default two-line QToolButton text can intrude into the arrow.
         option.text = ""
         option.icon = QIcon()
+        if self.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly:
+            super().paintEvent(event)
+            return
         painter = QStylePainter(self)
         painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
 
@@ -177,14 +180,19 @@ class _RecentFooterButton(QToolButton):
                 | Qt.TextFlag.TextWordWrap,
                 self._title,
             )
-            painter.setFont(self.font())
-            # A basename is much more useful in a compact toolbar than a
-            # path prefix such as /home/...; the full path is in the tooltip.
-            filename = Path(self._recent_path).name
+            filename_font = QFont(self.font())
+            if filename_font.pointSizeF() > 0:
+                filename_font.setPointSizeF(max(7.0, filename_font.pointSizeF() - 1))
+            painter.setFont(filename_font)
+            # Keep the basename clear of the arrow even when it is long.
+            # The full pathname remains available in the tooltip.
+            filename = painter.fontMetrics().elidedText(
+                Path(self._recent_path).name, Qt.TextElideMode.ElideMiddle,
+                text_width,
+            )
             painter.drawText(
                 QRect(text_x, 29, text_width, self.height() - 32),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-                | Qt.TextFlag.TextWordWrap,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 filename,
             )
         else:
@@ -205,7 +213,8 @@ class _AlignedNavigationPanel(QFrame):
     ):
         super().__init__(parent)
         self.setObjectName("workflowNavigation")
-        self.setFixedHeight(70)
+        self.setFixedHeight(60)
+        self._compact: bool | None = None
         self._columns = columns
         self.groups = tuple(QWidget(self) for _ in columns)
         layout = QHBoxLayout(self)
@@ -238,6 +247,65 @@ class _AlignedNavigationPanel(QFrame):
             width = column.width()
             if group.width() != width:
                 group.setFixedWidth(width)
+        # All nine actions use the same presentation. Never let one label
+        # disappear or a button overflow its column independently.
+        compact = any(
+            self._expanded_width(group) > column.width()
+            for column, group in zip(self._columns, self.groups)
+        )
+        self._set_compact(compact)
+
+    @staticmethod
+    def _buttons(group: QWidget) -> list[QToolButton]:
+        layout = group.layout()
+        return [
+            widget for i in range(layout.count())
+            if isinstance(widget := layout.itemAt(i).widget(), QToolButton)
+        ]
+
+    def _expanded_width(self, group: QWidget) -> int:
+        layout = group.layout()
+        margins = layout.contentsMargins()
+        width = margins.left() + margins.right()
+        visible_items = [
+            layout.itemAt(i).widget() for i in range(layout.count())
+            if layout.itemAt(i).widget() is not None
+            and not layout.itemAt(i).widget().isHidden()
+        ]
+        width += layout.spacing() * max(0, len(visible_items) - 1)
+        for widget in visible_items:
+            if isinstance(widget, _RecentFooterButton):
+                width += 202
+            elif isinstance(widget, QToolButton):
+                width += max(
+                    82, widget.iconSize().width()
+                    + widget.fontMetrics().horizontalAdvance(widget.text()) + 28,
+                )
+            else:
+                width += widget.width()
+        return width
+
+    def _set_compact(self, compact: bool) -> None:
+        if self._compact is compact:
+            return
+        self._compact = compact
+        for group in self.groups:
+            for button in self._buttons(group):
+                button.setToolButtonStyle(
+                    Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                    else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                )
+                if compact:
+                    # A split button still needs a separate 28 px arrow area.
+                    button.setFixedWidth(
+                        56 if isinstance(button, _RecentFooterButton) else 44
+                    )
+                elif isinstance(button, _RecentFooterButton):
+                    button.setFixedWidth(202)
+                else:
+                    button.setMaximumWidth(16777215)
+                    button.setMinimumWidth(82)
+            group.layout().invalidate()
 
 
 class WorkflowWindow(QMainWindow):
@@ -327,6 +395,7 @@ class WorkflowWindow(QMainWindow):
         self._structure_title.setFont(
             heading_font(self._structure_title.font(), "dialog")
         )
+        self._structure_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         structure_layout.addWidget(self._structure_title)
 
         self._subtitle = QLabel(structure_column)
@@ -368,6 +437,7 @@ class WorkflowWindow(QMainWindow):
         title = QLabel("Calculate", content)
         title.setObjectName("workflowCalculateTitle")
         title.setFont(heading_font(title.font(), "dialog"))
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         content_layout.addWidget(title)
 
         self._calculate_notice = QLabel(content)
@@ -409,6 +479,7 @@ class WorkflowWindow(QMainWindow):
         result_actions_title.setFont(
             heading_font(result_actions_title.font(), "dialog")
         )
+        result_actions_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         side_layout.addWidget(result_actions_title)
 
         self._result_actions = QFrame(side)
@@ -437,17 +508,13 @@ class WorkflowWindow(QMainWindow):
             (structure_column, content, side),
             (action_columns_layout.spacing(), splitter.handleWidth()), central,
         )
-        border = blend(
-            self.palette().color(QPalette.ColorRole.Window),
-            self.palette().color(QPalette.ColorRole.Mid), .35,
-        )
         toolbar_color = blend(
             self.palette().color(QPalette.ColorRole.Window),
             self.palette().color(QPalette.ColorRole.Mid), .10,
         )
         navigation.setStyleSheet(
             f"QFrame#workflowNavigation {{ background-color: {toolbar_color.name()}; "
-            f"border: none; border-bottom: 1px solid {border.name()}; }}"
+            "border: none; }"
         )
         root.insertWidget(0, navigation)
         self._navigation_panel = navigation
@@ -479,7 +546,7 @@ class WorkflowWindow(QMainWindow):
             button.setIcon(icon)
             button.setIconSize(QSize(20, 20))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedHeight(56)
+            button.setFixedHeight(48)
             button.setAutoRaise(True)
             # Fixed/natural widths keep this a toolbar rather than stretched
             # workflow cards. Recent buttons reserve room for their two lines.
@@ -630,11 +697,9 @@ class WorkflowWindow(QMainWindow):
             self.close,
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
-        # The Results navigation must never be clipped by the splitter,
-        # even with a narrower window or longer translated labels.
-        side.setMinimumWidth(max(
-            side.minimumWidth(), results_navigation.sizeHint().width()
-        ))
+        # Start compact, then expand all buttons together when every column
+        # has sufficient room. This keeps the splitter free to resize.
+        navigation._set_compact(True)
 
     def _open_recent(self, kind: str, path: str | None = None) -> None:
         """Use the latest path for the main button, or an explicit menu item."""
@@ -662,6 +727,7 @@ class WorkflowWindow(QMainWindow):
         self._custom_button.setAccessibleName(label)
 
         if snapshot == self._navigation_snapshot:
+            self._navigation_panel._align_columns()
             return
         self._navigation_snapshot = snapshot
         for kind, button in (
@@ -688,6 +754,7 @@ class WorkflowWindow(QMainWindow):
                         LoadAllRecentResults()
                     )
                 )
+        self._navigation_panel._align_columns()
 
     def _sync_action_card_heights(self) -> None:
         height = max(

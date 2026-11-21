@@ -627,7 +627,11 @@ def test_workflow_navigation_has_three_aligned_top_toolbar_groups(
     assert root.itemAt(0).widget() is navigation
     assert isinstance(root.itemAt(1).widget(), QSplitter)
     assert "background-color:" in navigation.styleSheet()
-    assert "border-bottom: 1px" in navigation.styleSheet()
+    assert "border-bottom:" not in navigation.styleSheet()
+    assert navigation.height() == 60
+    for name in ("workflowStructureTitle", "workflowCalculateTitle", "workflowResultsTitle"):
+        heading = window.findChild(QLabel, name)
+        assert heading.alignment() & Qt.AlignmentFlag.AlignHCenter
 
     columns = (
         window.findChild(QWidget, "workflowStructureColumn"),
@@ -682,17 +686,19 @@ def test_workflow_navigation_has_three_aligned_top_toolbar_groups(
         "Recent Results", "Project Browser", "Close",
     ]
     assert all(not button.icon().isNull() for button in buttons)
-    assert all(button.height() == 56 for button in buttons)
-    assert all(
-        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-        for button in buttons
-    )
+    assert all(button.height() == 48 for button in buttons)
+    # Every button changes mode together, never just a single group.
+    assert len({button.toolButtonStyle() for button in buttons}) == 1
     assert all(button.iconSize().width() == 20 for button in buttons)
     assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
     assert len({footer.layout().contentsMargins().left() for footer in footers}) == 1
     assert len({footer.layout().contentsMargins().right() for footer in footers}) == 1
-    assert window._repeat_button.width() == 202
-    assert window._recent_structures_button.minimumWidth() == 202
+    assert window._repeat_button.width() == (
+        56 if navigation._compact else 202
+    )
+    assert window._recent_structures_button.minimumWidth() == (
+        56 if navigation._compact else 202
+    )
 
     assert all(not footer.styleSheet() for footer in footers)
     # Every group starts from the left; the first button has matching
@@ -821,6 +827,43 @@ def test_top_toolbar_tracks_column_geometry_on_resize_and_splitter_move(tmp_path
     window.close()
 
 
+def test_toolbar_switches_all_buttons_together_when_columns_shrink(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.showNormal()
+    window.resize(2000, 820)
+    application.processEvents()
+    window._layout_splitter.setSizes([1320, 630])
+    application.processEvents()
+
+    panel = window._navigation_panel
+    buttons = [
+        button for group in panel.groups
+        for button in group.findChildren(QToolButton)
+    ]
+    assert len(buttons) == 9
+    assert not panel._compact
+    assert all(
+        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        for button in buttons
+    )
+
+    window.resize(1120, 820)
+    application.processEvents()
+    assert panel._compact
+    assert all(
+        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+        for button in buttons
+    )
+    assert all(button.width() in (44, 56) for button in buttons)
+    assert all(
+        button.mapTo(group, QPoint(button.width() - 1, 0)).x() < group.width()
+        for group in panel.groups
+        for button in group.findChildren(QToolButton)
+    )
+    window.close()
+
+
 def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
@@ -857,9 +900,10 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
         }[kind]
         assert "\n" in button.text()
         assert str(paths[kind][1]) in button.toolTip()
+        assert "\n" in button.toolTip()
         assert "width: 28px" in button.styleSheet()
         # The label is the actual filename, without a clipped path prefix.
-        assert button.text().split("\\n", 1)[1] == paths[kind][1].name
+        assert button.text().split("\n", 1)[1] == paths[kind][1].name
         # The painter keeps the title and basename to the left of the
         # 28 px menu control (plus an explicit gutter).
         assert button.width() - button.MENU_WIDTH - 14 > 36
