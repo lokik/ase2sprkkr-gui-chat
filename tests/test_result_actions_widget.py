@@ -98,12 +98,10 @@ def test_results_toolbar_has_equal_width_buttons_and_load_action():
     application.processEvents()
 
     top_buttons = (
-        widget.select_all_button,
-        widget.load_result_button,
-        widget.import_directory_button,
+        widget.load_result_button, widget.import_directory_button,
     )
     assert [button.text() for button in top_buttons] == [
-        "Select All", "Load Result", "Import Directory…",
+        "Load Result", "Import Directory…",
     ]
     assert all(not button.icon().isNull() for button in top_buttons)
     assert all(button.isVisible() for button in top_buttons)
@@ -111,10 +109,18 @@ def test_results_toolbar_has_equal_width_buttons_and_load_action():
         button.width() for button in top_buttons
     ) <= 1
 
-    bottom_buttons = (widget._use_state_button, widget.assign_project_button)
+    bottom_buttons = (
+        widget._use_state_button, widget.assign_project_button,
+        widget.select_all_button,
+    )
     assert [button.text() for button in bottom_buttons] == [
-        "Use this structure", "Assign to Project",
+        "Use this structure", "Assign to Project", "Select All",
     ]
+    assert widget.show_all_values_checkbox.parentWidget().parentWidget() is (
+        widget._record_actions
+    )
+    assert widget._record_actions.isHidden()  # No result selected yet.
+    assert not widget._recompute_button.isEnabled()
     assert not widget._use_state_button.isEnabled()
     assert widget._bottom_controls.isHidden()  # No results to select yet.
     assert widget.layout().indexOf(widget._bottom_controls) == (
@@ -315,7 +321,48 @@ def test_result_from_other_structure_offers_structure_reuse():
     assert widget._use_state_button.text() == "Use this structure"
     assert not widget._bottom_controls.isHidden()
     assert not widget._recompute_button.isHidden()
-    assert widget._recompute_button.text() == "Recompute on current structure"
+    assert widget._recompute_button.text() == "Recompute"
+    assert widget._recompute_button.toolTip() == "Recompute on current structure"
+    widget.close()
+
+
+def test_recompute_width_matches_selection_button_and_checkbox_is_independent():
+    application = QApplication.instance() or QApplication([])
+    store = ResultStore()
+    structure_id, state_id = store.new_structure_state(
+        Atoms("Fe"), potential_path="Fe.pot"
+    )
+    record = store.add_result(
+        _record_result("dos"), structure_id=structure_id,
+        input_state_id=state_id, input_parameters=object(), directory=None,
+    )
+    widget = _widget(show_values_without_actions=False)
+    _set_store(
+        widget, store, structure_id=structure_id,
+        state_id=state_id, selected_result_id=record.id,
+    )
+    widget.resize(540, 450)
+    widget.show()
+    application.processEvents()
+    assert widget._recompute_button.isVisible()
+    assert widget._recompute_button.isEnabled()
+    assert widget.show_all_values_checkbox.isVisible()
+    assert widget._record_actions.layout().count() == 3
+    check = widget.show_all_values_checkbox
+    right = check.parentWidget().x() + check.x() + check.width()
+    assert widget._record_actions.width() - right <= 14
+    assert abs(
+        widget._recompute_button.width() - widget._use_state_button.width()
+    ) <= 18
+
+    # Recompute may be disabled for another result, but both slots stay put.
+    widget._refresh_record_actions(
+        type(widget._current_presentation.actions)(use_state=None, recompute=None)
+    )
+    application.processEvents()
+    assert widget._recompute_button.isVisible()
+    assert not widget._recompute_button.isEnabled()
+    assert widget.show_all_values_checkbox.isVisible()
     widget.close()
 
 
@@ -350,7 +397,8 @@ def test_result_from_other_state_of_same_structure_offers_potential_reuse(tmp_pa
 
     assert widget._use_state_button.isEnabled()
     assert widget._use_state_button.text() == "Use this potential"
-    assert widget._recompute_button.text() == "Recompute on current potential"
+    assert widget._recompute_button.text() == "Recompute"
+    assert widget._recompute_button.toolTip() == "Recompute on current potential"
     widget.close()
 
 
@@ -376,5 +424,6 @@ def test_empty_spheres_is_not_presented_as_recomputable_task():
 
     assert widget.selected_result_id == record.id
     assert widget._selector.currentItem().text(0) == "Empty spheres"
-    assert widget._recompute_button.isHidden()
+    assert not widget._recompute_button.isEnabled()
+    assert widget._recompute_button.isVisible() is False  # Widget is not shown.
     widget.close()

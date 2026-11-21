@@ -6,7 +6,7 @@ from collections.abc import Mapping
 import numpy as np
 from ase.data.colors import jmol_colors
 from PyQt6.QtCore import QSignalBlocker, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QPalette
 from PyQt6.QtWidgets import (
     QBoxLayout,
     QButtonGroup,
@@ -20,6 +20,9 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.presentation import structure_kind_label
+from ase2sprkkr_gui.gui.misc.colors import blend
+from ase2sprkkr_gui.gui.style import action_card_stylesheet
+from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import CenteredIconToolButton
 from ase2sprkkr_gui.gui.plots.atom_sizes import marker_areas
 from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
 from ase2sprkkr_gui.physics.composition import structure_formula
@@ -129,12 +132,12 @@ class StructureOverviewWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("guidedStructureOverview")
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self._atoms = None
         self._host = None
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(7)
 
         # The scope selector belongs beside the plot, together with the
@@ -156,15 +159,30 @@ class StructureOverviewWidget(QFrame):
 
         # This belongs only to the main overview, not to reusable previews
         # or their fullscreen copies.
-        self.external_viewer_button = QToolButton(self)
+        self.external_viewer_button = CenteredIconToolButton(self)
         self.external_viewer_button.setObjectName("guidedExternalViewerButton")
         self.external_viewer_button.setIcon(QIcon.fromTheme(
             "applications-graphics",
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
         ))
-        self.external_viewer_button.setIconSize(QSize(20, 20))
-        self.external_viewer_button.setToolTip("Open in external structure viewer")
-        self.external_viewer_button.setAccessibleName("Visualize Structure")
+        self.external_viewer_button.setIconSize(QSize(26, 26))
+        self.external_viewer_button.setText("Viewer")
+        self.external_viewer_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextUnderIcon
+        )
+        self.external_viewer_button.setFixedHeight(68)
+        self.external_viewer_button.setToolTip("External viewer")
+        self.external_viewer_button.setAccessibleName("External viewer")
+        accent = blend(
+            self.palette().color(QPalette.ColorRole.Button),
+            self.palette().color(QPalette.ColorRole.Mid), .78,
+        )
+        self.external_viewer_button.setStyleSheet(
+            action_card_stylesheet(
+                self.palette(), accent, "QToolButton", accent_width=3,
+            )
+            + "QToolButton { padding: 3px 7px; }"
+        )
         self.external_viewer_button.clicked.connect(
             lambda _checked=False: self.visualizeRequested.emit()
         )

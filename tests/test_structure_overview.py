@@ -9,7 +9,8 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 import pytest
 from ase import Atoms
 from ase.build import bulk
-from PyQt6.QtWidgets import QApplication, QBoxLayout
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtWidgets import QFrame, QApplication, QBoxLayout
 
 from ase2sprkkr import SPRKKRAtoms
 from ase2sprkkr_gui.ase.embedding import EmbeddingDraft
@@ -85,7 +86,15 @@ def test_overview_shows_separate_host_and_cluster_information(application):
     fit_index = next(i for i in range(controls.count())
                      if controls.itemAt(i).widget() is widget.preview.fit_button)
     assert controls.itemAt(fit_index + 1).widget() is widget.external_viewer_button
-    assert widget.external_viewer_button.toolTip() == "Open in external structure viewer"
+    assert widget.frameShape() == QFrame.Shape.NoFrame
+    assert widget.layout().contentsMargins().left() == 0
+    assert widget.external_viewer_button.text() == "Viewer"
+    assert widget.external_viewer_button.toolTip() == "External viewer"
+    assert widget.external_viewer_button.height() == 68
+    assert widget.external_viewer_button.iconSize() == QSize(26, 26)
+    assert widget.external_viewer_button.toolButtonStyle() == (
+        Qt.ToolButtonStyle.ToolButtonTextUnderIcon
+    )
 
     widget.host_radio.setChecked(True)
     assert not widget.cluster_radio.isChecked()

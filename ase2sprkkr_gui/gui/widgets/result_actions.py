@@ -31,6 +31,7 @@ from ase2sprkkr_gui.gui.application.result_presentation import (
     present_result,
 )
 from ase2sprkkr_gui.gui.misc.resources import icon_path
+from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import CenteredIconPushButton
 
 _PLOT_ICON = icon_path("labplot-xy-interpolation-curve.svg")
 _STANDARD_ICONS = {
@@ -157,6 +158,7 @@ class ResultActionsWidget(QWidget):
         self._selector.hide()
         top_row = QHBoxLayout()
         top_row.setSpacing(6)
+        self._import_controls_layout = top_row
         self.select_all_button = QPushButton("Select All", self)
         self.select_all_button.setIcon(
             QIcon.fromTheme(
@@ -174,7 +176,7 @@ class ResultActionsWidget(QWidget):
             )
         )
         self.assign_project_button.clicked.connect(self._request_project_assignment)
-        self.load_result_button = QPushButton("Load Result", self)
+        self.load_result_button = CenteredIconPushButton("Load Result", self)
         self.load_result_button.setObjectName("resultsLoadButton")
         self.load_result_button.setToolTip(
             "Load one SPR-KKR output file into Results (Ctrl+Shift+O)"
@@ -189,7 +191,7 @@ class ResultActionsWidget(QWidget):
         self.load_result_button.clicked.connect(
             lambda _checked=False: self.loadResultRequested.emit()
         )
-        self.import_directory_button = QPushButton("Import Directory…", self)
+        self.import_directory_button = CenteredIconPushButton("Import Directory…", self)
         self.import_directory_button.setObjectName("resultsImportDirectoryButton")
         self.import_directory_button.setIcon(
             QIcon.fromTheme(
@@ -204,10 +206,10 @@ class ResultActionsWidget(QWidget):
         self.import_directory_button.clicked.connect(
             lambda _checked=False: self.importDirectoryRequested.emit()
         )
-        # Three equal-width controls above the result browser.
+        # Import controls can be moved to the WorkflowWindow header. In
+        # stand-alone result browsers they remain here, above the tree.
         for button in (
-            self.select_all_button, self.load_result_button,
-            self.import_directory_button,
+            self.load_result_button, self.import_directory_button,
         ):
             button.setSizePolicy(
                 QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
@@ -232,6 +234,7 @@ class ResultActionsWidget(QWidget):
         self._record_actions = QWidget(self)
         record_actions_layout = QHBoxLayout(self._record_actions)
         record_actions_layout.setContentsMargins(0, 0, 0, 0)
+        record_actions_layout.setSpacing(top_row.spacing())
         self._recompute_button = QPushButton("Recompute", self._record_actions)
         self._recompute_button.setIcon(
             QIcon.fromTheme(
@@ -240,8 +243,27 @@ class ResultActionsWidget(QWidget):
             )
         )
         self._recompute_button.clicked.connect(self._recompute_selected)
-        record_actions_layout.addWidget(self._recompute_button)
-        record_actions_layout.addStretch(1)
+        self._recompute_button.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        record_actions_layout.addWidget(self._recompute_button, 1)
+        # The middle slot mirrors Assign to Project in the selection row.
+        record_actions_layout.addWidget(QWidget(self._record_actions), 1)
+        values_slot = QWidget(self._record_actions)
+        values_slot_layout = QHBoxLayout(values_slot)
+        values_slot_layout.setContentsMargins(0, 0, 0, 0)
+        values_slot_layout.addStretch(1)
+        values_slot_layout.addWidget(
+            self.show_all_values_checkbox,
+            alignment=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+        )
+        values_slot.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        record_actions_layout.addWidget(values_slot, 1)
+        # Show all values is independent of whether Recompute is applicable,
+        # but neither control is useful until a result is selected.
+        self._recompute_button.setEnabled(False)
         self._record_actions.hide()
 
         self._result_file_warning = QLabel("", self)
@@ -273,8 +295,7 @@ class ResultActionsWidget(QWidget):
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll, 1)
 
-        # Selection-dependent actions follow the browser; the last slot is a
-        # checkbox, aligned with the three equally wide toolbar buttons.
+        # Three equally wide selection controls immediately below the tree.
         self._bottom_controls = QWidget(self)
         bottom_row = QHBoxLayout(self._bottom_controls)
         bottom_row.setContentsMargins(0, 0, 0, 0)
@@ -288,25 +309,32 @@ class ResultActionsWidget(QWidget):
         )
         self._use_state_button.clicked.connect(self._use_selected_state)
         self._use_state_button.setEnabled(False)
-        for button in (self._use_state_button, self.assign_project_button):
+        for button in (
+            self._use_state_button, self.assign_project_button,
+            self.select_all_button,
+        ):
             button.setSizePolicy(
                 QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
             )
             bottom_row.addWidget(button, 1)
-        check_slot = QWidget(self._bottom_controls)
-        check_layout = QHBoxLayout(check_slot)
-        check_layout.setContentsMargins(0, 0, 0, 0)
-        check_layout.addWidget(
-            self.show_all_values_checkbox, alignment=Qt.AlignmentFlag.AlignCenter
-        )
-        check_slot.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
-        )
-        bottom_row.addWidget(check_slot, 1)
         # Keep state/assignment controls directly below the result tree,
         # never below the selected result's potentially long values list.
         layout.insertWidget(layout.indexOf(self._selector) + 1, self._bottom_controls)
         self._bottom_controls.hide()
+
+    def move_import_controls_to(self, target_layout: QHBoxLayout) -> None:
+        """Move the existing import actions to a persistent header toolbar.
+
+        Preserves signals, shortcuts, icons and tooltips instead of creating
+        duplicate actions that could get out of sync.
+        """
+        for button in (self.load_result_button, self.import_directory_button):
+            self._import_controls_layout.removeWidget(button)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            button.setFixedHeight(40)
+            target_layout.addWidget(button)
 
     @property
     def has_rows(self) -> bool:
@@ -463,10 +491,10 @@ class ResultActionsWidget(QWidget):
             else use_state.label if use_state else "Use this structure"
         )
         self._use_state_button.setToolTip(use_state.label if use_state else "")
-        self._recompute_button.setVisible(recompute is not None)
-        if recompute is not None:
-            self._recompute_button.setText(recompute.label)
-        self._record_actions.setVisible(recompute is not None)
+        self._recompute_button.setEnabled(recompute is not None)
+        self._recompute_button.setText("Recompute")
+        self._recompute_button.setToolTip(recompute.label if recompute else "")
+        self._record_actions.setVisible(self._current_presentation is not None)
 
     def _use_selected_state(self) -> None:
         result_id = self.selected_result_id

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from threading import Thread
+from pathlib import Path
 from typing import Any, Callable
 
-from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
+    QAbstractButton,
     QFrame,
     QHBoxLayout,
     QLayout,
@@ -13,10 +15,10 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QMenu,
+    QPushButton,
     QScrollArea,
     QStyle,
     QSizePolicy,
-    QSplitter,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -47,10 +49,11 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XL,
     SPACE_XS,
     SPACE_XXL,
-    button_stylesheet,
+    action_card_stylesheet,
     heading_font,
     secondary_text_stylesheet,
 )
+from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import CenteredIconToolButton
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
 from ase2sprkkr_gui.gui.widgets.structures.overview import StructureOverviewWidget
 from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
@@ -95,17 +98,33 @@ def _check_recent_files(snapshot: RecentFilesSnapshot, signals: _RecentValidatio
     signals.finished.emit(snapshot, find_missing_recent_paths(snapshot))
 
 
-class _RecentFooterButton(QToolButton):
-    """A split-menu navigation button showing the most recent path."""
+def _navigation_button_stylesheet(palette: QPalette, selector: str) -> str:
+    """A muted, compact counterpart to the larger workflow action cards."""
+    accent = blend(
+        palette.color(QPalette.ColorRole.Button),
+        palette.color(QPalette.ColorRole.Mid), .78,
+    )
+    return (
+        action_card_stylesheet(
+            palette, accent, selector, accent_width=3,
+        )
+        + f"{selector} {{ padding: 3px 7px; }}"
+        + f"{selector}:disabled {{ color: "
+        f"{palette.color(QPalette.ColorRole.PlaceholderText).name()}; }}"
+    )
+
+
+class _RecentFooterButton(CenteredIconToolButton):
+    """Recent action with a compact filename suffix and the complete path tooltip."""
 
     def __init__(self, title: str, parent: QWidget):
         super().__init__(parent)
         self._title = title
         self._recent_path: str | None = None
         self._base_tooltip = ""
+        self._display_mode = "full"
+        self._short_title = title
         self.setText(title)
-        # Keep the action name on one line; only the path may be elided.
-        self.setFixedWidth(194)
 
     def set_recent_path(self, path: str | None) -> None:
         self._recent_path = path
@@ -115,74 +134,184 @@ class _RecentFooterButton(QToolButton):
         self._base_tooltip = tooltip
         self._refresh_label()
 
+    def set_short_title(self, title: str) -> None:
+        self._short_title = title
+        self._refresh_label()
+
+    def set_display_mode(self, mode: str) -> None:
+        self._display_mode = mode
+        self._refresh_label()
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._refresh_label()
 
     def _refresh_label(self) -> None:
-        if self._recent_path:
-            # Reserve space for the icon and the enlarged menu split control.
-            available = max(45, self.width() - 82)
-            short_path = self.fontMetrics().elidedText(
-                self._recent_path, Qt.TextElideMode.ElideMiddle, available
-            )
-            label = f"{self._title}\n{short_path}"
-            tooltip = f"{self._base_tooltip}\n{self._recent_path}"
-        else:
-            label = self._title
-            tooltip = self._base_tooltip
+        mode = self._display_mode
+        title = self._short_title if mode == "short" else self._title
+        # Display only the basename. The complete path remains in the tooltip
+        # and in the menu, so dropping the ornamental ellipsis loses nothing.
+        label = title
+        if self._recent_path and mode != "icon":
+            label += "\n" + Path(self._recent_path).name
+        tooltip = (
+            f"{self._title}\n{self._recent_path}"
+            if mode == "icon" and self._recent_path else
+            self._title if mode == "icon" else
+            f"{self._base_tooltip}\n{self._recent_path}"
+            if self._recent_path else self._base_tooltip
+        )
         if self.text() != label:
             self.setText(label)
         if self.toolTip() != tooltip:
             self.setToolTip(tooltip)
 
 
-class _AlignedNavigationPanel(QFrame):
-    """One footer with three layout-managed groups tracking the main columns.
 
-    The old absolute widget positioning could shift the whole navigation
-    offscreen. Let Qt position the groups and synchronize *only* their widths.
-    """
+class _HeaderActionBar(QWidget):
+    """Column header which uses the same compact mode as its peers."""
 
-    def __init__(
-        self, columns: tuple[QWidget, QWidget, QWidget],
-        gaps: tuple[int, int], parent: QWidget,
-    ):
+    # Horizontal navigation buttons are deliberately wide and low; retain
+    # the header height so only the buttons' silhouette changes.
+    FULL_WIDTH = 200
+    SHORT_WIDTH = 140
+    BUTTON_HEIGHT = 58
+    COMPACT_SIZE = BUTTON_HEIGHT  # Square icon-only main button.
+    MENU_EXTRA_WIDTH = 22
+    VERTICAL_GAP = 12  # Also used by the unchanged Results utility footer.
+    BAR_HEIGHT = 93
+
+    layoutChanged = pyqtSignal()
+
+    def __init__(self, parent: QWidget, name: str, *, centered: bool = False):
         super().__init__(parent)
-        self.setObjectName("workflowNavigation")
-        self.setFixedHeight(60)
-        self._columns = columns
-        self.groups = tuple(QWidget(self) for _ in columns)
+        self.setObjectName(name)
+        self._centered = centered
+        self.setFixedHeight(self.BAR_HEIGHT)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self._buttons: list[QAbstractButton] = []
+        self._labels: dict[QAbstractButton, str] = {}
+        self._short_labels: dict[QAbstractButton, str] = {}
+        self._tooltips: dict[QAbstractButton, str] = {}
+        self._styles: dict[QAbstractButton, str] = {}
+        self._mode = "full"
+        self._mode_applied = False
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # The middle header shares the text/cards' right inset, so its
+        # button row is centered on Calculate rather than on the wider column.
+        layout.setContentsMargins(0, 0, SPACE_XL if centered else 0, 0)
         layout.setSpacing(0)
-        for i, group in enumerate(self.groups):
-            layout.addWidget(group)
-            if i < len(gaps):
-                layout.addSpacing(gaps[i])
-        for column in columns:
-            column.installEventFilter(self)
+        self._button_row = QHBoxLayout()
+        self._button_row.setContentsMargins(0, 0, 0, 0)
+        self._button_row.setSpacing(2)  # Toolbar only; content gaps stay unchanged.
+        if centered:
+            layout.addStretch(1)
+        layout.addLayout(self._button_row)
+        layout.addStretch(1)
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched in self._columns and event.type() == QEvent.Type.Resize:
-            self._align_columns()
-        return super().eventFilter(watched, event)
+    def register(self, button: QAbstractButton, *, short_title: str) -> None:
+        self._buttons.append(button)
+        self._labels[button] = button.text()
+        self._short_labels[button] = short_title
+        self._tooltips[button] = button.toolTip()
+        self._styles[button] = button.styleSheet()
+        if isinstance(button, _RecentFooterButton):
+            button.set_short_title(short_title)
+        self.layout().removeWidget(button)
+        self._button_row.addWidget(
+            button, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        button.setIconSize(QSize(26, 26))
+        button.setFixedHeight(self.BUTTON_HEIGHT)
+        button.setMinimumWidth(0)
+        button.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        self._mode_applied = False
+        self.refresh()
+
+    def set_button_label(self, button: QAbstractButton, title: str) -> None:
+        self._labels[button] = title
+        button.setAccessibleName(title)
+        # Reapply the current presentation even when its width has not changed.
+        self._mode_applied = False
+        self.refresh()
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self.BAR_HEIGHT)
+
+    def sizeHint(self) -> QSize:
+        return QSize(0, self.BAR_HEIGHT)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
-        self._align_columns()
+        self.refresh()
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._align_columns()
+    def required_mode(self) -> str:
+        visible = sum(not button.isHidden() for button in self._buttons)
+        if not visible:
+            return "full"
+        gaps = (visible - 1) * self._button_row.spacing()
+        available = self.width() - self.layout().contentsMargins().right()
+        if available >= visible * self.FULL_WIDTH + gaps:
+            return "full"
+        if available >= visible * self.SHORT_WIDTH + gaps:
+            return "short"
+        return "icon"
 
-    def _align_columns(self) -> None:
-        if not self.isVisible():
-            return
-        for column, group in zip(self._columns, self.groups):
-            width = column.width()
-            if group.width() != width:
-                group.setFixedWidth(width)
+    def refresh(self) -> None:
+        self.layoutChanged.emit()
+
+    def set_mode(self, mode: str) -> None:
+        self._mode = mode
+        self._mode_applied = True
+        for button in self._buttons:
+            width = (
+                self.FULL_WIDTH if mode == "full" else
+                self.SHORT_WIDTH if mode == "short" else
+                self.COMPACT_SIZE + (
+                    self.MENU_EXTRA_WIDTH
+                    if isinstance(button, _RecentFooterButton) else 0
+                )
+            )
+            if button.width() != width or button.minimumWidth() != width:
+                button.setFixedWidth(width)
+
+            if isinstance(button, _RecentFooterButton):
+                button.setToolButtonStyle(
+                    Qt.ToolButtonStyle.ToolButtonIconOnly if mode == "icon"
+                    else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                )
+                button.set_display_mode(mode)
+                style = self._styles[button]
+                if mode == "icon":
+                    style += "QToolButton::menu-button { width: 22px; }"
+                button.setStyleSheet(style)
+            elif isinstance(button, QToolButton):
+                button.setToolButtonStyle(
+                    Qt.ToolButtonStyle.ToolButtonIconOnly if mode == "icon"
+                    else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                )
+                button.setText(
+                    self._short_labels[button] if mode == "short"
+                    else self._labels[button]
+                )
+                button.setToolTip(
+                    f"{self._labels[button]}\n{self._tooltips[button]}"
+                    if mode == "icon" else self._tooltips[button]
+                )
+            elif isinstance(button, QPushButton):
+                button.setText(
+                    "" if mode == "icon" else
+                    self._short_labels[button] if mode == "short" else
+                    self._labels[button]
+                )
+                button.setToolTip(
+                    f"{self._labels[button]}\n{self._tooltips[button]}"
+                    if mode == "icon" else self._tooltips[button]
+                )
+
 
 
 class WorkflowWindow(QMainWindow):
@@ -242,44 +371,103 @@ class WorkflowWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(SPACE_XXL, SPACE_XL, SPACE_XL, SPACE_XL)
-        root.setSpacing(0)
+        root.setContentsMargins(SPACE_XXL, 0, SPACE_XL, 0)
+        root.setSpacing(SPACE_SM)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, central)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(8)
-        root.addWidget(splitter, 1)
-        self._layout_splitter = splitter
 
-        # Treat the first two columns as one resize unit. Their equal
-        # layout stretches keep them the same width when Results is resized.
-        action_columns = QWidget(splitter)
-        action_columns.setObjectName("workflowActionColumns")
-        action_columns_layout = QHBoxLayout(action_columns)
-        action_columns_layout.setContentsMargins(0, 0, 0, 0)
-        action_columns_layout.setSpacing(splitter.handleWidth())
+        # Fixed navigation is separate from the scrollable guided cards.
+        # Keep these controls small and neutral, like the Results controls.
+        def navigation_group(parent: QWidget, name: str) -> _HeaderActionBar:
+            return _HeaderActionBar(
+                parent, name, centered=name == "workflowCalculationNavigation",
+            )
+
+        def navigation_button(
+            group: _HeaderActionBar,
+            label: str,
+            icon: QIcon,
+            tooltip: str,
+            callback: Callable[[], None],
+            *,
+            short_title: str,
+            recent_menu: bool = False,
+        ) -> QToolButton:
+            button = (
+                _RecentFooterButton(label, group)
+                if recent_menu else CenteredIconToolButton(group)
+            )
+            if not recent_menu:
+                button.setText(label)
+            button.setIcon(icon)
+            button.setIconSize(QSize(24, 24))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            mid = button.palette().color(QPalette.ColorRole.Mid).name()
+            button.setStyleSheet(
+                _navigation_button_stylesheet(
+                    button.palette(), "QToolButton"
+                )
+                + f"QToolButton::menu-button {{ width: 28px; border-left: 1px solid {mid}; }}"
+            )
+            if recent_menu:
+                button.set_base_tooltip(tooltip)
+                button.setPopupMode(
+                    QToolButton.ToolButtonPopupMode.MenuButtonPopup
+                )
+                button.setMenu(QMenu(button))
+            else:
+                button.setToolTip(tooltip)
+            button.setAccessibleName(label)
+            button.clicked.connect(callback)
+            group.register(button, short_title=short_title)
+            return button
+
+        # Exactly three equal, non-draggable columns. Keep the normal gaps
+        # between their content areas, but let each header use its full width.
+        columns_row = QHBoxLayout()
+        columns_row.setContentsMargins(0, 0, 0, 0)
+        columns_row.setSpacing(SPACE_SM)
+        root.addLayout(columns_row, 1)
+        self._columns_layout = columns_row
 
         # The first column owns both current-structure information and all
         # structural workflows. Its content scrolls as a single unit.
-        structure_column = QWidget(action_columns)
+        structure_column = QWidget(central)
         structure_column.setObjectName("workflowStructureColumn")
         structure_column.setMinimumWidth(300)
+        structure_column.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         structure_layout = QVBoxLayout(structure_column)
-        structure_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+        structure_layout.setContentsMargins(0, 0, 0, 0)
+        structure_layout.setSpacing(SPACE_SM)
+        structure_column_navigation = navigation_group(
+            structure_column, "workflowStructureNavigation"
+        )
+        structure_layout.addWidget(structure_column_navigation)
 
-        self._structure_title = QLabel("Structure", structure_column)
+        # Keep the existing right inset for ordinary content, but not for
+        # the navigation header: it needs the full width for three actions.
+        structure_detail = QWidget(structure_column)
+        structure_detail_layout = QVBoxLayout(structure_detail)
+        structure_detail_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+        self._structure_title = QLabel("Structure", structure_detail)
         self._structure_title.setObjectName("workflowStructureTitle")
         self._structure_title.setFont(
             heading_font(self._structure_title.font(), "dialog")
         )
-        structure_layout.addWidget(self._structure_title)
+        self._structure_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        structure_detail_layout.addWidget(self._structure_title)
 
-        self._subtitle = QLabel(structure_column)
+        self._subtitle = QLabel(structure_detail)
         self._subtitle.setWordWrap(True)
         self._subtitle.setStyleSheet(secondary_text_stylesheet(self.palette()))
-        structure_layout.addWidget(self._subtitle)
+        structure_detail_layout.addWidget(self._subtitle)
 
-        structure_scroll = QScrollArea(structure_column)
+        structure_scroll = QScrollArea(structure_detail)
         structure_scroll.setObjectName("workflowStructureActionsScrollArea")
         structure_scroll.setFrameShape(QFrame.Shape.NoFrame)
         structure_scroll.setWidgetResizable(True)
@@ -300,27 +488,42 @@ class WorkflowWindow(QMainWindow):
         structure_body_layout.addWidget(self._structure_actions)
         structure_body_layout.addStretch(1)
         structure_scroll.setWidget(structure_body)
-        structure_layout.addWidget(structure_scroll, 1)
-        action_columns_layout.addWidget(structure_column, 1)
+        structure_detail_layout.addWidget(structure_scroll, 1)
+        structure_layout.addWidget(structure_detail, 1)
+        columns_row.addWidget(structure_column, 1)
 
         # Calculation commands have their own column, independently scrollable
         # from structure actions and from the persistent results sidebar.
-        content = QWidget(action_columns)
+        content = QWidget(central)
         content.setObjectName("workflowCalculateColumn")
         content.setMinimumWidth(300)
+        content.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, SPACE_XL, 0)
-        title = QLabel("Calculate", content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(SPACE_SM)
+        content_navigation = navigation_group(
+            content, "workflowCalculationNavigation"
+        )
+        content_layout.addWidget(content_navigation)
+
+        content_detail = QWidget(content)
+        content_detail_layout = QVBoxLayout(content_detail)
+        content_detail_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+        title = QLabel("Calculate", content_detail)
         title.setObjectName("workflowCalculateTitle")
         title.setFont(heading_font(title.font(), "dialog"))
-        content_layout.addWidget(title)
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        content_detail_layout.addWidget(title)
 
-        self._calculate_notice = QLabel(content)
+        self._calculate_notice = QLabel(content_detail)
         self._calculate_notice.setWordWrap(True)
+        self._calculate_notice.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self._calculate_notice.setStyleSheet(
             secondary_text_stylesheet(self.palette())
         )
-        content_layout.addWidget(self._calculate_notice)
+        content_detail_layout.addWidget(self._calculate_notice)
 
         self._actions = WorkflowActionsWidget(
             content, column="calculate",
@@ -329,31 +532,36 @@ class WorkflowWindow(QMainWindow):
         self._actions.commandRequested.connect(self.execute_workflow_command)
         for cards in (self._structure_actions, self._actions):
             cards.naturalCardHeightChanged.connect(self._sync_action_card_heights)
-        action_scroll = QScrollArea(content)
+        action_scroll = QScrollArea(content_detail)
         action_scroll.setObjectName("workflowActionScrollArea")
         action_scroll.setFrameShape(QFrame.Shape.NoFrame)
         action_scroll.setWidgetResizable(True)
         action_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
         action_scroll.setWidget(self._actions)
-        content_layout.addWidget(action_scroll, 1)
+        content_detail_layout.addWidget(action_scroll, 1)
+        content_layout.addWidget(content_detail, 1)
 
-        action_columns_layout.addWidget(content, 1)
-        splitter.addWidget(action_columns)
+        columns_row.addWidget(content, 1)
 
         # Results share the same borderless column treatment as the actions.
-        side = QWidget(splitter)
+        side = QWidget(central)
         side.setObjectName("workflowResultsColumn")
         side.setMinimumWidth(285)
         side.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(SPACE_SM)
+        side_navigation = navigation_group(
+            side, "workflowResultsNavigation"
+        )
+        side_layout.addWidget(side_navigation)
 
         result_actions_title = QLabel("Results", side)
         result_actions_title.setObjectName("workflowResultsTitle")
         result_actions_title.setFont(
             heading_font(result_actions_title.font(), "dialog")
         )
+        result_actions_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         side_layout.addWidget(result_actions_title)
 
         self._result_actions = QFrame(side)
@@ -371,163 +579,40 @@ class WorkflowWindow(QMainWindow):
         result_actions_layout.addWidget(self._result_actions_widget, 1)
         side_layout.addWidget(self._result_actions, 1)
 
-        splitter.addWidget(side)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([880, 380])
+        columns_row.addWidget(side, 1)
 
-        # A single continuous footer sits below the splitter. The groups are
-        # positioned from the real Structure / Calculate / Results geometry,
-        # including splitter movements and window resizes.
-        navigation = _AlignedNavigationPanel(
-            (structure_column, content, side),
-            (action_columns_layout.spacing(), splitter.handleWidth()), central,
-        )
-        border = blend(
-            self.palette().color(QPalette.ColorRole.Window),
-            self.palette().color(QPalette.ColorRole.Mid), .35,
-        )
-        toolbar_color = blend(
-            self.palette().color(QPalette.ColorRole.Window),
-            self.palette().color(QPalette.ColorRole.Mid), .10,
-        )
-        navigation.setStyleSheet(
-            f"QFrame#workflowNavigation {{ background-color: {toolbar_color.name()}; "
-            f"border: none; border-top: 1px solid {border.name()}; }}"
-        )
-        root.addWidget(navigation)
-        self._navigation_panel = navigation
-
-        def navigation_group(group: QWidget, object_name: str) -> QWidget:
-            group.setObjectName(object_name)
-            group_layout = QHBoxLayout(group)
-            inset = SPACE_SM if object_name == "workflowResultsNavigation" else 0
-            group_layout.setContentsMargins(
-                SPACE_SM + inset, SPACE_XS + 2, SPACE_SM + inset, SPACE_XS + 2
-            )
-            group_layout.setSpacing(SPACE_XS)
-            return group
-
-        def add_navigation_button(
-            group: QWidget,
-            label: str,
-            icon: QIcon,
-            tooltip: str,
-            callback: Callable[[], None],
-            *,
-            recent_menu: bool = False,
-        ) -> QToolButton:
-            button = (
-                _RecentFooterButton(label, group)
-                if recent_menu else QToolButton(group)
-            )
-            if not recent_menu:
-                button.setText(label)
-            button.setIcon(icon)
-            button.setIconSize(QSize(20, 20))
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedHeight(46)
-            button.setAutoRaise(True)
-            # Fixed/natural widths keep this a toolbar rather than stretched
-            # workflow cards. Recent buttons reserve room for their two lines.
-            if not recent_menu:
-                button.setMinimumWidth(82)
-            button.setSizePolicy(
-                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-            )
-            palette = button.palette()
-            text = palette.color(QPalette.ColorRole.ButtonText)
-            accent = palette.color(QPalette.ColorRole.Highlight)
-            hover = blend(toolbar_color, accent, .10)
-            pressed = blend(toolbar_color, accent, .18)
-            mid = blend(toolbar_color, palette.color(QPalette.ColorRole.Mid), .45)
-            button.setStyleSheet(
-                "QToolButton {"
-                f"color: {text.name()}; background: transparent; "
-                "border: 1px solid transparent; border-radius: 5px; "
-                "padding: 4px 7px; "
-                "}"
-                "QToolButton:hover {"
-                f"background-color: {hover.name()}; "
-                f"border-color: {mid.name()}; "
-                "}"
-                "QToolButton:pressed {"
-                f"background-color: {pressed.name()}; "
-                "}"
-                "QToolButton:disabled {"
-                f"color: {palette.color(QPalette.ColorRole.PlaceholderText).name()}; "
-                "}"
-                "QToolButton::menu-button {"
-                "width: 28px; "
-                f"border-left: 1px solid {mid.name()}; "
-                "}"
-            )
-            if recent_menu:
-                button.set_base_tooltip(tooltip)
-            else:
-                button.setToolTip(tooltip)
-            button.setAccessibleName(label)
-            if recent_menu:
-                button.setPopupMode(
-                    QToolButton.ToolButtonPopupMode.MenuButtonPopup
-                )
-                button.setMenu(QMenu(button))
-            button.clicked.connect(callback)
-            group.layout().addWidget(button)
-            return button
-
-        def add_separator(group: QWidget) -> None:
-            separator = QFrame(group)
-            separator.setFrameShape(QFrame.Shape.NoFrame)
-            separator.setFixedSize(1, 25)
-            separator.setStyleSheet(
-                "background-color: "
-                + blend(toolbar_color, self.palette().color(QPalette.ColorRole.Mid), .6).name()
-                + ";"
-            )
-            group.layout().addWidget(
-                separator, alignment=Qt.AlignmentFlag.AlignVCenter
-            )
-
-        structure_navigation = navigation_group(
-            navigation.groups[0], "workflowStructureNavigation"
-        )
-        self._settings_button = add_navigation_button(
-            structure_navigation,
-            "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
-            self._open_settings,
-        )
-        self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
-        add_separator(structure_navigation)
-        self._start_over_button = add_navigation_button(
-            structure_navigation,
-            "Start from Scratch",
-            self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
-            "Clear the current workspace; existing results are kept",
-            self._start_over,
-        )
-        self._recent_structures_button = add_navigation_button(
-            structure_navigation,
+        # Stable commands belong to the headers of their workflow columns.
+        # Recent Structures retains its position when Start from Scratch appears.
+        self._structure_navigation = structure_column_navigation
+        self._recent_structures_button = navigation_button(
+            structure_column_navigation,
             "Recent Structures",
             QIcon(str(icon_path("bulk_crystal.png"))),
             "Open the latest structure or choose another",
             lambda: self._open_recent("structure"),
+            short_title="Recent",
             recent_menu=True,
         )
-
-        calculation_navigation = navigation_group(
-            navigation.groups[1], "workflowCalculationNavigation"
+        self._start_over_button = navigation_button(
+            structure_column_navigation,
+            "Start from Scratch",
+            self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
+            "Clear the current workspace; existing results are kept",
+            self._start_over,
+            short_title="Start",
         )
-        self._repeat_button = add_navigation_button(
-            calculation_navigation,
+
+        self._repeat_button = navigation_button(
+            content_navigation,
             "Repeat Calculation",
             QIcon(str(icon_path("system-run.svg"))),
             "Repeat the most recent input or choose another",
             lambda: self._open_recent("input"),
+            short_title="Repeat",
             recent_menu=True,
         )
-        self._load_input_button = add_navigation_button(
-            calculation_navigation,
+        self._load_input_button = navigation_button(
+            content_navigation,
             "Load Input File",
             QIcon.fromTheme(
                 "document-open",
@@ -535,28 +620,88 @@ class WorkflowWindow(QMainWindow):
             ),
             "Load, edit, save or calculate from an SPR-KKR input file",
             self._load_input_file,
+            short_title="Load",
         )
-        self._custom_button = add_navigation_button(
-            calculation_navigation,
+        self._custom_button = navigation_button(
+            content_navigation,
             "Custom Input File",
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
             "Choose a registered SPR-KKR task and configure its parameters",
             self._custom_task,
+            short_title="Custom",
         )
 
-        results_navigation = navigation_group(
-            navigation.groups[2], "workflowResultsNavigation"
-        )
-        self._recent_results_button = add_navigation_button(
-            results_navigation,
+        self._recent_results_button = navigation_button(
+            side_navigation,
             "Recent Results",
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
             "Open the latest result or choose another",
             lambda: self._open_recent("output"),
+            short_title="Recent",
             recent_menu=True,
         )
-        self._project_browser_button = add_navigation_button(
-            results_navigation,
+        self._result_actions_widget.move_import_controls_to(
+            side_navigation.layout()
+        )
+        for button in (
+            self._result_actions_widget.load_result_button,
+            self._result_actions_widget.import_directory_button,
+        ):
+            button.setStyleSheet(
+                _navigation_button_stylesheet(button.palette(), "QPushButton")
+            )
+            side_navigation.register(
+                button,
+                short_title=(
+                    "Load" if button is self._result_actions_widget.load_result_button
+                    else "Import"
+                ),
+            )
+
+        # Keep the Results-only utility toolbar at its original height and
+        # distance from the window edge, without an enclosing ruler.
+        results_footer = QFrame(side)
+        results_footer.setObjectName("workflowResultsFooter")
+        results_footer.setFrameShape(QFrame.Shape.NoFrame)
+        results_footer.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        footer_stack = QVBoxLayout(results_footer)
+        footer_stack.setContentsMargins(
+            0, 0, 0, _HeaderActionBar.VERTICAL_GAP
+        )
+        footer_stack.setSpacing(_HeaderActionBar.VERTICAL_GAP)
+        # Preserve the one-pixel layout height previously occupied by the
+        # separator; removing the line must not shift the footer controls.
+        footer_stack.addSpacing(1)
+        footer_row = QHBoxLayout()
+        footer_row.setContentsMargins(0, 0, 0, 0)
+        footer_row.setSpacing(SPACE_XS)
+        footer_stack.addLayout(footer_row)
+
+        def footer_button(
+            label: str, icon: QIcon, tooltip: str,
+            callback: Callable[[], None],
+        ) -> QToolButton:
+            button = CenteredIconToolButton(results_footer)
+            button.setText(label)
+            button.setIcon(icon)
+            button.setIconSize(QSize(26, 26))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            button.setFixedHeight(68)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
+            button.setStyleSheet(
+                _navigation_button_stylesheet(button.palette(), "QToolButton")
+            )
+            button.setToolTip(tooltip)
+            button.setAccessibleName(label)
+            button.clicked.connect(callback)
+            footer_row.addWidget(button, 1)
+            return button
+
+        self._project_browser_button = footer_button(
             "Project Browser",
             QIcon.fromTheme(
                 "folder-open",
@@ -565,24 +710,52 @@ class WorkflowWindow(QMainWindow):
             "Browse projects and past calculations",
             lambda: self.projectBrowserRequested.emit(),
         )
-        results_navigation.layout().addStretch(1)
-        add_separator(results_navigation)
-        self._close_button = add_navigation_button(
-            results_navigation,
+        self._settings_button = footer_button(
+            "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
+            self._open_settings,
+        )
+        self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
+        self._close_button = footer_button(
             "Close",
             QIcon.fromTheme(
                 "application-exit",
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton),
             ),
-            "Close Ase2sprkkr (Ctrl+Q)",
-            self.close,
+            "Close Ase2sprkkr (Ctrl+Q)", self.close,
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
-        # The Results navigation must never be clipped by the splitter,
-        # even with a narrower window or longer translated labels.
-        side.setMinimumWidth(max(
-            side.minimumWidth(), results_navigation.sizeHint().width()
-        ))
+        side_layout.addWidget(
+            results_footer, alignment=Qt.AlignmentFlag.AlignBottom
+        )
+        self._results_footer = results_footer
+
+        # All three headers switch modes together, even when only one column
+        # becomes too narrow for its full labels.
+        self._header_bars = (
+            structure_column_navigation, content_navigation, side_navigation,
+        )
+        self._structure_navigation = structure_column_navigation
+        self._calculate_navigation = content_navigation
+        self._syncing_headers = False
+        for bar in self._header_bars:
+            bar.layoutChanged.connect(self._sync_header_modes)
+        self._sync_header_modes()
+
+    def _sync_header_modes(self) -> None:
+        if getattr(self, "_syncing_headers", False):
+            return
+        self._syncing_headers = True
+        try:
+            modes = ("full", "short", "icon")
+            mode = max(
+                (bar.required_mode() for bar in self._header_bars),
+                key=modes.index,
+            )
+            for bar in self._header_bars:
+                if bar._mode != mode or not bar._mode_applied:
+                    bar.set_mode(mode)
+        finally:
+            self._syncing_headers = False
 
     def _open_recent(self, kind: str, path: str | None = None) -> None:
         """Use the latest path for the main button, or an explicit menu item."""
@@ -605,9 +778,11 @@ class WorkflowWindow(QMainWindow):
         )
         self._start_over_button.setVisible(has_workspace)
         self._start_over_button.setEnabled(has_workspace)
+        self._structure_navigation.refresh()
         label = "Custom Calculation" if has_structure else "Custom Input File"
-        self._custom_button.setText(label)
-        self._custom_button.setAccessibleName(label)
+        self._calculate_navigation.set_button_label(
+            self._custom_button, label
+        )
 
         if snapshot == self._navigation_snapshot:
             return
@@ -712,7 +887,7 @@ class WorkflowWindow(QMainWindow):
         self._update_navigation(snapshot)
         if atoms is None:
             self._calculate_notice.setText(
-                "Create or load a structure to see available guided calculations."
+                "First, create or load the structure."
             )
         else:
             self._calculate_notice.setText(
