@@ -28,6 +28,7 @@ from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellatio
 from ase2sprkkr_gui.gui.dialogs.scf_progress import ScfProgressPage
 from ase2sprkkr_gui.gui.dialogs.jxc_progress import JxcProgressPage
 from ase2sprkkr_gui.gui.dialogs.dos_progress import DosProgressPage
+from ase2sprkkr_gui.gui.dialogs.bsf_progress import BsfProgressPage
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 
 
@@ -128,6 +129,7 @@ class RunMonitorWindow(QDialog):
         self._scf_progress: ScfProgressPage | None = None
         self._jxc_progress: JxcProgressPage | None = None
         self._dos_progress: DosProgressPage | None = None
+        self._bsf_progress: BsfProgressPage | None = None
         task = (task_name or "").strip().lower()
         if task == "scf":
             self._scf_progress = ScfProgressPage(self, target_error=scf_tolerance)
@@ -138,6 +140,9 @@ class RunMonitorWindow(QDialog):
         elif task == "dos":
             self._dos_progress = DosProgressPage(self, total_points=dos_total_points)
             info_page = self._dos_progress
+        elif task in {"bsf", "bsfek", "bsfkk"}:
+            self._bsf_progress = BsfProgressPage(self)
+            info_page = self._bsf_progress
         else:
             info_page = None
         if info_page is not None:
@@ -283,6 +288,8 @@ class RunMonitorWindow(QDialog):
             self._jxc_progress.consume(text, kind)
         if self._dos_progress is not None:
             self._dos_progress.consume(text, kind)
+        if self._bsf_progress is not None:
+            self._bsf_progress.consume(text, kind)
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()
