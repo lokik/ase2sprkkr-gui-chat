@@ -1,7 +1,7 @@
 """Buttons with consistently centered icons and bounded, wrapped labels."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QRect, QSize, Qt
+from PyQt6.QtCore import QRect, Qt
 from PyQt6.QtGui import QFont, QFontMetrics, QIcon, QPalette
 from PyQt6.QtWidgets import (
     QPushButton, QStyle, QStyleOptionButton, QStyleOptionToolButton,
@@ -31,23 +31,11 @@ def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
     bounds = rect.adjusted(7, 4, -7, -4)
     if bounds.width() <= 0 or bounds.height() <= 0:
         return
-    icon_size = button.iconSize()
-    # QIcon.pixmap() preserves the source aspect ratio, even when requested
-    # with non-square dimensions. Paint the slightly wider toolbar icons at
-    # the actual requested proportions, without changing button geometry.
-    edge = max(icon_size.width(), icon_size.height())
     icon = button.icon().pixmap(
-        QSize(edge, edge),
+        button.iconSize(),
         QIcon.Mode.Normal if button.isEnabled() else QIcon.Mode.Disabled,
     )
     ratio = max(1.0, icon.devicePixelRatioF())
-    if icon.width() and icon.height():
-        icon = icon.scaled(
-            QSize(round(icon_size.width() * ratio), round(icon_size.height() * ratio)),
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        icon.setDevicePixelRatio(ratio)
     iw, ih = round(icon.width() / ratio), round(icon.height() / ratio)
     text = (
         "" if isinstance(button, QToolButton)
@@ -93,32 +81,24 @@ def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
         small_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .90))
         small_metrics = QFontMetrics(small_font)
 
-        gap = 7
-        # Calculate everything within the *main* button subcontrol. A split
-        # button's arrow area never contributes to the available text width.
-        available_width = max(1, bounds.width() - iw - gap)
-        title_lines = _wrap_title(title, title_metrics, available_width)
+        # Align all labeled toolbar icons to a fixed left inset instead of
+        # centering the icon and variable-length text as a group.
+        # Only the main subcontrol is available; never paint into an arrow.
+        icon_x = bounds.left() + 5
+        text_x = icon_x + iw + 10
+        width = max(1, bounds.right() - text_x + 1)
+        title_lines = _wrap_title(title, title_metrics, width)
         file_label = (
             small_metrics.elidedText(
-                filename, Qt.TextElideMode.ElideLeft, available_width,
+                filename, Qt.TextElideMode.ElideLeft, width,
             ) if filename else ""
         )
-        text_width = max(
-            [title_metrics.horizontalAdvance(line) for line in title_lines]
-            + ([small_metrics.horizontalAdvance(file_label)] if file_label else [0])
-        )
-        # Center the *icon and text together*, rather than pinning the icon to
-        # the left edge. This also centers icons for wrapped labels.
-        block_width = iw + gap + text_width
-        icon_x = bounds.left() + max(0, (bounds.width() - block_width) // 2)
-        text_x = icon_x + iw + gap
-        width = min(available_width, max(1, bounds.right() - text_x + 1))
         title_h = len(title_lines) * title_metrics.height()
         file_h = small_metrics.height() if filename else 0
         block_h = title_h + file_h
         top = bounds.center().y() - block_h // 2
 
-        # Align the icon with the complete centered text block.
+        # Align the icon vertically with the text block.
         painter.drawPixmap(
             icon_x, bounds.center().y() - ih // 2, icon,
         )
@@ -155,6 +135,13 @@ class CenteredIconToolButton(QToolButton):
             QStyle.ComplexControl.CC_ToolButton, option,
             QStyle.SubControl.SC_ToolButton, self,
         )
+        if self.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup:
+            menu_rect = self.style().subControlRect(
+                QStyle.ComplexControl.CC_ToolButton, option,
+                QStyle.SubControl.SC_ToolButtonMenu, self,
+            )
+            if menu_rect.isValid() and menu_rect.left() > main_rect.left():
+                main_rect.setRight(min(main_rect.right(), menu_rect.left() - 1))
         _draw_content(
             painter, self, main_rect,
             under=self.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
