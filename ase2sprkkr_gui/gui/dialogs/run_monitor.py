@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from shutil import copyfileobj
+from tempfile import SpooledTemporaryFile
 from threading import Thread
 from typing import Any
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import QColor, QFont, QIcon, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -24,6 +28,7 @@ from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellatio
 from ase2sprkkr_gui.gui.dialogs.scf_progress import ScfProgressPage
 from ase2sprkkr_gui.gui.dialogs.jxc_progress import JxcProgressPage
 from ase2sprkkr_gui.gui.dialogs.dos_progress import DosProgressPage
+from ase2sprkkr_gui.gui.misc.resources import icon_path
 
 
 logger = logging.getLogger(__name__)
@@ -93,6 +98,11 @@ class RunMonitorWindow(QDialog):
         self._worker: RunMonitorWorker | None = None
         self._close_requested = False
         self._output_line_length = 0
+        # The on-screen log is bounded; keep the complete, unwrapped stream
+        # in a spooled file for copying and saving without unbounded RAM use.
+        self._output_archive = SpooledTemporaryFile(
+            max_size=1024 * 1024, mode="w+t", encoding="utf-8", newline=""
+        )
         self.refreshed.connect(self._set_status)
 
         layout = QVBoxLayout(self)
@@ -152,6 +162,24 @@ class RunMonitorWindow(QDialog):
         )
         self._refresh_btn.clicked.connect(self._on_refresh)
         buttons.addWidget(self._refresh_btn)
+
+        self._copy_output_btn = QPushButton("Copy output", self)
+        self._copy_output_btn.setIcon(
+            QIcon.fromTheme("edit-copy", QIcon(str(icon_path("copy-output.svg"))))
+        )
+        self._copy_output_btn.setToolTip("Copy the complete command output to the clipboard.")
+        self._copy_output_btn.setEnabled(False)
+        self._copy_output_btn.clicked.connect(self._on_copy_output)
+        buttons.addWidget(self._copy_output_btn)
+
+        self._save_output_btn = QPushButton("Save output as…", self)
+        self._save_output_btn.setIcon(
+            QIcon.fromTheme("document-save-as", QIcon(str(icon_path("save-output-as.svg"))))
+        )
+        self._save_output_btn.setToolTip("Save the complete command output to a text file.")
+        self._save_output_btn.setEnabled(False)
+        self._save_output_btn.clicked.connect(self._on_save_output)
+        buttons.addWidget(self._save_output_btn)
         buttons.addStretch(1)
 
         self._close_btn = QPushButton("Close", self)
@@ -179,6 +207,7 @@ class RunMonitorWindow(QDialog):
             self.hide()
             event.ignore()
             return
+        self._output_archive.close()
         super().closeEvent(event)
 
     def start(self) -> None:
@@ -243,6 +272,10 @@ class RunMonitorWindow(QDialog):
 
     @pyqtSlot(str, str)
     def _append_output(self, text: str, kind: str) -> None:
+        if text:
+            self._output_archive.write(text)
+            self._copy_output_btn.setEnabled(True)
+            self._save_output_btn.setEnabled(True)
         if self._scf_progress is not None:
             self._scf_progress.consume(text, kind)
         if self._jxc_progress is not None:
@@ -259,6 +292,38 @@ class RunMonitorWindow(QDialog):
         cursor.insertText(self._bounded_output(text))
         self._output.setTextCursor(cursor)
         self._output.ensureCursorVisible()
+
+    @pyqtSlot()
+    def _on_copy_output(self) -> None:
+        output = self._output_archive
+        output.flush()
+        output.seek(0)
+        try:
+            QApplication.clipboard().setText(output.read())
+        finally:
+            output.seek(0, 2)
+
+    @pyqtSlot()
+    def _on_save_output(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Command Output As",
+            "command-output.txt",
+            "Text files (*.txt);;All files (*)",
+        )
+        if not path:
+            return
+
+        output = self._output_archive
+        output.flush()
+        output.seek(0)
+        try:
+            with open(path, "w", encoding="utf-8", newline="") as destination:
+                copyfileobj(output, destination)
+        except OSError as exc:
+            QMessageBox.warning(self, "Could Not Save Output", f"Could not save command output:\n{exc}")
+        finally:
+            output.seek(0, 2)
 
     @pyqtSlot()
     def _on_stop(self) -> None:

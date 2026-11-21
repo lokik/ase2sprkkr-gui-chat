@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QPlainTextEdit
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPlainTextEdit
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob
@@ -251,4 +251,67 @@ def test_dos_monitor_uses_structured_progress_and_preserves_raw_output():
 
     window._append_output("15/300 done.\n", "stderr")
     assert window._dos_progress.progress.value() == 14
+    window.close()
+
+
+def test_run_monitor_copy_and_save_export_complete_raw_output(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    assert not window._copy_output_btn.isEnabled()
+    assert not window._save_output_btn.isEnabled()
+    assert not window._copy_output_btn.icon().isNull()
+    assert not window._save_output_btn.icon().isNull()
+
+    # Screen limits and synthetic line wrapping must not affect exports.
+    initial = "first line\n" + "".join(
+        f"line {n}\n" for n in range(MAX_OUTPUT_BLOCKS + 10)
+    ) + "x" * (MAX_LOGICAL_LINE_LENGTH + 5)
+    window._append_output(initial, "out")
+    window._append_output("\nstderr ✓\n", "stderr")
+    expected = initial + "\nstderr ✓\n"
+    assert "first line" not in window._output.toPlainText()
+    assert window._copy_output_btn.isEnabled()
+    assert window._save_output_btn.isEnabled()
+
+    window._copy_output_btn.click()
+    assert app.clipboard().text() == expected
+
+    destination = tmp_path / "command-output.txt"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        lambda *args, **kwargs: (str(destination), "Text files (*.txt)"),
+    )
+    window._save_output_btn.click()
+    assert destination.read_text(encoding="utf-8") == expected
+
+    # Saving must restore the append position for later live output.
+    window._append_output("later\n", "out")
+    window._save_output_btn.click()
+    assert destination.read_text(encoding="utf-8") == expected + "later\n"
+    window.close()
+
+
+def test_run_monitor_save_cancel_and_error_do_not_discard_output(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    window._append_output("kept\n", "out")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: ("", ""))
+    window._save_output_btn.click()
+    assert window._save_output_btn.isEnabled()
+
+    missing = tmp_path / "missing" / "command-output.txt"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName", lambda *a, **k: (str(missing), ""),
+    )
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+    window._save_output_btn.click()
+    assert len(warnings) == 1
+    assert warnings[0][0] == "Could Not Save Output"
+    window._append_output("more\n", "out")
+    window._copy_output_btn.click()
+    assert app.clipboard().text() == "kept\nmore\n"
     window.close()

@@ -25,3 +25,7 @@ icons' navy outlines, teal atomic highlights, and lightly shaded cells,
 while remaining legible at the editor's 22 px tab size. The Overview and
 The Embedded tab and embedding action reuse the existing packaged embedding
 icon from the Guided workflow (currently `bulk_crystal.png`).
+
+The run monitor's copy and save-as actions use original packaged fallback icons
+(`copy-output.svg` and `save-output-as.svg`) when the desktop theme does not
+supply `edit-copy` or `document-save-as`.
