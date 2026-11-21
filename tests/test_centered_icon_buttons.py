@@ -1,7 +1,7 @@
 """Painter geometry regression tests for the compact workflow toolbar."""
 
 from PyQt6.QtCore import QRect, QSize, Qt
-from PyQt6.QtGui import QFont, QFontMetrics, QIcon, QPixmap
+from PyQt6.QtGui import QFont, QIcon, QPixmap
 from PyQt6.QtWidgets import QApplication
 
 from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import (
@@ -52,23 +52,25 @@ def _button(label, mode=Qt.ToolButtonStyle.ToolButtonTextBesideIcon):
     return button
 
 
-def test_labeled_icon_and_wrapped_title_center_as_a_group():
+def test_labeled_icons_share_a_left_inset_regardless_of_title_length():
     button = _button("Load Input File")
     painter = _PainterRecorder()
-    area = QRect(0, 0, 160, 68)
+    area = QRect(0, 0, 200, 58)
     _draw_content(painter, button, area)
+    other = _button("Recent Structures")
+    other_painter = _PainterRecorder()
+    _draw_content(other_painter, other, area)
 
-    assert len(painter.icons) == 1
-    assert painter.labels
+    assert len(painter.icons) == len(other_painter.icons) == 1
+    assert painter.labels and other_painter.labels
     icon_x, _, icon = painter.icons[0]
     icon_width = round(icon.width() / max(1.0, icon.devicePixelRatioF()))
-    text_end = max(
-        rect.left() + QFontMetrics(font).horizontalAdvance(text)
-        for rect, text, font in painter.labels
+    assert 10 <= icon_x - area.left() <= 15
+    assert other_painter.icons[0][0] == icon_x
+    assert all(
+        rect.left() >= icon_x + icon_width + 8
+        for rect, _, _ in painter.labels
     )
-    # Check the actual painted icon/text group rather than the full text box.
-    group_center = (icon_x + text_end) / 2
-    assert abs(group_center - area.center().x()) <= 2
 
 
 def test_recent_filename_is_confined_to_split_button_body():
@@ -87,17 +89,19 @@ def test_recent_filename_is_confined_to_split_button_body():
     )
 
 
-def test_nonsquare_toolbar_icons_keep_requested_painted_proportions():
-    button = _button("Recent Results")
-    button.setIconSize(QSize(27, 22))
+def test_compact_icon_is_centered_in_58_pixel_square_not_dropdown():
+    button = _button("Recent Results", Qt.ToolButtonStyle.ToolButtonIconOnly)
+    button.setIconSize(QSize(26, 26))
     painter = _PainterRecorder()
-    _draw_content(painter, button, QRect(0, 0, 160, 68))
+    # The 22-pixel split menu is outside this square main control.
+    main_rect = QRect(0, 0, 58, 58)
+    _draw_content(painter, button, main_rect)
 
     assert len(painter.icons) == 1
-    _, _, icon = painter.icons[0]
-    dpr = max(1.0, icon.devicePixelRatioF())
-    assert round(icon.width() / dpr) == 27
-    assert round(icon.height() / dpr) == 22
+    x, y, icon = painter.icons[0]
+    ratio = max(1.0, icon.devicePixelRatioF())
+    assert abs(x + icon.width() / (2 * ratio) - main_rect.center().x()) <= 1
+    assert abs(y + icon.height() / (2 * ratio) - main_rect.center().y()) <= 1
 
 
 def test_compact_and_footer_icons_are_centered_in_their_own_body():
