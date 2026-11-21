@@ -159,7 +159,7 @@ def test_recent_header_shows_title_and_filename_in_two_rows():
 def test_header_icons_and_command_rows_align_for_all_text_lengths():
     area = QRect(0, 0, 112, 68)
     placements = []
-    for title in ("Load Result", "Start from Scratch", "Recent\\nFe2_SCF.out"):
+    for title in ("Load Result", "Start from Scratch", "Recent\nFe2_SCF.out"):
         button = _button(title, Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         button.setProperty("twoLineUnderIcon", True)
         painter = _PainterRecorder()
@@ -171,9 +171,26 @@ def test_header_icons_and_command_rows_align_for_all_text_lengths():
     assert placements[0] == placements[1] == placements[2]
 
 
+def test_header_commands_are_always_two_lines_even_when_they_fit():
+    for title in (
+        "Load Input File", "Custom Input File", "Load Result File",
+        "Import All From Directory", "Load Input", "Custom Input",
+        "Load Result", "Import Directory", "Start from Scratch",
+    ):
+        button = _button(title, Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        painter = _PainterRecorder()
+        _draw_content(
+            painter, button, QRect(0, 0, 155, 68),
+            under=True, two_line=True,
+        )
+        assert len(painter.labels) == 2, title
+        assert all(text for _, text, _ in painter.labels), title
+        assert painter.labels[0][0].top() < painter.labels[1][0].top()
+
+
 def test_header_uses_semibold_command_and_quieter_filename():
     button = _button(
-        "Recent Results\\nFe2_SCF.out",
+        "Recent Results\nFe2_SCF.out",
         Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
     )
     painter = _PainterRecorder()
