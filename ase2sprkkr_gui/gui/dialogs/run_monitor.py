@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
 from ase2sprkkr_gui.gui.dialogs.scf_progress import ScfProgressPage
+from ase2sprkkr_gui.gui.dialogs.jxc_progress import JxcProgressPage
 
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ class RunMonitorWindow(QDialog):
         background_thread_factory: Callable[..., Any] = Thread,
         autostart: bool = True,
         observation_only: bool = False,
-        scf: bool = False,
+        task_name: str | None = None,
         scf_tolerance: float | None = None,
     ) -> None:
         super().__init__(parent)
@@ -113,10 +114,19 @@ class RunMonitorWindow(QDialog):
         self._output.setReadOnly(True)
         self._output.setMaximumBlockCount(MAX_OUTPUT_BLOCKS)
         self._scf_progress: ScfProgressPage | None = None
-        if scf:
+        self._jxc_progress: JxcProgressPage | None = None
+        task = (task_name or "").strip().lower()
+        if task == "scf":
             self._scf_progress = ScfProgressPage(self, target_error=scf_tolerance)
+            info_page = self._scf_progress
+        elif task == "jxc":
+            self._jxc_progress = JxcProgressPage(self)
+            info_page = self._jxc_progress
+        else:
+            info_page = None
+        if info_page is not None:
             self._tabs = QTabWidget(self)
-            self._tabs.addTab(self._scf_progress, "INFO")
+            self._tabs.addTab(info_page, "INFO")
             self._tabs.addTab(self._output, "Output")
             layout.addWidget(self._tabs, 1)
         else:
@@ -230,6 +240,8 @@ class RunMonitorWindow(QDialog):
     def _append_output(self, text: str, kind: str) -> None:
         if self._scf_progress is not None:
             self._scf_progress.consume(text, kind)
+        if self._jxc_progress is not None:
+            self._jxc_progress.consume(text, kind)
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()
