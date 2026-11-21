@@ -83,6 +83,7 @@ class RunMonitorWindow(QDialog):
         observation_only: bool = False,
         task_name: str | None = None,
         scf_tolerance: float | None = None,
+        dos_total_points: int | None = None,
     ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -135,7 +136,7 @@ class RunMonitorWindow(QDialog):
             self._jxc_progress = JxcProgressPage(self)
             info_page = self._jxc_progress
         elif task == "dos":
-            self._dos_progress = DosProgressPage(self)
+            self._dos_progress = DosProgressPage(self, total_points=dos_total_points)
             info_page = self._dos_progress
         else:
             info_page = None
