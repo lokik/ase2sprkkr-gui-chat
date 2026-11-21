@@ -205,3 +205,27 @@ def test_attached_scf_monitor_shows_info_and_accepts_replayed_iterations():
     assert window._scf_progress.tracker.iterations[0].iteration == 5
     assert window._output.toPlainText().strip() == completed.strip()
     window.close()
+
+
+
+def test_jxc_monitor_uses_task_specific_info_events():
+    app = QApplication.instance() or QApplication([])
+    window = RunMonitorWindow(
+        lambda cancellation: object(), task_name="JXC", autostart=False
+    )
+    assert window._jxc_progress is not None
+    assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
+    window._append_output(
+        "  number of TAU(I,J)'s to be calculated: 89\n",
+        "out",
+    )
+    assert window._jxc_progress.last_info.text() == (
+        "Calculating 89 TAU(I,J) pairs"
+    )
+    window._append_output(
+        "results written to file:Fe_JXC_XCPLTEN_Jij.dat\n",
+        "out",
+    )
+    assert "JXC results written" in window._jxc_progress.last_info.text()
+    assert "number of TAU(I,J)" in window._output.toPlainText()
+    window.close()
