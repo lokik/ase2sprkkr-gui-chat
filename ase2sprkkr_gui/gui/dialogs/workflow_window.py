@@ -7,6 +7,7 @@ from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLayout,
     QLabel,
@@ -48,6 +49,7 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XS,
     SPACE_XXL,
     button_stylesheet,
+    group_panel_stylesheet,
     heading_font,
     secondary_text_stylesheet,
 )
@@ -450,19 +452,49 @@ class WorkflowWindow(QMainWindow):
             lambda: self._open_recent("output"),
             recent_menu=True,
         )
+        self._recent_results_button.setFixedWidth(174)
+        self._result_actions_widget.move_import_controls_to(
+            side_navigation.layout()
+        )
         side_navigation.layout().addStretch(1)
 
-        # The original Results-only utility toolbar is restored at the bottom.
+        # Restore the original Results-only toolbar: a single framed group
+        # with three equally-sized icon-over-text buttons.
         # Its three global commands are always visible, independently of scroll.
-        results_footer = QFrame(side)
+        results_footer = QGroupBox("", side)
         results_footer.setObjectName("workflowResultsFooter")
-        results_footer.setFrameShape(QFrame.Shape.NoFrame)
+        results_footer.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         footer_layout = QHBoxLayout(results_footer)
-        footer_layout.setContentsMargins(SPACE_SM, SPACE_XS, SPACE_SM, 0)
+        footer_layout.setContentsMargins(
+            SPACE_SM, SPACE_SM, SPACE_SM, SPACE_SM
+        )
         footer_layout.setSpacing(SPACE_XS)
-        results_footer.setFixedHeight(44)
-        self._project_browser_button = navigation_button(
-            results_footer,
+
+        def footer_button(
+            label: str, icon: QIcon, tooltip: str,
+            callback: Callable[[], None],
+        ) -> QToolButton:
+            button = QToolButton(results_footer)
+            button.setText(label)
+            button.setIcon(icon)
+            button.setIconSize(QSize(24, 24))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            button.setMinimumHeight(72)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            button.setStyleSheet(
+                button_stylesheet(self.palette(), selector="QToolButton")
+            )
+            button.setToolTip(tooltip)
+            button.setAccessibleName(label)
+            button.clicked.connect(callback)
+            footer_layout.addWidget(button, 1)
+            return button
+
+        self._project_browser_button = footer_button(
             "Project Browser",
             QIcon.fromTheme(
                 "folder-open",
@@ -470,27 +502,29 @@ class WorkflowWindow(QMainWindow):
             ),
             "Browse projects and past calculations",
             lambda: self.projectBrowserRequested.emit(),
-            height=36,
         )
-        footer_layout.addStretch(1)
-        self._settings_button = navigation_button(
-            results_footer,
+        self._settings_button = footer_button(
             "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
-            self._open_settings, height=36,
+            self._open_settings,
         )
         self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
-        self._close_button = navigation_button(
-            results_footer,
+        self._close_button = footer_button(
             "Close",
             QIcon.fromTheme(
                 "application-exit",
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton),
             ),
-            "Close Ase2sprkkr (Ctrl+Q)",
-            self.close, height=36,
+            "Close Ase2sprkkr (Ctrl+Q)", self.close,
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
-        side_layout.addWidget(results_footer)
+        results_footer.setStyleSheet(
+            group_panel_stylesheet(
+                self.palette(), self.palette().color(QPalette.ColorRole.Highlight)
+            )
+        )
+        side_layout.addWidget(
+            results_footer, alignment=Qt.AlignmentFlag.AlignBottom
+        )
         self._results_footer = results_footer
 
         # Avoid clipping the header or the fixed Results toolbar if the

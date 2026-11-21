@@ -649,6 +649,21 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert [btn.text() for btn in footer.findChildren(QToolButton)] == [
         "Project Browser", "Settings", "Close",
     ]
+    assert footer.styleSheet().startswith("QGroupBox")
+    assert all(
+        btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
+        and btn.iconSize().width() == 24
+        and btn.minimumHeight() == 72
+        for btn in footer.findChildren(QToolButton)
+    )
+    assert window._result_actions_widget.load_result_button.parentWidget() is navs[2]
+    assert window._result_actions_widget.import_directory_button.parentWidget() is navs[2]
+    assert [navs[2].layout().itemAt(i).widget() for i in range(3)] == [
+        window._recent_results_button,
+        window._result_actions_widget.load_result_button,
+        window._result_actions_widget.import_directory_button,
+    ]
+    assert window._result_actions_widget._import_controls_layout.count() == 0
     assert all(
         btn.icon().isNull() is False
         for btn in (
@@ -726,6 +741,8 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
         (calculate, window._load_input_button),
         (calculate, window._custom_button),
         (results, window._recent_results_button),
+        (results, window._result_actions_widget.load_result_button),
+        (results, window._result_actions_widget.import_directory_button),
         (results, window._project_browser_button),
         (results, window._settings_button),
         (results, window._close_button),
@@ -744,6 +761,10 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
         assert footer.y() + footer.height() <= results.height()
 
     visible_and_within_columns()
+    utility_buttons = window._results_footer.findChildren(QToolButton)
+    assert max(b.width() for b in utility_buttons) - min(
+        b.width() for b in utility_buttons
+    ) <= 1
     window._layout_splitter.moveSplitter(850, 1)
     application.processEvents()
     visible_and_within_columns()
