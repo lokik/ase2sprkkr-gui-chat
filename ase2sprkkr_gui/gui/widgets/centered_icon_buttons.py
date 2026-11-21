@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QRect, Qt
-from PyQt6.QtGui import QFont, QFontMetrics, QIcon, QPalette
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPalette
 from PyQt6.QtWidgets import (
     QPushButton, QStyle, QStyleOptionButton, QStyleOptionToolButton,
     QStylePainter, QToolButton,
@@ -64,51 +64,60 @@ def _draw_content(
 
         base_font = button.font()
         if under and two_line:
-            # At most two text rows: wrap a plain title, or use the second
-            # row for the most recent filename (the entire path is a tooltip).
+            # Reserve both text rows even for a one-line command. Otherwise
+            # centering each variable-height block makes icons jump vertically
+            # when a recent filename is shown or a long title wraps.
             title_font = QFont(base_font)
-            title_font.setBold(True)
+            title_font.setWeight(QFont.Weight.DemiBold)
             file_font = QFont(base_font)
             file_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .85))
             title_metrics = QFontMetrics(title_font)
             file_metrics = QFontMetrics(file_font)
+            row_height = title_metrics.height()
+            total_height = ih + 2 + 2 * row_height
+            if total_height > bounds.height():
+                # Keep the icon size, but allow the text to adapt to a large
+                # system font within the fixed-height navigation button.
+                title_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .9))
+                file_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .8))
+                title_metrics = QFontMetrics(title_font)
+                file_metrics = QFontMetrics(file_font)
+                row_height = title_metrics.height()
+                total_height = ih + 2 + 2 * row_height
+
+            icon_y = bounds.top() + max(0, (bounds.height() - total_height) // 2)
+            painter.drawPixmap(bounds.center().x() - iw // 2, icon_y, icon)
+            text_y = icon_y + ih + 2
             title_lines = (
                 [title_metrics.elidedText(
                     title, Qt.TextElideMode.ElideRight, bounds.width(),
                 )] if filename else
                 _wrap_title(title, title_metrics, bounds.width())
             )
-            # Reduce the text slightly only if the system font needs it.
-            height = (ih + 2 + len(title_lines) * title_metrics.height()
-                      + (file_metrics.height() if filename else 0))
-            if height > bounds.height():
-                title_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .9))
-                file_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .8))
-                title_metrics = QFontMetrics(title_font)
-                file_metrics = QFontMetrics(file_font)
-                title_lines = (
-                    [title_metrics.elidedText(
-                        title, Qt.TextElideMode.ElideRight, bounds.width(),
-                    )] if filename else
-                    _wrap_title(title, title_metrics, bounds.width())
-                )
-                height = (ih + 2 + len(title_lines) * title_metrics.height()
-                          + (file_metrics.height() if filename else 0))
-            top = bounds.center().y() - height // 2
-            painter.drawPixmap(bounds.center().x() - iw // 2, top, icon)
-            text_y = top + ih + 2
             painter.setFont(title_font)
-            for line in title_lines:
+            for row, line in enumerate(title_lines):
                 painter.drawText(
-                    QRect(bounds.left(), text_y, bounds.width(),
-                          title_metrics.height()),
+                    QRect(bounds.left(), text_y + row * row_height,
+                          bounds.width(), row_height),
                     Qt.AlignmentFlag.AlignCenter, line,
                 )
-                text_y += title_metrics.height()
             if filename:
+                # A lighter, smaller filename is secondary to the command,
+                # with the same second-row baseline across recent buttons.
+                file_y = text_y + row_height + max(
+                    0, (row_height - file_metrics.height()) // 2,
+                )
+                if button.isEnabled():
+                    foreground = button.palette().color(enabled_role)
+                    background = button.palette().color(QPalette.ColorRole.Button)
+                    painter.setPen(QColor(
+                        round(.76 * foreground.red() + .24 * background.red()),
+                        round(.76 * foreground.green() + .24 * background.green()),
+                        round(.76 * foreground.blue() + .24 * background.blue()),
+                    ))
                 painter.setFont(file_font)
                 painter.drawText(
-                    QRect(bounds.left(), text_y, bounds.width(),
+                    QRect(bounds.left(), file_y, bounds.width(),
                           file_metrics.height()),
                     Qt.AlignmentFlag.AlignCenter,
                     file_metrics.elidedText(
