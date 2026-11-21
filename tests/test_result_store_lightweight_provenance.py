@@ -92,3 +92,30 @@ def test_historical_snapshot_can_restore_structure_without_retaining_live_atoms(
     assert controller.atoms is not original
     assert controller.atoms.get_chemical_symbols() == ["Fe", "Ni"]
     assert controller.atoms.info["occupancy"]["0"] == {"Fe": 0.75, "Co": 0.25}
+
+
+def test_output_file_version_reuses_already_captured_digest(tmp_path, monkeypatch):
+    from ase2sprkkr_gui.gui.application import result_store
+
+    stdout = tmp_path / "Fe_SCF.out"
+    stdout.write_text("some stdout")
+    result = SimpleNamespace(
+        task_name="dos",
+        produces_potential=False,
+        output_values={"output": SimpleNamespace(path=lambda: str(stdout))},
+    )
+    def repeated_capture(*_args, **_kwargs):
+        raise AssertionError("stdout digest should be reused, not captured twice")
+
+    monkeypatch.setattr(result_store, "result_file_version", repeated_capture)
+    store = ResultStore()
+    record = store.add_result(
+        result,
+        structure_id=None,
+        input_state_id=None,
+        input_parameters=None,
+        directory=str(tmp_path),
+        output_path=stdout,
+    )
+    assert record.output_version is record.result_files["output"]
+    assert record.output_version.is_current()

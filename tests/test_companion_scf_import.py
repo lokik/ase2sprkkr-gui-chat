@@ -96,7 +96,6 @@ def test_loading_dos_also_imports_scf_but_selects_dos(tmp_path, monkeypatch):
     monkeypatch.setattr(
         file_flows, "load_companion_scf_result", lambda _loaded: scf
     )
-    monkeypatch.setattr(file_flows, "_finish_output_load", lambda *_args: None)
     controller = WorkspaceController()
     selected = []
     controller.resultSelectionRequested.connect(selected.append)
@@ -120,7 +119,6 @@ def test_companion_failure_does_not_prevent_primary_output(tmp_path, monkeypatch
         raise OSError("missing or broken SCF output")
 
     monkeypatch.setattr(file_flows, "load_companion_scf_result", fail)
-    monkeypatch.setattr(file_flows, "_finish_output_load", lambda *_args: None)
     controller = WorkspaceController()
 
     assert file_flows.load_output(
@@ -178,3 +176,46 @@ def test_result_working_dialog_covers_companion_search_and_publication(
         "dos", "scf",
     ]
     parent.close()
+
+
+def test_companion_matches_potential_before_loading_and_reuses_atoms(
+    tmp_path, monkeypatch,
+):
+    from dataclasses import replace
+
+    dos, wrong, right = (
+        tmp_path / "Fe_DOS.out",
+        tmp_path / "Fe_old_SCF.out",
+        tmp_path / "Fe_SCF.out",
+    )
+    for path in (dos, wrong, right):
+        path.touch()
+    potential = (tmp_path / "Fe.pot_new").resolve()
+    parsed = []
+    atoms = object()
+
+    def parse(path):
+        parsed.append(path)
+        filename = "old.pot_new" if path == wrong else potential.name
+        result = SimpleNamespace(
+            task_name="scf", directory=str(tmp_path),
+            files={"converged": filename}, input_parameters=None,
+            output_values={}, is_embedded=False,
+        )
+        result.path_to = lambda key: result.files[key]
+        return result
+
+    reads = []
+    monkeypatch.setattr(result_loading.TaskResult, "from_file", staticmethod(parse))
+    monkeypatch.setattr(
+        result_loading, "_load_potential",
+        lambda *_args, **_kwargs: reads.append("potential") or (None, None),
+    )
+    selected = replace(_loaded(dos, potential=potential), atoms=atoms)
+    companion = load_companion_scf_result(selected)
+
+    assert companion is not None
+    assert companion.output_path == right.resolve()
+    assert companion.atoms is atoms
+    assert wrong in parsed and right in parsed
+    assert reads == []  # Neither unrelated nor already-parsed POTFIL is reread.

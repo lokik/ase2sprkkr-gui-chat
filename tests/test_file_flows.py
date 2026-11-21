@@ -296,6 +296,7 @@ def test_host_load_cancel_or_cluster_file_preserves_current_cluster(
 
 def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeypatch):
     from types import SimpleNamespace
+    from contextlib import nullcontext
 
     latest = tmp_path / "new.out"
     earlier = tmp_path / "old.out"
@@ -312,6 +313,9 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
 
     class Controller:
         resultSelectionRequested = SimpleNamespace(emit=selected.append)
+
+        def batch_external_results(self):
+            return nullcontext()
 
         def adopt_external_result(self, result):
             return SimpleNamespace(
@@ -477,4 +481,44 @@ def test_directory_import_adds_only_successfully_loaded_potentials(
         str(output_b.resolve()), str(output_a.resolve()),
     )
     assert history.last_kind == "output"
-    assert len(changed) == 2
+    assert len(changed) == 1
+
+
+def test_reopening_unchanged_result_reuses_parsed_output(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+
+    output = tmp_path / "Fe_SCF.out"
+    potential = tmp_path / "Fe.pot_new"
+    output.write_text("SCF stdout")
+    potential.write_text("potential bytes")
+    loaded = LoadedResult(
+        result=SimpleNamespace(
+            task_name="scf", produces_potential=True, output_values={},
+        ),
+        output_path=output, potential_path=potential,
+        atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True),
+        potential_error=None, directory=str(tmp_path),
+    )
+    reads = []
+    monkeypatch.setattr(
+        file_flows, "load_result_file",
+        lambda path: reads.append(path) or loaded,
+    )
+    controller = WorkspaceController()
+    history = RecentFiles(tmp_path / "recent.json")
+    changed = []
+    controller.resultChanged.connect(changed.append)
+
+    assert file_flows.load_output(controller, history, output, None)
+    first_id = controller.result_store.results[0].id
+    assert file_flows.load_output(controller, history, output, None)
+    assert reads == [output]
+    assert len(changed) == 1
+    assert len(controller.result_store.results) == 1
+    assert controller.result_store.results[0].id == first_id
+
+    # A changed potential must not be trusted from the historical cache.
+    potential.write_text("different potential bytes")
+    assert file_flows.load_output(controller, history, output, None)
+    assert reads == [output, output]

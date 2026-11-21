@@ -358,18 +358,19 @@ def load_all_recent_outputs(
         imported: list[Path] = []
         potential_entries: list[tuple[RecentKind, Path]] = []
         selected_id = None
-        for path, result in loaded:
-            try:
-                adoption = controller.adopt_external_result(result)
-                if adoption.record is not None:
-                    selected_id = adoption.record.id
-                if adoption.potential_path is not None and adoption.potential_error is None:
-                    potential_entries.append(("structure", adoption.potential_path))
-                imported.append(path)
-            except Exception as exc:  # noqa: BLE001 - independent results
-                failures.append((path.name, str(exc)))
+        with controller.batch_external_results():
+            for path, result in loaded:
+                try:
+                    adoption = controller.adopt_external_result(result)
+                    if adoption.record is not None:
+                        selected_id = adoption.record.id
+                    if adoption.potential_path is not None and adoption.potential_error is None:
+                        potential_entries.append(("structure", adoption.potential_path))
+                    imported.append(path)
+                except Exception as exc:  # noqa: BLE001 - independent results
+                    failures.append((path.name, str(exc)))
 
-        # Complete all synchronous Qt updates before dismissing Working.
+        # One result-tree rebuild, followed by one recent-files update.
         recent_files.remember_many(potential_entries, preserve_last_kind=True)
         if selected_id is not None:
             controller.resultSelectionRequested.emit(selected_id)
@@ -429,17 +430,17 @@ def load_output_directory(
     def publish(read_results):
         loaded, failures = read_results
         imported = []
-        for index, (path, result) in enumerate(loaded):
-            adoption = controller.adopt_external_result(
-                result, select_result=index == len(loaded) - 1
-            )
-            recent_files.remember_result(
-                path,
-                potential_path=(
-                    adoption.potential_path if adoption.potential_error is None else None
-                ),
-            )
-            imported.append(path)
+        entries: list[tuple[RecentKind, Path]] = []
+        with controller.batch_external_results():
+            for index, (path, result) in enumerate(loaded):
+                adoption = controller.adopt_external_result(
+                    result, select_result=index == len(loaded) - 1
+                )
+                if adoption.potential_path is not None and adoption.potential_error is None:
+                    entries.append(("structure", adoption.potential_path))
+                entries.append(("output", path))
+                imported.append(path)
+        recent_files.remember_many(entries)
         return imported, failures
 
     try:
@@ -496,6 +497,37 @@ def choose_and_load_output_directory(
     )
 
 
+def _cached_output(
+    controller: WorkspaceController, file_path: str | Path,
+) -> LoadedResult | None:
+    """Reuse an imported file only if its output and structural source remain current."""
+    record = controller.result_store.result_for_external_source(file_path)
+    if record is None:
+        return None
+    # Scientific result files can change without the stdout changing.
+    # Do not reuse parsed values when any captured artifact is now stale.
+    if any(not version.is_current() for version in record.result_files.values()):
+        return None
+    if record.potential_path is not None:
+        state = controller.result_store.state_for_result(record)
+        if (
+            state is None or state.potential_version is None
+            or not state.potential_version.is_current()
+            or any(not version.is_current() for version in state.source_dependencies)
+        ):
+            return None
+    return LoadedResult(
+        result=record.result,
+        output_path=record.output_path,
+        potential_path=record.potential_path,
+        atoms=None,  # The already-recorded structure state is authoritative.
+        potential_error=None,
+        directory=record.directory,
+        input_parameters=record.input_parameters,
+        persistent_ref=record.persistent_ref,
+    )
+
+
 def _existing_scf_potentials(controller: WorkspaceController) -> frozenset[Path]:
     """Snapshot GUI history before starting a worker; never read the store from it."""
     return frozenset(
@@ -510,9 +542,12 @@ def _read_output(
     *,
     known_scf_potentials: frozenset[Path],
     on_success,
+    cached_loaded: LoadedResult | None = None,
 ):
     """Read result and optional SCF off-thread, then publish before Working closes."""
     def read():
+        if cached_loaded is not None:
+            return cached_loaded, None
         loaded = load_result_file(file_path)
         companion = None
         if loaded.potential_path not in known_scf_potentials:
@@ -594,6 +629,7 @@ def load_output(
         file_path, parent,
         known_scf_potentials=_existing_scf_potentials(controller),
         on_success=publish,
+        cached_loaded=_cached_output(controller, file_path),
     )
     if adoption is None:
         return False
@@ -654,6 +690,7 @@ def continue_output(
         file_path, parent,
         known_scf_potentials=_existing_scf_potentials(controller),
         on_success=publish,
+        cached_loaded=_cached_output(controller, file_path),
     )
     if outcome is None:
         return False

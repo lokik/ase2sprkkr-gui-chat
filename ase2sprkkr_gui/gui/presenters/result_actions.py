@@ -9,7 +9,7 @@ from ase2sprkkr_gui.gui.application.result_action_policy import (
     new_calculation_source,
     result_action_availability,
 )
-from ase2sprkkr_gui.gui.application.result_presentation import present_result_tree
+from ase2sprkkr_gui.gui.application.result_presentation import present_result_record, present_result_tree
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
 
@@ -60,9 +60,21 @@ class ResultActionsPresenter(QObject):
         self._widget.set_model(model)
 
     def select_result(self, result_id: int) -> None:
-        """Select one result and immediately project its presentation."""
+        """Change selection without rebuilding a tree already up to date."""
+        if result_id == self._selected_result_id:
+            return
         self._selected_result_id = result_id
-        self.refresh()
+        if not self._widget.select_result(result_id):
+            # The request may refer to a result not yet projected.
+            self.refresh()
+            return
+        record = self._controller.result_store.result(result_id)
+        self._widget.set_result(present_result_record(
+            self._controller.result_store,
+            record,
+            current_structure_id=self._controller.structure_id,
+            current_state_id=self._controller.state_id,
+        ))
 
     def action_availability(self, result_id: int) -> ResultActionAvailability:
         """Resolve actions again at intent time to avoid stale UI decisions."""
