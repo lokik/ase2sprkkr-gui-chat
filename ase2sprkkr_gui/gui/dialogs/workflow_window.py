@@ -203,10 +203,10 @@ class _HeaderActionBar(QWidget):
     """Column header which uses the same compact mode as its peers."""
 
     FULL_WIDTH = 188
-    BUTTON_HEIGHT = 34
-    COMPACT_SIZE = 34
+    BUTTON_HEIGHT = 40
+    COMPACT_SIZE = 40
     MENU_EXTRA_WIDTH = 20
-    VERTICAL_GAP = 4
+    VERTICAL_GAP = 6
     BAR_HEIGHT = BUTTON_HEIGHT + VERTICAL_GAP * 2
 
     layoutChanged = pyqtSignal()
@@ -244,7 +244,7 @@ class _HeaderActionBar(QWidget):
         self._button_row.addWidget(
             button, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        button.setIconSize(QSize(16, 16))
+        button.setIconSize(QSize(18, 18))
         button.setFixedHeight(self.BUTTON_HEIGHT)
         button.setMinimumWidth(0)
         button.setSizePolicy(
@@ -476,7 +476,7 @@ class WorkflowWindow(QMainWindow):
             if not recent_menu:
                 button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(16, 16))
+            button.setIconSize(QSize(18, 18))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
             button.setSizePolicy(
@@ -720,10 +720,9 @@ class WorkflowWindow(QMainWindow):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         footer_stack = QVBoxLayout(results_footer)
-        footer_stack.setContentsMargins(
-            0, 0, 0, _HeaderActionBar.VERTICAL_GAP
-        )
-        footer_stack.setSpacing(_HeaderActionBar.VERTICAL_GAP)
+        # Footer size is independent of the slim header bar.
+        footer_stack.setContentsMargins(0, 0, 0, 12)
+        footer_stack.setSpacing(12)
         # Preserve the one-pixel layout height previously occupied by the
         # separator; removing the line must not shift the footer controls.
         footer_stack.addSpacing(1)
@@ -741,7 +740,7 @@ class WorkflowWindow(QMainWindow):
             button.setIcon(icon)
             button.setIconSize(QSize(24, 24))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
+            button.setFixedHeight(68)
             button.setSizePolicy(
                 QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
             )

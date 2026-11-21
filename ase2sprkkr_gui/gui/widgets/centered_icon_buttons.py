@@ -26,6 +26,27 @@ def _wrap_title(text: str, metrics: QFontMetrics, width: int) -> list[str]:
     return lines
 
 
+def _tool_button_main_rect(button: QToolButton) -> QRect:
+    """Get the main click region without relying on style-dependent hints.
+
+    Some Qt styles return the full toolbutton rect for SC_ToolButton when
+    a stylesheet defines ::menu-button. The actual popup control still takes
+    a fixed width, and our icon must be centered *before* that arrow.
+    Keep the widths synchronized with the toolbar's stylesheet.
+    """
+    rect = button.rect()
+    if (
+        button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        and button.menu() is not None
+    ):
+        arrow_width = (
+            20 if button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+            else 28
+        )
+        rect.setRight(max(rect.left(), rect.right() - arrow_width))
+    return rect
+
+
 def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
     """Paint inside the clickable rect, never into the split-menu arrow."""
     bounds = rect.adjusted(7, 4, -7, -4)
@@ -95,10 +116,10 @@ def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
             [title_metrics.horizontalAdvance(line) for line in title_lines]
             + ([small_metrics.horizontalAdvance(file_label)] if file_label else [0])
         )
-        # Center the *icon and text together*, rather than pinning the icon to
-        # the left edge. This also centers icons for wrapped labels.
-        block_width = iw + gap + text_width
-        icon_x = bounds.left() + max(0, (bounds.width() - block_width) // 2)
+        # A toolbar label is left-aligned, unlike an action card. Centering
+        # icon + text as one block pushed shorter labels far into the button.
+        # Keep a consistent left inset in all full-width button variants.
+        icon_x = bounds.left()
         text_x = icon_x + iw + gap
         width = min(available_width, max(1, bounds.right() - text_x + 1))
         title_h = len(title_lines) * title_metrics.height()
@@ -139,10 +160,7 @@ class CenteredIconToolButton(QToolButton):
         option.text = ""
         painter = QStylePainter(self)
         painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
-        main_rect = self.style().subControlRect(
-            QStyle.ComplexControl.CC_ToolButton, option,
-            QStyle.SubControl.SC_ToolButton, self,
-        )
+        main_rect = _tool_button_main_rect(self)
         _draw_content(
             painter, self, main_rect,
             under=self.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
@@ -159,7 +177,6 @@ class CenteredIconPushButton(QPushButton):
         option.text = ""
         painter = QStylePainter(self)
         painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
-        content_rect = self.style().subElementRect(
-            QStyle.SubElement.SE_PushButtonContents, option, self,
-        )
-        _draw_content(painter, self, content_rect)
+        # Use the actual button rectangle. Style-dependent content rects
+        # occasionally pin a compact icon towards the left edge.
+        _draw_content(painter, self, self.rect())

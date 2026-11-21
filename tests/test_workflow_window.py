@@ -628,7 +628,7 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert navigation is window._navigation_panel
     assert root.itemAt(0).widget() is navigation
     assert root.itemAt(1).widget().layout().itemAt(0).widget() is window._layout_splitter
-    assert navigation.height() == 42
+    assert navigation.height() == 52
     assert navigation.minimumSizeHint().width() == 0
     assert "background-color:" in navigation.styleSheet()
     structure = window.findChild(QWidget, "workflowStructureColumn")
@@ -708,10 +708,10 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     ]
     assert window._result_actions_widget._import_controls_layout.count() == 0
     assert all(
-        bar.height() == 42
+        bar.height() == 52
         for bar in navs
     )
-    assert all(button.height() == 34 for bar in navs for button in bar._buttons)
+    assert all(button.height() == 40 for bar in navs for button in bar._buttons)
     # The full-width strip owns the gray fill, while buttons highlight
     # only when hovered. Keep the framed card appearance for Results footer.
     assert all(
@@ -857,13 +857,13 @@ def test_header_and_results_footer_keep_spacing_without_rulers(tmp_path):
     for header in headers:
         assert header.minimumSizeHint().width() == 0
         assert header.minimumWidth() == 0
-        assert header.height() == 42
+        assert header.height() == 52
         for button in header._buttons:
             if not button.isHidden():
                 button_top = button.mapTo(header, QPoint(0, 0)).y()
                 button_bottom = button_top + button.height()
-                assert abs(button_top - 4) <= 1
-                assert abs(header.height() - button_bottom - 4) <= 1
+                assert abs(button_top - 6) <= 1
+                assert abs(header.height() - button_bottom - 6) <= 1
 
     footer = window._results_footer
     assert footer.frameShape() == QFrame.Shape.NoFrame
@@ -972,10 +972,10 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     results = columns[2]
     assert results._compact
     assert all(bar._compact for bar in columns)
-    assert [b.width() for b in results._buttons] == [54, 34, 34]
-    assert [b.width() for b in columns[1]._buttons] == [54, 34, 34]
-    assert window._recent_structures_button.width() == 54
-    assert all(b.height() == 34 for b in results._buttons)
+    assert [b.width() for b in results._buttons] == [60, 40, 40]
+    assert [b.width() for b in columns[1]._buttons] == [60, 40, 40]
+    assert window._recent_structures_button.width() == 60
+    assert all(b.height() == 40 for b in results._buttons)
     assert "width: 20px" in window._recent_results_button.styleSheet()
     assert window._recent_results_button.toolButtonStyle() == (
         Qt.ToolButtonStyle.ToolButtonIconOnly
@@ -1008,6 +1008,44 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     for button in results._buttons:
         assert not button.grab().isNull()
     assert all(not bar._compact for bar in columns)
+    window.close()
+
+
+def test_top_toolbar_main_click_regions_exclude_only_split_arrows(tmp_path):
+    from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import (
+        _tool_button_main_rect,
+    )
+
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.showNormal()
+    window.resize(2140, 900)
+    window._layout_splitter.setSizes([1200, 900])
+    application.processEvents()
+
+    # With labels, split buttons must reserve 28 px for the dropdown,
+    # while ordinary toolbuttons keep their entire clickable area.
+    recent = window._recent_results_button
+    ordinary = window._custom_button
+    assert _tool_button_main_rect(recent).width() == recent.width() - 28
+    assert _tool_button_main_rect(ordinary).width() == ordinary.width()
+
+    window._layout_splitter.setSizes([1780, 330])
+    application.processEvents()
+    assert all(group._compact for group in window._header_bars)
+    assert recent.width() == 60
+    assert _tool_button_main_rect(recent).width() == 40
+    assert ordinary.width() == 40
+    assert _tool_button_main_rect(ordinary).width() == 40
+    assert window._result_actions_widget.load_result_button.width() == 40
+
+    # Paint the compact widgets, including QPushButton and the split-menu
+    # button. This also exercises their custom QStyle painting paths.
+    for button in (
+        recent, ordinary, window._result_actions_widget.load_result_button,
+    ):
+        assert not button.grab().isNull()
+
     window.close()
 
 
