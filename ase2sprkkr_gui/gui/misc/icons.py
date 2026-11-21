@@ -29,7 +29,7 @@ def task_icon(task: str) -> QIcon:
     return QIcon(str(path)) if path is not None else QIcon()
 
 
-def badge_icon(base: QIcon, kind: Literal["recent", "reconverge", "new"]) -> QIcon:
+def badge_icon(base: QIcon, kind: Literal["recent", "reconverge", "new", "load"]) -> QIcon:
     """Combine an unchanged object icon with a consistent semantic badge.
 
     Recent means a previous item, reconverge means rerun SCF from the current
@@ -81,6 +81,16 @@ def badge_icon(base: QIcon, kind: Literal["recent", "reconverge", "new"]) -> QIc
             ))
             painter.drawLine(QPointF(36, 31.3), QPointF(36, 40.7))
             painter.drawLine(QPointF(31.3, 36), QPointF(40.7, 36))
+        elif kind == "load":
+            # A downward arrow entering a tray, unlike the history clock.
+            painter.setPen(QPen(
+                QColor("#087f83"), 2.4, Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin,
+            ))
+            painter.drawLine(QPointF(36, 30.4), QPointF(36, 38.2))
+            painter.drawLine(QPointF(32.8, 35.2), QPointF(36, 38.4))
+            painter.drawLine(QPointF(39.2, 35.2), QPointF(36, 38.4))
+            painter.drawLine(QPointF(32, 41), QPointF(40, 41))
         else:
             raise ValueError(f"Unknown icon badge: {kind}")
 
