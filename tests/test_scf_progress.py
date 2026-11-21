@@ -107,7 +107,7 @@ def test_new_scf_calculation_enables_info_page_before_start():
     window = SprkkrRunWindow(request)
     assert window._scf_progress is not None
     assert window._scf_progress.tracker.target_error == 1e-7
-    assert window._scf_progress.last_info.text() == "Preparing first iteration…"
+    assert window._scf_progress.last_info.text() == "Preparing first iteration..."
     lower, upper = window._scf_progress.error_axis.get_ylim()
     assert lower < 1e-7 < upper
     window.close()
@@ -125,7 +125,7 @@ def test_scf_tolerance_helper_uses_effective_value_and_ignores_missing():
 def test_target_is_visible_before_first_iteration_and_remains_in_view():
     app = QApplication.instance() or QApplication([])
     page = ScfProgressPage(target_error=1e-6)
-    assert page.last_info.text() == "Preparing first iteration…"
+    assert page.last_info.text() == "Preparing first iteration..."
     assert list(page.target_line.get_ydata()) == [1e-6, 1e-6]
     low, high = page.error_axis.get_ylim()
     assert low < 1e-6 < high
@@ -151,7 +151,7 @@ def test_stdout_header_supplies_target_for_reattached_run():
     page._redraw()
 
     assert page.tracker.target_error == 1e-5
-    assert page.last_info.text() == "Preparing first iteration…"
+    assert page.last_info.text() == "Preparing first iteration..."
     assert list(page.target_line.get_ydata()) == [1e-5, 1e-5]
     low, high = page.error_axis.get_ylim()
     assert low < 1e-5 < high
