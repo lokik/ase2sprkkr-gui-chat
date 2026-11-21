@@ -131,7 +131,7 @@ class SprkkrRunWindow(RunMonitorWindow):
             header=header,
             warning_title="MPI Not Detected",
             on_finished=on_finished,
-            scf=str(getattr(request.input_parameters, "task_name", "")).upper() == "SCF",
+            scf=str(getattr(getattr(request, "input_parameters", None), "task_name", "")).upper() == "SCF",
             autostart=False,
         )
         self._conflict_cancellation_pending = False
