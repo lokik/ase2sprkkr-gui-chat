@@ -215,7 +215,14 @@ def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
     assert row.count() == 3
     assert [row.itemAt(i).widget() for i in range(3)] == list(columns)
     assert [row.stretch(i) for i in range(3)] == [1, 1, 1]
+    assert row.spacing() == 8  # Preserve gaps between the content columns.
     assert not window.findChildren(QSplitter)
+    for column in columns[:2]:
+        header = column.layout().itemAt(0).widget()
+        body = column.layout().itemAt(1).widget()
+        assert header.layout().itemAt(0).layout().spacing() == 2
+        assert column.layout().contentsMargins().right() == 0
+        assert body.layout().contentsMargins().right() == 24
 
     def equal_thirds():
         widths = [column.width() for column in columns]
