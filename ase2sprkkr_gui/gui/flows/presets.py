@@ -1,55 +1,95 @@
 """Shared preset actions for Guided and Expert input editors."""
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
-from PyQt6.QtWidgets import QInputDialog, QMessageBox, QWidget
+from PyQt6.QtWidgets import QInputDialog, QMenu, QMessageBox, QWidget
 
 from ase2sprkkr.input_parameters.presets import PresetStore
 from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
+
+
+def available_presets(
+    session: InputParametersSession,
+    *,
+    compatible_tasks: Iterable[str] | None = None,
+) -> tuple[str, ...]:
+    """List IPD-wide and task-scoped presets appropriate to this editor."""
+    schema = session.working_parameters.definition_name
+    names = PresetStore().list(f"input_parameters:{schema}")
+    if compatible_tasks is None:
+        return names
+    allowed = {str(task).upper() for task in compatible_tasks}
+    return tuple(
+        name for name in names
+        if not name.startswith("task:")
+        or name.split(":", 1)[1].split(".", 1)[0].upper() in allowed
+    )
+
+
+def _preset_label(identifier: str) -> str:
+    """Show the friendly name, retaining scope to disambiguate collisions."""
+    scope, qualified = identifier.split(":", 1)
+    owner, name = qualified.split(".", 1)
+    kind = "task" if scope == "task" else "input parameters"
+    return f"{name} ({owner.upper()} {kind})"
+
+
+def populate_preset_menus(
+    replace_menu: QMenu,
+    merge_menu: QMenu,
+    session: InputParametersSession,
+    parent: QWidget | None,
+    *,
+    on_select: Callable[[str, bool], None],
+    compatible_tasks: Iterable[str] | None = None,
+) -> None:
+    """Populate both menus from one snapshot, disabling inapplicable actions."""
+    try:
+        names = available_presets(session, compatible_tasks=compatible_tasks)
+    except Exception as exc:
+        QMessageBox.critical(parent, "Load presets failed", str(exc))
+        names = ()
+
+    current_task = session.working_parameters.task_name
+    for clear_first, menu in ((True, replace_menu), (False, merge_menu)):
+        menu.clear()
+        menu.setToolTipsVisible(True)
+        for name in names:
+            action = menu.addAction(_preset_label(name))
+            action.setData(name)
+            if not clear_first and name.startswith("task:"):
+                owner = name.split(":", 1)[1].split(".", 1)[0]
+                if current_task is not None and owner.upper() != current_task.upper():
+                    action.setEnabled(False)
+                    action.setToolTip(
+                        f"Cannot merge {owner.upper()} settings into "
+                        f"{current_task}; use Replace by preset instead."
+                    )
+                    continue
+            action.triggered.connect(
+                lambda _checked=False, selected=name, replace=clear_first:
+                on_select(selected, replace)
+            )
+        enabled = any(action.isEnabled() for action in menu.actions())
+        menu.setEnabled(enabled)
+        menu.menuAction().setEnabled(enabled)
 
 
 def load_preset(
     session: InputParametersSession,
     parent: QWidget | None,
     *,
+    name: str,
     clear_first: bool = True,
     compatible_tasks: Iterable[str] | None = None,
 ) -> bool:
-    """Apply a scoped preset as one undoable action.
-
-    Expert mode allows an intentional task switch within the same IPD.
-    Guided mode limits the result to backend tasks supported by its editor.
-    """
+    """Apply the explicitly selected preset as one undoable action."""
     store = PresetStore()
-    schema = session.working_parameters.definition_name
     allowed = (
         None if compatible_tasks is None
         else {str(task).upper() for task in compatible_tasks}
     )
-    try:
-        # A schema editor discovers all task subscopes, not only the effective
-        # task inferred from its current parameter values.
-        names = store.list(f"input_parameters:{schema}")
-        if allowed is not None:
-            names = tuple(
-                name for name in names
-                if not name.startswith("task:")
-                or name.split(":", 1)[1].split(".", 1)[0].upper() in allowed
-            )
-    except Exception as exc:
-        QMessageBox.critical(parent, "Load preset failed", str(exc))
-        return False
-    if not names:
-        QMessageBox.information(
-            parent, "Presets", f"No saved {schema.upper()} presets.",
-        )
-        return False
-    name, ok = QInputDialog.getItem(
-        parent, "Load preset", "Preset:", names, editable=False,
-    )
-    if not ok:
-        return False
 
     def apply(candidate):
         candidate.load_preset(
