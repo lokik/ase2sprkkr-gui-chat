@@ -1108,7 +1108,8 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
     application.processEvents()
     assert window._start_over_button.isEnabled()
     assert not window._start_over_button.isHidden()
-    assert window._custom_button.text() == "Custom Calculation"
+    assert window._custom_button.accessibleName() == "Custom Calculation"
+    assert window._custom_button.text() == "Custom"
     gui.controller.reset()
     window.close()
 
