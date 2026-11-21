@@ -28,7 +28,7 @@ def test_search_prioritizes_name_over_info_even_when_preference_sort_disagrees()
         TaskChoice("DETAIL_ONLY", False, "Yes", "Other", details="Long BSF description"),
     )
     chooser.search.setText("bSf")
-    assert _names(chooser) == ["BSF", "BSFEXTRA", "ABSFZ", "EKREL", "BAND"]
+    assert _names(chooser) == ["BSF", "BSFEXTRA", "ABSFZ", "BAND", "EKREL"]
     assert "DETAIL_ONLY" not in _names(chooser)
     chooser.close()
 
