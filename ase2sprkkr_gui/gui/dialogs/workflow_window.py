@@ -179,6 +179,7 @@ class _HeaderActionBar(QWidget):
     """Column header which uses the same compact mode as its peers."""
 
     FULL_WIDTH = 160
+    ICON_SIZE = QSize(27, 22)
     BUTTON_HEIGHT = 68
     COMPACT_SIZE = 68
     MENU_EXTRA_WIDTH = 22
@@ -221,7 +222,7 @@ class _HeaderActionBar(QWidget):
         self._button_row.addWidget(
             button, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        button.setIconSize(QSize(24, 24))
+        button.setIconSize(self.ICON_SIZE)
         button.setFixedHeight(self.BUTTON_HEIGHT)
         button.setMinimumWidth(0)
         button.setSizePolicy(
@@ -654,7 +655,7 @@ class WorkflowWindow(QMainWindow):
             button = CenteredIconToolButton(results_footer)
             button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(24, 24))
+            button.setIconSize(_HeaderActionBar.ICON_SIZE)
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
             button.setSizePolicy(
