@@ -47,12 +47,11 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XL,
     SPACE_XS,
     SPACE_XXL,
-    action_card_stylesheet,
+    button_stylesheet,
     heading_font,
     palette_tint,
     secondary_text_stylesheet,
 )
-from ase2sprkkr_gui.gui.widgets.action_card import action_card_accent
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
 from ase2sprkkr_gui.gui.widgets.structures.overview import StructureOverviewWidget
 from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
@@ -236,6 +235,26 @@ class WorkflowWindow(QMainWindow):
         root.setContentsMargins(SPACE_XXL, SPACE_XL, SPACE_XL, SPACE_XL)
         root.setSpacing(0)
 
+        # The workflow cards are the only visually inset region. A subtle
+        # backdrop follows the cards' actual height rather than the viewport.
+        cards_tint = palette_tint(
+            self.palette(), self.palette().color(QPalette.ColorRole.Mid),
+            light_amount=.11, dark_amount=.16,
+        )
+
+        def card_surface(parent: QWidget, object_name: str) -> tuple[QFrame, QVBoxLayout]:
+            surface = QFrame(parent)
+            surface.setObjectName(object_name)
+            surface.setFrameShape(QFrame.Shape.NoFrame)
+            surface.setStyleSheet(
+                f"QFrame#{object_name} {{ background-color: {cards_tint.name()}; "
+                "border-radius: 6px; }"
+            )
+            surface_layout = QVBoxLayout(surface)
+            surface_layout.setContentsMargins(SPACE_SM, SPACE_SM, SPACE_SM, SPACE_SM)
+            surface_layout.setSpacing(0)
+            return surface, surface_layout
+
         splitter = QSplitter(Qt.Orientation.Horizontal, central)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(8)
@@ -283,12 +302,16 @@ class WorkflowWindow(QMainWindow):
         self._structure_overview = StructureOverviewWidget(structure_body)
         self._structure_overview.visualizeRequested.connect(self._visualize_structure)
         structure_body_layout.addWidget(self._structure_overview)
+        self._structure_cards_surface, cards_layout = card_surface(
+            structure_body, "workflowStructureCardsSurface"
+        )
         self._structure_actions = WorkflowActionsWidget(
-            structure_body, column="structure",
+            self._structure_cards_surface, column="structure",
             excluded_commands=(ContinueRecent, StartOver, VisualizeStructure),
         )
         self._structure_actions.commandRequested.connect(self.execute_workflow_command)
-        structure_body_layout.addWidget(self._structure_actions)
+        cards_layout.addWidget(self._structure_actions)
+        structure_body_layout.addWidget(self._structure_cards_surface)
         structure_body_layout.addStretch(1)
         structure_scroll.setWidget(structure_body)
         structure_layout.addWidget(structure_scroll, 1)
@@ -313,19 +336,30 @@ class WorkflowWindow(QMainWindow):
         )
         content_layout.addWidget(self._calculate_notice)
 
-        self._actions = WorkflowActionsWidget(
-            content, column="calculate",
-            excluded_commands=(CustomTask, RepeatRecentInput),
-        )
-        self._actions.commandRequested.connect(self.execute_workflow_command)
-        for cards in (self._structure_actions, self._actions):
-            cards.naturalCardHeightChanged.connect(self._sync_action_card_heights)
         action_scroll = QScrollArea(content)
         action_scroll.setObjectName("workflowActionScrollArea")
         action_scroll.setFrameShape(QFrame.Shape.NoFrame)
         action_scroll.setWidgetResizable(True)
         action_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
-        action_scroll.setWidget(self._actions)
+        calculation_body = QWidget(action_scroll)
+        calculation_body_layout = QVBoxLayout(calculation_body)
+        calculation_body_layout.setContentsMargins(0, 0, SPACE_SM, 0)
+        calculation_body_layout.setSpacing(0)
+        calculation_body_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self._calculate_cards_surface, calc_cards_layout = card_surface(
+            calculation_body, "workflowCalculateCardsSurface"
+        )
+        self._actions = WorkflowActionsWidget(
+            self._calculate_cards_surface, column="calculate",
+            excluded_commands=(CustomTask, RepeatRecentInput),
+        )
+        self._actions.commandRequested.connect(self.execute_workflow_command)
+        for cards in (self._structure_actions, self._actions):
+            cards.naturalCardHeightChanged.connect(self._sync_action_card_heights)
+        calc_cards_layout.addWidget(self._actions)
+        calculation_body_layout.addWidget(self._calculate_cards_surface)
+        calculation_body_layout.addStretch(1)
+        action_scroll.setWidget(calculation_body)
         content_layout.addWidget(action_scroll, 1)
 
         action_columns_layout.addWidget(content, 1)
@@ -373,16 +407,12 @@ class WorkflowWindow(QMainWindow):
         navigation = _AlignedNavigationPanel(
             (structure_column, content, side), central,
         )
-        background = palette_tint(
-            self.palette(), self.palette().color(QPalette.ColorRole.Mid),
-            light_amount=.09, dark_amount=.16,
-        )
         border = blend(
             self.palette().color(QPalette.ColorRole.Window),
             self.palette().color(QPalette.ColorRole.Mid), .35,
         )
         navigation.setStyleSheet(
-            f"QFrame#workflowNavigation {{ background-color: {background.name()}; "
+            f"QFrame#workflowNavigation {{ background: transparent; border: none; "
             f"border-top: 1px solid {border.name()}; }}"
         )
         root.addWidget(navigation)
@@ -403,7 +433,6 @@ class WorkflowWindow(QMainWindow):
             tooltip: str,
             callback: Callable[[], None],
             *,
-            category: str,
             recent_menu: bool = False,
         ) -> QToolButton:
             button = (
@@ -424,23 +453,12 @@ class WorkflowWindow(QMainWindow):
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
             palette = button.palette()
-            accent = action_card_accent(palette, category)
-            # Retain the card vocabulary without making the footer as loud
-            # as a full-height action card: a narrower, softer accent and
-            # tinted button background, never a stretched button width.
-            soft_accent = blend(
-                palette.color(QPalette.ColorRole.Button), accent, .60
-            )
             mid = palette.color(QPalette.ColorRole.Mid).name()
             button.setStyleSheet(
-                action_card_stylesheet(
-                    palette, soft_accent, "QToolButton", accent_width=3,
-                )
+                button_stylesheet(palette, selector="QToolButton")
                 + "QToolButton { padding: 3px 6px; } "
                 + f"QToolButton::menu-button {{ width: 28px; border-left: 1px solid {mid}; }}"
-                + f"QToolButton:disabled {{ color: {palette.color(QPalette.ColorRole.PlaceholderText).name()}; }}"
             )
-            button.setProperty("navigationCategory", category)
             if recent_menu:
                 button.set_base_tooltip(tooltip)
             else:
@@ -467,7 +485,7 @@ class WorkflowWindow(QMainWindow):
         self._settings_button = add_navigation_button(
             structure_navigation,
             "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
-            self._open_settings, category="neutral",
+            self._open_settings,
         )
         self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
         add_separator(structure_navigation)
@@ -477,7 +495,7 @@ class WorkflowWindow(QMainWindow):
             "Start from Scratch",
             self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
             "Clear the current workspace; existing results are kept",
-            self._start_over, category="destructive",
+            self._start_over,
         )
         self._recent_structures_button = add_navigation_button(
             structure_navigation,
@@ -485,7 +503,7 @@ class WorkflowWindow(QMainWindow):
             QIcon(str(icon_path("bulk_crystal.png"))),
             "Open the latest structure or choose another",
             lambda: self._open_recent("structure"),
-            category="structure", recent_menu=True,
+            recent_menu=True,
         )
         structure_navigation.layout().addStretch(1)
 
@@ -499,7 +517,7 @@ class WorkflowWindow(QMainWindow):
             QIcon(str(icon_path("system-run.svg"))),
             "Repeat the most recent input or choose another",
             lambda: self._open_recent("input"),
-            category="calculation", recent_menu=True,
+            recent_menu=True,
         )
         self._load_input_button = add_navigation_button(
             calculation_navigation,
@@ -509,14 +527,14 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
             ),
             "Load, edit, save or calculate from an SPR-KKR input file",
-            self._load_input_file, category="calculation",
+            self._load_input_file,
         )
         self._custom_button = add_navigation_button(
             calculation_navigation,
             "Custom Input File",
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
             "Choose a registered SPR-KKR task and configure its parameters",
-            self._custom_task, category="calculation",
+            self._custom_task,
         )
         calculation_navigation.layout().addStretch(1)
 
@@ -529,7 +547,7 @@ class WorkflowWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
             "Open the latest result or choose another",
             lambda: self._open_recent("output"),
-            category="results", recent_menu=True,
+            recent_menu=True,
         )
         self._project_browser_button = add_navigation_button(
             results_navigation,
@@ -539,7 +557,7 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
             ),
             "Browse projects and past calculations",
-            lambda: self.projectBrowserRequested.emit(), category="results",
+            lambda: self.projectBrowserRequested.emit(),
         )
         results_navigation.layout().addStretch(1)
         add_separator(results_navigation)
@@ -551,7 +569,7 @@ class WorkflowWindow(QMainWindow):
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton),
             ),
             "Close Ase2sprkkr (Ctrl+Q)",
-            self.close, category="neutral",
+            self.close,
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
 
@@ -680,6 +698,8 @@ class WorkflowWindow(QMainWindow):
         self._subtitle.setVisible(bool(plan.subtitle) and (atoms is None or invalid_cluster))
         self._structure_actions.set_plan(plan)
         self._actions.set_plan(plan)
+        self._structure_cards_surface.setVisible(self._structure_actions.has_actions)
+        self._calculate_cards_surface.setVisible(self._actions.has_actions)
         self._update_navigation(snapshot)
         if atoms is None:
             self._calculate_notice.setText(

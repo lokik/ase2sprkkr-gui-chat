@@ -626,7 +626,7 @@ def test_workflow_navigation_has_three_compact_column_footers(
     navigation = window.findChild(QFrame, "workflowNavigation")
     assert navigation is window._navigation_panel
     assert root.itemAt(1).widget() is navigation
-    assert "background-color:" in navigation.styleSheet()
+    assert "background: transparent" in navigation.styleSheet()
     assert "border-top: 1px" in navigation.styleSheet()
 
     columns = (
@@ -688,16 +688,10 @@ def test_workflow_navigation_has_three_compact_column_footers(
 
     assert all(not footer.styleSheet() for footer in footers)
     assert all(
-        "border-left: 3px solid" in button.styleSheet()
-        and "border-radius: 6px" in button.styleSheet()
+        "border-left: 3px solid" not in button.styleSheet()
         and "background-color:" in button.styleSheet()
         for button in buttons
     )
-    assert [button.property("navigationCategory") for button in buttons] == [
-        "neutral", "destructive", "structure",
-        "calculation", "calculation", "calculation",
-        "results", "results", "neutral",
-    ]
     assert all(
         button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
         for button in buttons
@@ -744,6 +738,31 @@ def test_workflow_navigation_has_three_compact_column_footers(
     application.processEvents()
     assert not window.isVisible()
     assert gui._project_browser is None or not gui._project_browser.isVisible()
+
+
+def test_dynamic_cards_have_bounded_backdrops_but_results_do_not(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    gui, window = _workflow(tmp_path)
+    window.showNormal()
+    window.resize(1650, 900)
+    application.processEvents()
+
+    structure_surface = window.findChild(QFrame, "workflowStructureCardsSurface")
+    calculation_surface = window.findChild(QFrame, "workflowCalculateCardsSurface")
+    assert structure_surface is window._structure_cards_surface
+    assert calculation_surface is window._calculate_cards_surface
+    assert structure_surface.isVisible()
+    assert calculation_surface.isHidden()
+    assert "background-color:" in structure_surface.styleSheet()
+    assert "border-radius: 6px" in calculation_surface.styleSheet()
+    assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
+
+    gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
+    application.processEvents()
+    assert calculation_surface.isVisible()
+    scroll = window.findChild(QWidget, "workflowActionScrollArea")
+    assert calculation_surface.height() < scroll.height()
+    window.close()
 
 
 def test_shared_footer_tracks_column_geometry_on_resize_and_splitter_move(tmp_path):
