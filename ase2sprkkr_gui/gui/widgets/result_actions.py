@@ -30,6 +30,7 @@ from ase2sprkkr_gui.gui.application.result_presentation import (
     ResultValuePresentation,
     present_result,
 )
+from ase2sprkkr_gui.gui.misc.icons import badge_icon
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import CenteredIconPushButton
 
@@ -185,10 +186,7 @@ class ResultActionsWidget(QWidget):
         )
         self.load_result_button.setShortcut(QKeySequence("Ctrl+Shift+O"))
         self.load_result_button.setIcon(
-            QIcon.fromTheme(
-                "document-open",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
-            )
+            badge_icon(QIcon(str(icon_path("result-graph.svg"))), "load")
         )
         self.load_result_button.clicked.connect(
             lambda _checked=False: self.loadResultRequested.emit()
@@ -196,10 +194,7 @@ class ResultActionsWidget(QWidget):
         self.import_directory_button = CenteredIconPushButton("Import Directory…", self)
         self.import_directory_button.setObjectName("resultsImportDirectoryButton")
         self.import_directory_button.setIcon(
-            QIcon.fromTheme(
-                "folder-open",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
-            )
+            badge_icon(QIcon(str(icon_path("results-folder.svg"))), "load")
         )
         self.import_directory_button.setToolTip(
             "Import recognized SPR-KKR outputs from a directory (Ctrl+Shift+I)"
