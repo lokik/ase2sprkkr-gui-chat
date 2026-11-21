@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from math import isfinite
 import re
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
@@ -74,7 +74,7 @@ class ScfProgressTracker:
         if kind.lower() in {"err", "stderr"} or not text:
             return False
         # Keep only a bounded unfinished line; completed lines are processed below.
-        lines = (self._partial + text).replace("\r\n", "\n").split("\n")
+        lines = (self._partial + text).replace("\r\n", "\n").replace("\r", "\n").split("\n")
         self._partial = lines.pop()[-_PARTIAL_LINE_LIMIT:]
         changed = False
         for line in lines:
@@ -117,8 +117,7 @@ class ScfProgressPage(QWidget):
         self.last_info = QLabel(self.tracker.last_info_line, self)
         self.last_info.setWordWrap(True)
         self.last_info.setTextInteractionFlags(
-            self.last_info.textInteractionFlags()
-            | self.last_info.textInteractionFlags().__class__.TextSelectableByMouse
+            Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout.addWidget(self.last_info)
 
