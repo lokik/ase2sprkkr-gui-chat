@@ -720,7 +720,16 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
         bar.height() == 93
         for bar in navs
     )
-    assert all(button.height() == 58 for bar in navs for button in bar._buttons)
+    assert all(button.height() == 68 for bar in navs for button in bar._buttons)
+    assert all(
+        button.property("twoLineUnderIcon") is True
+        for bar in navs for button in bar._buttons
+    )
+    assert all(
+        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
+        for bar in navs for button in bar._buttons
+        if isinstance(button, QToolButton)
+    )
     assert all(
         button.iconSize() == QSize(26, 26)
         for bar in navs for button in bar._buttons
@@ -840,7 +849,7 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     window.resize(1920, 820)
     application.processEvents()
     visible_and_within_columns()
-    assert all(bar._mode == "short" for bar in window._header_bars)
+    assert all(bar._mode == "full" for bar in window._header_bars)
     window.resize(1100, 750)
     application.processEvents()
     assert window.width() < 1350  # Must not be pinned by header labels.
@@ -868,7 +877,7 @@ def test_header_and_results_footer_keep_spacing_without_rulers(tmp_path):
             if not button.isHidden():
                 button_top = button.mapTo(header, QPoint(0, 0)).y()
                 button_bottom = button_top + button.height()
-                # The 58-pixel buttons are centered in the original 93-pixel header.
+                # The 68-pixel buttons are centered in the original 93-pixel header.
                 expected_margin = (header.height() - button.height()) / 2
                 assert abs(button_top - expected_margin) <= 1
                 assert abs(header.height() - button_bottom - expected_margin) <= 1
@@ -928,7 +937,7 @@ def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
     application.processEvents()
     check_positions()
     # All three headers must remain ordered in the smaller icon-only layout.
-    window.resize(1360, 850)
+    window.resize(1100, 850)
     application.processEvents()
     check_positions()
     assert all(bar._mode == "icon" for bar in window._header_bars)
@@ -965,7 +974,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert all(bar._mode == "full" for bar in columns)
     assert all(
         [button.width() for button in bar._buttons if not button.isHidden()]
-        == [200] * sum(not b.isHidden() for b in bar._buttons)
+        == [168] * sum(not b.isHidden() for b in bar._buttons)
         for bar in columns
     )
 
@@ -984,17 +993,20 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert window._load_input_button.text() == "Load"
     assert window._custom_button.text() == "Custom"
 
-    # Shrink again: all equal columns collapse to centered icons together.
+    # Intermediate widths keep readable text instead of switching to icons.
     window.resize(1360, 850)
+    application.processEvents()
+    assert all(bar._mode == "short" for bar in columns)
+    window.resize(1100, 850)
     application.processEvents()
     results = columns[2]
     assert results._mode == "icon"
     assert all(bar._mode == "icon" for bar in columns)
-    assert [b.width() for b in results._buttons] == [80, 58, 58]
-    assert [b.width() for b in columns[1]._buttons] == [80, 58, 58]
-    assert window._recent_structures_button.width() == 80
+    assert [b.width() for b in results._buttons] == [90, 68, 68]
+    assert [b.width() for b in columns[1]._buttons] == [90, 68, 68]
+    assert window._recent_structures_button.width() == 90
     assert all(b.width() == b.height() for b in results._buttons[1:])
-    assert all(b.height() == 58 for b in results._buttons)
+    assert all(b.height() == 68 for b in results._buttons)
     assert "width: 22px" in window._recent_results_button.styleSheet()
     assert window._recent_results_button.toolButtonStyle() == (
         Qt.ToolButtonStyle.ToolButtonIconOnly
@@ -1018,12 +1030,12 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         results.COMPACT_SIZE + results.MENU_EXTRA_WIDTH
     )
 
-    # Widening the window restores all 200-pixel buttons.
+    # Widening the window restores all 168-pixel buttons.
     window.resize(2140, 900)
     application.processEvents()
     assert results._mode == "full"
     assert window._result_actions_widget.load_result_button.text() == "Load Result"
-    assert [b.width() for b in results._buttons] == [200, 200, 200]
+    assert [b.width() for b in results._buttons] == [168, 168, 168]
     for button in results._buttons:
         assert not button.grab().isNull()
     assert all(bar._mode == "full" for bar in columns)
