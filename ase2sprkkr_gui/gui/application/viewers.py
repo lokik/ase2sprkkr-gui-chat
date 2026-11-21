@@ -10,9 +10,6 @@ from importlib import import_module
 from importlib.util import find_spec
 from shutil import which
 
-from ase.visualize.viewers import VIEWERS
-
-
 def viewer_unavailability(viewer_name: str) -> str | None:
     """Return a reason when an ASE viewer is unavailable, otherwise None.
 
@@ -20,12 +17,16 @@ def viewer_unavailability(viewer_name: str) -> str | None:
     It cannot guarantee that an installed viewer will successfully start.
     """
     name = viewer_name.lower()
+    # The default viewer needs no availability probe, and importing ASE's
+    # viewer registry eagerly also imports ase.io and scipy.integrate.
+    if name == "ase":
+        return None
+
+    from ase.visualize.viewers import VIEWERS
+
     viewer = VIEWERS.get(name)
     if viewer is None:
         return f"Viewer '{viewer_name}' is not registered with ASE."
-
-    if name == "ase":
-        return None
 
     argv = getattr(viewer, "argv", None)
     if argv:

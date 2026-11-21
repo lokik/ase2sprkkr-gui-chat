@@ -34,7 +34,6 @@ from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
 from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometry
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
-from ase2sprkkr_gui.gui.dialogs.settings import edit_settings
 from ase2sprkkr_gui.gui.misc.colors import blend
 from ase2sprkkr_gui.gui.misc.icons import badge_icon, settings_icon
 from ase2sprkkr_gui.gui.misc.resources import icon_path
@@ -1134,6 +1133,10 @@ class WorkflowWindow(QMainWindow):
         file_flows.save_structure(self.controller, self.recent_history, self)
 
     def _open_settings(self, *, preferred_tasks: bool = False) -> None:
+        # Settings (including Matplotlib and ASE viewer discovery) are only
+        # needed when the user actually opens the dialog.
+        from ase2sprkkr_gui.gui.dialogs.settings import edit_settings
+
         accepted = (
             edit_settings(self.settings, self, initial_tab="Preferred tasks")
             if preferred_tasks else edit_settings(self.settings, self)

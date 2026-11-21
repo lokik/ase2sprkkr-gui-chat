@@ -27,8 +27,10 @@ def _controller():
 
 
 def test_viewer_availability_uses_registered_ase_cli_command(monkeypatch):
+    from ase.visualize.viewers import VIEWERS
+
     monkeypatch.setitem(
-        viewers.VIEWERS, "missing_executable_test",
+        VIEWERS, "missing_executable_test",
         SimpleNamespace(argv=["missing_viewer_executable_test"]),
     )
     monkeypatch.setattr(viewers, "which", lambda executable: None)
