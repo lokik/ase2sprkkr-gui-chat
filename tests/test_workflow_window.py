@@ -660,8 +660,8 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert footer.layout().itemAt(0).spacerItem() is not None
     assert all(
         btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-        and btn.iconSize().width() == 24
-        and btn.iconSize().height() == 24
+        and btn.iconSize().width() == 27
+        and btn.iconSize().height() == 22
         and btn.height() == 68
         for btn in footer.findChildren(QToolButton)
     )
@@ -705,9 +705,9 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
         bar.height() == 93
         for bar in navs
     )
-    assert all(button.height() == 48 for bar in navs for button in bar._buttons)
+    assert all(button.height() == 58 for bar in navs for button in bar._buttons)
     assert all(
-        button.iconSize() == QSize(24, 24)
+        button.iconSize() == QSize(27, 22)
         for bar in navs for button in bar._buttons
     )
     # Fixed actions and Results utilities share the neutral card treatment.
@@ -958,7 +958,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert [b.width() for b in results._buttons] == [98, 76, 76]
     assert [b.width() for b in columns[1]._buttons] == [98, 76, 76]
     assert window._recent_structures_button.width() == 98
-    assert all(b.height() == 48 for b in results._buttons)
+    assert all(b.height() == 58 for b in results._buttons)
     assert "width: 20px" in window._recent_results_button.styleSheet()
     assert window._recent_results_button.toolButtonStyle() == (
         Qt.ToolButtonStyle.ToolButtonIconOnly
