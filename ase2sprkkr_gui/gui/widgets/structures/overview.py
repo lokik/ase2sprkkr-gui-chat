@@ -6,7 +6,7 @@ from collections.abc import Mapping
 import numpy as np
 from ase.data.colors import jmol_colors
 from PyQt6.QtCore import QSignalBlocker, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QPalette
 from PyQt6.QtWidgets import (
     QBoxLayout,
     QButtonGroup,
@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.presentation import structure_kind_label
+from ase2sprkkr_gui.gui.misc.colors import blend
+from ase2sprkkr_gui.gui.style import action_card_stylesheet
 from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import CenteredIconToolButton
 from ase2sprkkr_gui.gui.plots.atom_sizes import marker_areas
 from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
@@ -171,6 +173,16 @@ class StructureOverviewWidget(QFrame):
         self.external_viewer_button.setFixedHeight(68)
         self.external_viewer_button.setToolTip("External viewer")
         self.external_viewer_button.setAccessibleName("External viewer")
+        accent = blend(
+            self.palette().color(QPalette.ColorRole.Button),
+            self.palette().color(QPalette.ColorRole.Mid), .78,
+        )
+        self.external_viewer_button.setStyleSheet(
+            action_card_stylesheet(
+                self.palette(), accent, "QToolButton", accent_width=3,
+            )
+            + "QToolButton { padding: 3px 7px; }"
+        )
         self.external_viewer_button.clicked.connect(
             lambda _checked=False: self.visualizeRequested.emit()
         )
