@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+from pathlib import Path
+from threading import Thread
 from typing import Any, Callable
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QPalette
+from PyQt6.QtCore import QEvent, QObject, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
-    QGroupBox,
     QHBoxLayout,
+    QLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
+    QMenu,
+    QScrollArea,
     QStyle,
+    QStyleOptionToolButton,
+    QStylePainter,
     QSizePolicy,
     QSplitter,
     QToolButton,
@@ -19,51 +25,223 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
+from ase2sprkkr_gui.gui.application.recent_files import (
+    RECENT_KINDS,
+    RecentFiles,
+    RecentFilesSnapshot,
+    find_missing_recent_paths,
+)
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
 from ase2sprkkr_gui.gui.application.window_geometry import manage_window_geometry
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
 from ase2sprkkr_gui.gui.dialogs.settings import edit_settings
+from ase2sprkkr_gui.gui.misc.colors import blend
 from ase2sprkkr_gui.gui.misc.icons import settings_icon
+from ase2sprkkr_gui.gui.misc.resources import icon_path
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
+from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
 from ase2sprkkr_gui.gui.flows import files as file_flows
 from ase2sprkkr_gui.gui.flows import structures as structure_flows
 from ase2sprkkr_gui.gui.flows import visualization as visualization_flow
-from ase2sprkkr_gui.gui.recent_presentation import RecentLaunchKind
+from ase2sprkkr_gui.gui.recent_presentation import RecentLaunchKind, recent_menu_items
 from ase2sprkkr_gui.gui.style import (
     SPACE_SM,
     SPACE_XL,
     SPACE_XS,
     SPACE_XXL,
     button_stylesheet,
-    group_panel_stylesheet,
     heading_font,
     secondary_text_stylesheet,
 )
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
+from ase2sprkkr_gui.gui.widgets.structures.overview import StructureOverviewWidget
 from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
 from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
+    BuildEmbedding,
+    ExplainEmbedding,
+    ConvergeHostScf,
     ContinueRecent,
+    LoadAllRecentResults,
+    RepeatRecentInput,
     CreateStructure,
     CreateStructureKind,
     Load,
     LoadKind,
     RunTask,
+    ReconvergeScf,
+    CustomTask,
     StartOver,
     UpdateEmptySpheres,
     UseForNewCalculation,
     VisualizeStructure,
+    EditStructure,
+    SaveStructure,
+    LoadHostPotential,
+    AttachHostPotential,
+    CreateHostPotential,
     WorkflowCommand,
     WorkflowPlan,
 )
 from ase2sprkkr_gui.gui.workflow.planner import WorkflowPlanner
 
 
+class _RecentValidationSignals(QObject):
+    """Deliver a one-shot filesystem check to the GUI thread."""
+
+    finished = pyqtSignal(object, object)
+
+
+def _check_recent_files(snapshot: RecentFilesSnapshot, signals: _RecentValidationSignals) -> None:
+    signals.finished.emit(snapshot, find_missing_recent_paths(snapshot))
+
+
+class _RecentFooterButton(QToolButton):
+    """Split button with a bold, wrapping title and recent filename.
+
+    The complete path is available in the tooltip; painting inside the main
+    split-button rect keeps all text away from Qt's native dropdown arrow.
+    """
+
+    MENU_WIDTH = 28
+    CONTENT_INSET = 10
+
+    def __init__(self, title: str, parent: QWidget):
+        super().__init__(parent)
+        self._title = title
+        self._recent_path: str | None = None
+        self._base_tooltip = ""
+        self.setText(title)
+        self.setFixedWidth(202)
+
+    def set_recent_path(self, path: str | None) -> None:
+        self._recent_path = path
+        self._refresh_label()
+
+    def set_base_tooltip(self, tooltip: str) -> None:
+        self._base_tooltip = tooltip
+        self._refresh_label()
+
+    def _refresh_label(self) -> None:
+        # Retain the readable text for accessibility and button inspection,
+        # while paintEvent provides proper per-line styling and wrapping.
+        filename = Path(self._recent_path).name if self._recent_path else ""
+        label = f"{self._title}\\n{filename}" if filename else self._title
+        tooltip = (
+            f"{self._base_tooltip}\\n{self._recent_path}"
+            if self._recent_path else self._base_tooltip
+        )
+        if self.text() != label:
+            self.setText(label)
+        if self.toolTip() != tooltip:
+            self.setToolTip(tooltip)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        # Draw the native surface and menu arrow, but paint the text ourselves:
+        # Qt's default two-line QToolButton text can intrude into the arrow.
+        option.text = ""
+        option.icon = QIcon()
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+
+        icon_size = self.iconSize()
+        icon_mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
+        pixmap = self.icon().pixmap(icon_size, icon_mode)
+        painter.drawPixmap(
+            self.CONTENT_INSET,
+            (self.height() - pixmap.height()) // 2,
+            pixmap,
+        )
+
+        text_x = self.CONTENT_INSET + icon_size.width() + 6
+        # Reserve a full native menu area, with a gap before its divider.
+        text_width = max(
+            1, self.width() - text_x - self.MENU_WIDTH - 14
+        )
+        painter.setPen(self.palette().color(
+            QPalette.ColorRole.ButtonText if self.isEnabled()
+            else QPalette.ColorRole.PlaceholderText
+        ))
+        title_font = QFont(self.font())
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        if self._recent_path:
+            painter.drawText(
+                QRect(text_x, 3, text_width, 27),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                | Qt.TextFlag.TextWordWrap,
+                self._title,
+            )
+            painter.setFont(self.font())
+            # A basename is much more useful in a compact toolbar than a
+            # path prefix such as /home/...; the full path is in the tooltip.
+            filename = Path(self._recent_path).name
+            painter.drawText(
+                QRect(text_x, 29, text_width, self.height() - 32),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                | Qt.TextFlag.TextWordWrap,
+                filename,
+            )
+        else:
+            painter.drawText(
+                QRect(text_x, 4, text_width, self.height() - 8),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                | Qt.TextFlag.TextWordWrap,
+                self._title,
+            )
+
+
+class _AlignedNavigationPanel(QFrame):
+    """One top toolbar with three groups aligned to the workflow columns."""
+
+    def __init__(
+        self, columns: tuple[QWidget, QWidget, QWidget],
+        gaps: tuple[int, int], parent: QWidget,
+    ):
+        super().__init__(parent)
+        self.setObjectName("workflowNavigation")
+        self.setFixedHeight(70)
+        self._columns = columns
+        self.groups = tuple(QWidget(self) for _ in columns)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        for i, group in enumerate(self.groups):
+            layout.addWidget(group)
+            if i < len(gaps):
+                layout.addSpacing(gaps[i])
+        for column in columns:
+            column.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched in self._columns and event.type() == QEvent.Type.Resize:
+            self._align_columns()
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._align_columns()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._align_columns()
+
+    def _align_columns(self) -> None:
+        if not self.isVisible():
+            return
+        for column, group in zip(self._columns, self.groups):
+            width = column.width()
+            if group.width() != width:
+                group.setFixedWidth(width)
+
+
 class WorkflowWindow(QMainWindow):
-    """Task-oriented entry point that keeps the full UI available as expert mode."""
+    """Primary task-oriented Ase2sprkkr application window."""
 
     projectBrowserRequested = pyqtSignal()
 
@@ -72,26 +250,35 @@ class WorkflowWindow(QMainWindow):
         controller: WorkspaceController,
         recent_files: RecentFiles,
         *,
-        open_expert: Callable[[], None],
         settings: ApplicationSettings,
         track_launch_monitor: calculation_flow.LaunchMonitorTracker,
         project_repository=None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Ase2sprkkr - Workflow")
-        manage_window_geometry(self, "workflow", default_size=(1120, 700))
+        manage_window_geometry(
+            self, "workflow", default_size=(1320, 760), default_maximized=True
+        )
         self.controller = controller
         self.recent_history = recent_files
+        self._displayed_recent_inputs = recent_files.paths("input")
         self.settings = settings
-        self._open_expert = open_expert
         self._track_launch_monitor = track_launch_monitor
         self.project_repository = project_repository
-        self._workflow_planner = WorkflowPlanner()
+        self._workflow_planner = WorkflowPlanner(settings=settings)
+        self._recent_validation_running = False
+        self._recent_validation_signals: _RecentValidationSignals | None = None
+        self._navigation_snapshot: RecentFilesSnapshot | None = None
         self.controller.structureChanged.connect(self._on_structure_changed)
-        self.controller.resultChanged.connect(lambda _result: self._refresh())
-        self.recent_history.changed.connect(self._refresh)
+        # Results have their own presenter; they do not change workflow
+        # availability unless the controller also emits structureChanged.
+        self.recent_history.changed.connect(self._refresh_recent_history)
+        self.controller.inputParametersChanged.connect(
+            lambda _parameters: self._update_navigation(self.recent_history.read_snapshot())
+        )
         self._build_ui()
         self._refresh()
+        self._validate_recent_files_async()
 
     @property
     def result_actions_widget(self) -> ResultActionsWidget:
@@ -109,149 +296,501 @@ class WorkflowWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget(self)
         self.setCentralWidget(central)
-        root = QHBoxLayout(central)
+        root = QVBoxLayout(central)
         root.setContentsMargins(SPACE_XXL, SPACE_XL, SPACE_XL, SPACE_XL)
         root.setSpacing(0)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, central)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(8)
-        root.addWidget(splitter)
+        root.addWidget(splitter, 1)
+        self._layout_splitter = splitter
 
-        content = QWidget(splitter)
-        content.setMinimumWidth(480)
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, SPACE_XL, 0)
-        title = QLabel("What would you like to do?")
-        title.setObjectName("workflowTitle")
-        title.setFont(heading_font(title.font(), "window"))
-        content_layout.addWidget(title)
-        self._subtitle = QLabel()
+        # Treat the first two columns as one resize unit. Their equal
+        # layout stretches keep them the same width when Results is resized.
+        action_columns = QWidget(splitter)
+        action_columns.setObjectName("workflowActionColumns")
+        action_columns_layout = QHBoxLayout(action_columns)
+        action_columns_layout.setContentsMargins(0, 0, 0, 0)
+        action_columns_layout.setSpacing(splitter.handleWidth())
+
+        # The first column owns both current-structure information and all
+        # structural workflows. Its content scrolls as a single unit.
+        structure_column = QWidget(action_columns)
+        structure_column.setObjectName("workflowStructureColumn")
+        structure_column.setMinimumWidth(300)
+        structure_layout = QVBoxLayout(structure_column)
+        structure_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+
+        self._structure_title = QLabel("Structure", structure_column)
+        self._structure_title.setObjectName("workflowStructureTitle")
+        self._structure_title.setFont(
+            heading_font(self._structure_title.font(), "dialog")
+        )
+        structure_layout.addWidget(self._structure_title)
+
+        self._subtitle = QLabel(structure_column)
         self._subtitle.setWordWrap(True)
         self._subtitle.setStyleSheet(secondary_text_stylesheet(self.palette()))
-        content_layout.addWidget(self._subtitle)
-        content_layout.addSpacing(SPACE_XL)
+        structure_layout.addWidget(self._subtitle)
 
-        self._actions = WorkflowActionsWidget(content)
+        structure_scroll = QScrollArea(structure_column)
+        structure_scroll.setObjectName("workflowStructureActionsScrollArea")
+        structure_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        structure_scroll.setWidgetResizable(True)
+        structure_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        structure_body = QWidget(structure_scroll)
+        structure_body_layout = QVBoxLayout(structure_body)
+        structure_body_layout.setContentsMargins(0, 0, SPACE_SM, 0)
+        structure_body_layout.setSpacing(SPACE_XL)
+        structure_body_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self._structure_overview = StructureOverviewWidget(structure_body)
+        self._structure_overview.visualizeRequested.connect(self._visualize_structure)
+        structure_body_layout.addWidget(self._structure_overview)
+        self._structure_actions = WorkflowActionsWidget(
+            structure_body, column="structure",
+            excluded_commands=(ContinueRecent, StartOver, VisualizeStructure),
+        )
+        self._structure_actions.commandRequested.connect(self.execute_workflow_command)
+        structure_body_layout.addWidget(self._structure_actions)
+        structure_body_layout.addStretch(1)
+        structure_scroll.setWidget(structure_body)
+        structure_layout.addWidget(structure_scroll, 1)
+        action_columns_layout.addWidget(structure_column, 1)
+
+        # Calculation commands have their own column, independently scrollable
+        # from structure actions and from the persistent results sidebar.
+        content = QWidget(action_columns)
+        content.setObjectName("workflowCalculateColumn")
+        content.setMinimumWidth(300)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+        title = QLabel("Calculate", content)
+        title.setObjectName("workflowCalculateTitle")
+        title.setFont(heading_font(title.font(), "dialog"))
+        content_layout.addWidget(title)
+
+        self._calculate_notice = QLabel(content)
+        self._calculate_notice.setWordWrap(True)
+        self._calculate_notice.setStyleSheet(
+            secondary_text_stylesheet(self.palette())
+        )
+        content_layout.addWidget(self._calculate_notice)
+
+        self._actions = WorkflowActionsWidget(
+            content, column="calculate",
+            excluded_commands=(CustomTask, RepeatRecentInput),
+        )
         self._actions.commandRequested.connect(self.execute_workflow_command)
-        content_layout.addWidget(self._actions)
+        for cards in (self._structure_actions, self._actions):
+            cards.naturalCardHeightChanged.connect(self._sync_action_card_heights)
+        action_scroll = QScrollArea(content)
+        action_scroll.setObjectName("workflowActionScrollArea")
+        action_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        action_scroll.setWidgetResizable(True)
+        action_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        action_scroll.setWidget(self._actions)
+        content_layout.addWidget(action_scroll, 1)
 
-        content_layout.addStretch(1)
-        splitter.addWidget(content)
+        action_columns_layout.addWidget(content, 1)
+        splitter.addWidget(action_columns)
 
-        # The sidebar is only a layout container: the result view and the
-        # bottom navigation must be independent, visually separate panels.
+        # Results share the same borderless column treatment as the actions.
         side = QWidget(splitter)
-        side.setMinimumWidth(300)
+        side.setObjectName("workflowResultsColumn")
+        side.setMinimumWidth(285)
         side.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(SPACE_SM)
 
+        result_actions_title = QLabel("Results", side)
+        result_actions_title.setObjectName("workflowResultsTitle")
+        result_actions_title.setFont(
+            heading_font(result_actions_title.font(), "dialog")
+        )
+        side_layout.addWidget(result_actions_title)
+
         self._result_actions = QFrame(side)
-        self._result_actions.setFrameShape(QFrame.Shape.StyledPanel)
+        self._result_actions.setFrameShape(QFrame.Shape.NoFrame)
         result_actions_layout = QVBoxLayout(self._result_actions)
         result_actions_layout.setContentsMargins(SPACE_SM, SPACE_SM, SPACE_SM, SPACE_SM)
         result_actions_layout.setSpacing(SPACE_XS)
-        result_actions_title = QLabel("Results...", self._result_actions)
-        result_actions_title.setFont(
-            heading_font(result_actions_title.font(), "section")
-        )
-        result_actions_layout.addWidget(result_actions_title)
         self._result_actions_widget = ResultActionsWidget(
             lambda value, action: execute_value_action(value, action, self),
             show_values_without_actions=False,
             show_history_button=False,
+            empty_text="",  # The Results heading and Load Result button suffice.
             parent=self._result_actions,
         )
         result_actions_layout.addWidget(self._result_actions_widget, 1)
         side_layout.addWidget(self._result_actions, 1)
 
-        # Keep the application-level navigation actions together at the
-        # bottom of the sidebar, below the workspace results.
-        navigation = QGroupBox("", side)
-        navigation.setObjectName("workflowNavigation")
-        navigation.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        splitter.addWidget(side)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([880, 380])
+
+        # A single top toolbar aligns its three groups with the three main
+        # columns, including splitter movements and window resizes.
+        navigation = _AlignedNavigationPanel(
+            (structure_column, content, side),
+            (action_columns_layout.spacing(), splitter.handleWidth()), central,
         )
-        navigation_layout = QHBoxLayout(navigation)
-        navigation_layout.setContentsMargins(SPACE_SM, SPACE_SM, SPACE_SM, SPACE_SM)
-        navigation_layout.setSpacing(SPACE_XS)
+        border = blend(
+            self.palette().color(QPalette.ColorRole.Window),
+            self.palette().color(QPalette.ColorRole.Mid), .35,
+        )
+        toolbar_color = blend(
+            self.palette().color(QPalette.ColorRole.Window),
+            self.palette().color(QPalette.ColorRole.Mid), .10,
+        )
+        navigation.setStyleSheet(
+            f"QFrame#workflowNavigation {{ background-color: {toolbar_color.name()}; "
+            f"border: none; border-bottom: 1px solid {border.name()}; }}"
+        )
+        root.insertWidget(0, navigation)
+        self._navigation_panel = navigation
+
+        def navigation_group(group: QWidget, object_name: str) -> QWidget:
+            group.setObjectName(object_name)
+            group_layout = QHBoxLayout(group)
+            group_layout.setContentsMargins(
+                SPACE_SM, SPACE_XS + 2, SPACE_SM, SPACE_XS + 2
+            )
+            group_layout.setSpacing(SPACE_XS)
+            return group
 
         def add_navigation_button(
-            label: str, icon: QIcon, tooltip: str, callback: Callable[[], None]
+            group: QWidget,
+            label: str,
+            icon: QIcon,
+            tooltip: str,
+            callback: Callable[[], None],
+            *,
+            recent_menu: bool = False,
         ) -> QToolButton:
-            button = QToolButton(navigation)
-            button.setText(label)
+            button = (
+                _RecentFooterButton(label, group)
+                if recent_menu else QToolButton(group)
+            )
+            if not recent_menu:
+                button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(24, 24))
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            button.setMinimumHeight(72)
+            button.setIconSize(QSize(20, 20))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.setFixedHeight(56)
+            button.setAutoRaise(True)
+            # Fixed/natural widths keep this a toolbar rather than stretched
+            # workflow cards. Recent buttons reserve room for their two lines.
+            if not recent_menu:
+                button.setMinimumWidth(82)
             button.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
+            palette = button.palette()
+            text = palette.color(QPalette.ColorRole.ButtonText)
+            accent = palette.color(QPalette.ColorRole.Highlight)
+            hover = blend(toolbar_color, accent, .10)
+            pressed = blend(toolbar_color, accent, .18)
+            mid = blend(toolbar_color, palette.color(QPalette.ColorRole.Mid), .45)
             button.setStyleSheet(
-                button_stylesheet(self.palette(), selector="QToolButton")
+                "QToolButton {"
+                f"color: {text.name()}; background: transparent; "
+                "border: 1px solid transparent; border-radius: 5px; "
+                "padding: 4px 7px; "
+                "}"
+                "QToolButton:hover {"
+                f"background-color: {hover.name()}; "
+                f"border-color: {mid.name()}; "
+                "}"
+                "QToolButton:pressed {"
+                f"background-color: {pressed.name()}; "
+                "}"
+                "QToolButton:disabled {"
+                f"color: {palette.color(QPalette.ColorRole.PlaceholderText).name()}; "
+                "}"
+                "QToolButton::menu-button {"
+                "width: 28px; "
+                f"border-left: 1px solid {mid.name()}; "
+                "}"
             )
-            button.setToolTip(tooltip)
+            if recent_menu:
+                button.set_base_tooltip(tooltip)
+            else:
+                button.setToolTip(tooltip)
             button.setAccessibleName(label)
+            if recent_menu:
+                button.setPopupMode(
+                    QToolButton.ToolButtonPopupMode.MenuButtonPopup
+                )
+                button.setMenu(QMenu(button))
             button.clicked.connect(callback)
-            navigation_layout.addWidget(button, 1)
+            group.layout().addWidget(button)
             return button
 
+        def add_separator(group: QWidget) -> None:
+            separator = QFrame(group)
+            separator.setFrameShape(QFrame.Shape.NoFrame)
+            separator.setFixedSize(1, 25)
+            separator.setStyleSheet(
+                "background-color: "
+                + blend(toolbar_color, self.palette().color(QPalette.ColorRole.Mid), .6).name()
+                + ";"
+            )
+            group.layout().addWidget(
+                separator, alignment=Qt.AlignmentFlag.AlignVCenter
+            )
+
+        structure_navigation = navigation_group(
+            navigation.groups[0], "workflowStructureNavigation"
+        )
+        self._start_over_button = add_navigation_button(
+            structure_navigation,
+            "Start from Scratch",
+            self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload),
+            "Clear the current workspace; existing results are kept",
+            self._start_over,
+        )
+        self._recent_structures_button = add_navigation_button(
+            structure_navigation,
+            "Recent Structures",
+            QIcon(str(icon_path("bulk_crystal.png"))),
+            "Open the latest structure or choose another",
+            lambda: self._open_recent("structure"),
+            recent_menu=True,
+        )
+        add_separator(structure_navigation)
+        self._settings_button = add_navigation_button(
+            structure_navigation,
+            "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
+            self._open_settings,
+        )
+        self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
+
+        calculation_navigation = navigation_group(
+            navigation.groups[1], "workflowCalculationNavigation"
+        )
+        self._repeat_button = add_navigation_button(
+            calculation_navigation,
+            "Repeat Calculation",
+            QIcon(str(icon_path("system-run.svg"))),
+            "Repeat the most recent input or choose another",
+            lambda: self._open_recent("input"),
+            recent_menu=True,
+        )
+        self._load_input_button = add_navigation_button(
+            calculation_navigation,
+            "Load Input File",
+            QIcon.fromTheme(
+                "document-open",
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
+            ),
+            "Load, edit, save or calculate from an SPR-KKR input file",
+            self._load_input_file,
+        )
+        self._custom_button = add_navigation_button(
+            calculation_navigation,
+            "Custom Input File",
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
+            "Choose a registered SPR-KKR task and configure its parameters",
+            self._custom_task,
+        )
+
+        results_navigation = navigation_group(
+            navigation.groups[2], "workflowResultsNavigation"
+        )
+        self._recent_results_button = add_navigation_button(
+            results_navigation,
+            "Recent Results",
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
+            "Open the latest result or choose another",
+            lambda: self._open_recent("output"),
+            recent_menu=True,
+        )
         self._project_browser_button = add_navigation_button(
+            results_navigation,
             "Project Browser",
             QIcon.fromTheme(
                 "folder-open",
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
             ),
             "Browse projects and past calculations",
-            lambda _checked=False: self.projectBrowserRequested.emit(),
+            lambda: self.projectBrowserRequested.emit(),
         )
-        self._expert_button = add_navigation_button(
-            "Expert Mode",
-            QIcon.fromTheme(
-                "emblem-important",
-                self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning),
-            ),
-            "Open the full expert interface",
-            self._open_expert_mode,
-        )
-        self._settings_button = add_navigation_button(
-            "Settings", settings_icon(), "Configure Ase2sprkkr", self._open_settings
-        )
+        add_separator(results_navigation)
         self._close_button = add_navigation_button(
+            results_navigation,
             "Close",
             QIcon.fromTheme(
                 "application-exit",
                 self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton),
             ),
-            "Close Ase2sprkkr",
+            "Close Ase2sprkkr (Ctrl+Q)",
             self.close,
         )
-        navigation.setStyleSheet(
-            group_panel_stylesheet(
-                self.palette(), self.palette().color(QPalette.ColorRole.Highlight)
-            )
+        self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
+        # The Results navigation must never be clipped by the splitter,
+        # even with a narrower window or longer translated labels.
+        side.setMinimumWidth(max(
+            side.minimumWidth(), results_navigation.sizeHint().width()
+        ))
+
+    def _open_recent(self, kind: str, path: str | None = None) -> None:
+        """Use the latest path for the main button, or an explicit menu item."""
+        paths = self.recent_history.paths(kind)
+        chosen = path if path is not None else (paths[0] if paths else None)
+        if chosen is None:
+            return
+        if kind == "input":
+            self.execute_workflow_command(RepeatRecentInput(chosen))
+        else:
+            self._continue_recent(kind, chosen)
+
+    def _update_navigation(self, snapshot: RecentFilesSnapshot) -> None:
+        """Refresh button availability and rebuild menus only for changed history."""
+        has_structure = self.controller.atoms is not None
+        has_workspace = (
+            has_structure
+            or self.controller.unresolved_cluster_path is not None
+            or self.controller.input_parameters is not None
         )
-        side_layout.addWidget(navigation, alignment=Qt.AlignmentFlag.AlignBottom)
-        splitter.addWidget(side)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([560, 360])
+        self._start_over_button.setVisible(has_workspace)
+        self._start_over_button.setEnabled(has_workspace)
+        label = "Custom Calculation" if has_structure else "Custom Input File"
+        self._custom_button.setText(label)
+        self._custom_button.setAccessibleName(label)
+
+        if snapshot == self._navigation_snapshot:
+            return
+        self._navigation_snapshot = snapshot
+        for kind, button in (
+            ("structure", self._recent_structures_button),
+            ("input", self._repeat_button),
+            ("output", self._recent_results_button),
+        ):
+            paths = snapshot.paths(kind)
+            button.setEnabled(bool(paths))
+            button.set_recent_path(paths[0] if paths else None)
+            menu = button.menu()
+            menu.clear()
+            for item in recent_menu_items(paths):
+                action = menu.addAction(item.label)
+                action.setToolTip(item.tooltip)
+                action.triggered.connect(
+                    lambda _checked=False, item_kind=kind, item_path=item.path:
+                    self._open_recent(item_kind, item_path)
+                )
+            if kind == "output" and paths:
+                menu.addSeparator()
+                menu.addAction("Load all results").triggered.connect(
+                    lambda _checked=False: self.execute_workflow_command(
+                        LoadAllRecentResults()
+                    )
+                )
+
+    def _sync_action_card_heights(self) -> None:
+        height = max(
+            self._structure_actions.natural_card_height,
+            self._actions.natural_card_height,
+        )
+        self._structure_actions.set_uniform_card_height(height)
+        self._actions.set_uniform_card_height(height)
+
+    def _refresh_recent_history(self) -> None:
+        self._update_navigation(self.recent_history.read_snapshot())
+        # Only input-history changes affect the planned action cards in a loaded workspace.
+        inputs_changed = self.recent_history.paths("input") != self._displayed_recent_inputs
+        if inputs_changed or (
+            self.controller.atoms is None
+            and self.controller.unresolved_cluster_path is None
+        ):
+            self._refresh()
+        self._validate_recent_files_async()
+
+    def _validate_recent_files_async(self) -> None:
+        """Keep the initial menus responsive; inspect paths in one daemon worker."""
+        if self._recent_validation_running:
+            return
+        snapshot = self.recent_history.read_snapshot()
+        if not any(snapshot.paths(kind) for kind in RECENT_KINDS):
+            return
+        signals = _RecentValidationSignals()
+        signals.finished.connect(self._recent_files_checked)
+        self._recent_validation_signals = signals
+        self._recent_validation_running = True
+        Thread(
+            target=_check_recent_files, args=(snapshot, signals),
+            name="recent-files-check", daemon=True,
+        ).start()
+
+    def _recent_files_checked(self, snapshot: RecentFilesSnapshot, missing: dict) -> None:
+        self._recent_validation_running = False
+        self._recent_validation_signals = None
+        if self.recent_history.read_snapshot() != snapshot:
+            # History changed while the worker was checking a filesystem.
+            # Its result is obsolete; validate the latest snapshot instead.
+            self._validate_recent_files_async()
+            return
+        # The history emits one changed signal, replacing the whole menu
+        # presentation once, and only when missing files were actually found.
+        self.recent_history.remove_known_missing(snapshot, missing)
 
     def _refresh(self) -> None:
+        snapshot = self.recent_history.read_snapshot()
+        self._displayed_recent_inputs = snapshot.input
         plan = self._workflow_planner.for_workspace(
             self.controller,
-            recent=self.recent_history.read_snapshot(),
+            recent=snapshot,
+        )
+        atoms = self.controller.atoms
+        kind = self.controller.structure_kind()
+        self._structure_overview.set_structure(
+            atoms, kind=kind, scf_status=self.controller.scf_status(),
+        )
+        self._structure_overview.setVisible(atoms is not None)
+        # Formula, dimensionality and SCF state belong to the structure panel.
+        # Keep onboarding and diagnostic messages in the structure column.
+        invalid_cluster = (
+            kind == "0d" and getattr(atoms, "embedding_host", None) is None
+        )
+        self._structure_title.setText(
+            "Structure" if atoms is not None else "Start with..."
         )
         self._subtitle.setText(plan.subtitle)
+        self._subtitle.setVisible(bool(plan.subtitle) and (atoms is None or invalid_cluster))
+        self._structure_actions.set_plan(plan)
         self._actions.set_plan(plan)
+        self._update_navigation(snapshot)
+        if atoms is None:
+            self._calculate_notice.setText(
+                "Create or load a structure to see available guided calculations."
+            )
+        else:
+            self._calculate_notice.setText(
+                "No guided calculation is available for the current structure."
+            )
+        self._calculate_notice.setVisible(not self._actions.has_actions)
 
     def execute_workflow_command(self, command: WorkflowCommand) -> None:
         """Mechanically route one already-approved workflow command."""
         if isinstance(command, RunTask):
             self._prepare_task(command.backend_task)
+            return
+        if isinstance(command, ReconvergeScf):
+            self._prepare_task("scf", restart_scf=True)
+            return
+        if isinstance(command, CustomTask):
+            self._custom_task()
+            return
+        if isinstance(command, ConvergeHostScf):
+            calculation_flow.configure_and_run_host_scf(
+                self.controller, self.recent_history, self,
+                dataset_default_mode=self.settings.dataset_default_mode,
+                restart_host_scf=command.restart_scf,
+                track_launch_monitor=self._track_launch_monitor,
+                project_repository=self.project_repository,
+            )
             return
         if isinstance(command, UpdateEmptySpheres):
             self._update_empty_spheres()
@@ -264,6 +803,12 @@ class WorkflowWindow(QMainWindow):
                 CreateStructureKind.SURFACE: self._create_surface,
                 CreateStructureKind.TWO_D: self._create_transition,
             }[command.kind]()
+            return
+        if isinstance(command, ExplainEmbedding):
+            self._explain_embedded_cluster()
+            return
+        if isinstance(command, BuildEmbedding):
+            structure_flows.build_embedding_structure(self.controller, self)
             return
         if isinstance(command, Build2D):
             surface_mode = {
@@ -282,8 +827,45 @@ class WorkflowWindow(QMainWindow):
         if isinstance(command, ContinueRecent):
             self._continue_recent(command.kind, command.path)
             return
+        if isinstance(command, LoadAllRecentResults):
+            file_flows.load_all_recent_outputs(
+                self.controller, self.recent_history, self,
+            )
+            return
+        if isinstance(command, RepeatRecentInput):
+            if command.path is None:
+                return
+            custom_flow.load_custom_input(
+                self.controller, self.recent_history, self, command.path,
+                track_launch_monitor=self._track_launch_monitor,
+                project_repository=self.project_repository,
+            )
+            return
         if isinstance(command, VisualizeStructure):
             self._visualize_structure()
+            return
+        if isinstance(command, EditStructure):
+            structure_flows.edit_structure(
+                self.controller, self, recent_files=self.recent_history
+            )
+            return
+        if isinstance(command, SaveStructure):
+            self._save_structure()
+            return
+        if isinstance(command, LoadHostPotential):
+            file_flows.load_host_potential(
+                self.controller, self.recent_history, self
+            )
+            return
+        if isinstance(command, AttachHostPotential):
+            file_flows.attach_host_potential(
+                self.controller, self.recent_history, self
+            )
+            return
+        if isinstance(command, CreateHostPotential):
+            file_flows.create_host_potential(
+                self.controller, self.recent_history, self
+            )
             return
         if isinstance(command, UseForNewCalculation):
             self._use_for_new_calculation()
@@ -292,6 +874,28 @@ class WorkflowWindow(QMainWindow):
             self._start_over()
             return
         raise TypeError(f"Unsupported workflow command {type(command).__name__}.")
+
+    def _explain_embedded_cluster(self) -> None:
+        answer = QMessageBox.question(
+            self, "Creating an Embedded Cluster",
+            "An embedded cluster needs a periodic host. First create or load "
+            "a bulk (3D) or layered (2D) structure; then choose "
+            "'Build Embedded Cluster' from the structure actions.\n\n"
+            "Show this introductory action again?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.No:
+            self.settings.show_embedded_cluster_hint = False
+            if self.settings.save():
+                self._refresh()
+            else:
+                self.settings.show_embedded_cluster_hint = True
+                QMessageBox.warning(
+                    self, "Cannot Save Settings",
+                    "Could not save the preference; the introductory action "
+                    "will remain visible.",
+                )
 
     def _on_structure_changed(self, _atoms: Any) -> None:
         self._refresh()
@@ -332,14 +936,8 @@ class WorkflowWindow(QMainWindow):
 
     def _continue_recent(self, kind: RecentLaunchKind, file_path: str) -> None:
         file_flows.continue_recent(
-            self.controller,
-            self.recent_history,
-            kind,
-            file_path,
-            self,
+            self.controller, self.recent_history, kind, file_path, self,
         )
-        if self.controller.atoms is None:
-            self._refresh()
 
     def _build_2d(self, _checked: bool = False, *, surface_mode: bool = False) -> None:
         structure_flows.build_2d_structure(
@@ -349,13 +947,29 @@ class WorkflowWindow(QMainWindow):
             surface_mode=surface_mode,
         )
 
-    def _prepare_task(self, task: str) -> None:
+    def _prepare_task(self, task: str, *, restart_scf: bool = False) -> None:
+        from ase2sprkkr_gui.gui.input_parameters.tasks import is_guided_task
+        if not is_guided_task(task):
+            from ase2sprkkr import InputParameters
+            from ase2sprkkr_gui.gui.input_parameters.dataset import apply_default_dataset
+
+            parameters = InputParameters.for_task(task)
+            apply_default_dataset(
+                parameters, self.settings.dataset_default_mode, self.controller.atoms,
+            )
+            custom_flow.edit_custom_parameters(
+                self.controller, self.recent_history, self, parameters,
+                track_launch_monitor=self._track_launch_monitor,
+                project_repository=self.project_repository,
+            )
+            return
         calculation_flow.configure_and_run_task(
             self.controller,
             self.recent_history,
             self,
             task,
             dataset_default_mode=self.settings.dataset_default_mode,
+            restart_scf=restart_scf,
             track_launch_monitor=self._track_launch_monitor,
             project_repository=self.project_repository,
         )
@@ -382,8 +996,28 @@ class WorkflowWindow(QMainWindow):
     def _visualize_structure(self) -> None:
         visualization_flow.visualize_structure(self.controller, self.settings, self)
 
-    def _open_settings(self) -> None:
-        edit_settings(self.settings, self)
+    def _save_structure(self) -> None:
+        file_flows.save_structure(self.controller, self.recent_history, self)
 
-    def _open_expert_mode(self) -> None:
-        self._open_expert()
+    def _open_settings(self, *, preferred_tasks: bool = False) -> None:
+        accepted = (
+            edit_settings(self.settings, self, initial_tab="Preferred tasks")
+            if preferred_tasks else edit_settings(self.settings, self)
+        )
+        if accepted:
+            self._refresh()
+
+    def _custom_task(self) -> None:
+        custom_flow.choose_custom_task(
+            self.controller, self.recent_history, self,
+            dataset_default_mode=self.settings.dataset_default_mode,
+            track_launch_monitor=self._track_launch_monitor,
+            project_repository=self.project_repository,
+        )
+
+    def _load_input_file(self) -> None:
+        custom_flow.choose_custom_input(
+            self.controller, self.recent_history, self,
+            track_launch_monitor=self._track_launch_monitor,
+            project_repository=self.project_repository,
+        )
