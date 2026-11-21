@@ -181,7 +181,7 @@ class _HeaderActionBar(QWidget):
     # Horizontal navigation buttons are deliberately wide and low; retain
     # the header height so only the buttons' silhouette changes.
     FULL_WIDTH = 176
-    BUTTON_HEIGHT = 48
+    BUTTON_HEIGHT = 58
     COMPACT_SIZE = 76
     MENU_EXTRA_WIDTH = 22
     VERTICAL_GAP = 12  # Also used by the unchanged Results utility footer.
@@ -222,7 +222,7 @@ class _HeaderActionBar(QWidget):
         self._button_row.addWidget(
             button, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        button.setIconSize(QSize(24, 24))
+        button.setIconSize(QSize(27, 22))
         button.setFixedHeight(self.BUTTON_HEIGHT)
         button.setMinimumWidth(0)
         button.setSizePolicy(
@@ -561,7 +561,7 @@ class WorkflowWindow(QMainWindow):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
         # Allow room for the wider Results header actions at normal window sizes.
-        splitter.setSizes([850, 410])
+        splitter.setSizes([880, 380])
 
         # Stable commands belong to the headers of their workflow columns.
         # Recent Structures retains its position when Start from Scratch appears.
@@ -656,7 +656,7 @@ class WorkflowWindow(QMainWindow):
             button = CenteredIconToolButton(results_footer)
             button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(24, 24))
+            button.setIconSize(QSize(27, 22))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             button.setFixedHeight(68)
             button.setSizePolicy(
