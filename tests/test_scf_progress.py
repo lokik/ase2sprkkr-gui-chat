@@ -85,7 +85,7 @@ def test_info_text_is_formatted_by_parser_not_reparsed():
 def test_scf_run_has_info_page_and_raw_output_is_preserved():
     app = QApplication.instance() or QApplication([])
     window = RunMonitorWindow(
-        lambda cancellation: object(), scf=True, autostart=False
+        lambda cancellation: object(), task_name="SCF", autostart=False
     )
     assert isinstance(window._tabs, QTabWidget)
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
