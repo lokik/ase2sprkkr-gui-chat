@@ -5,7 +5,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
 from types import SimpleNamespace
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, QSize
 from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMessageBox, QSizePolicy, QSplitter, QToolButton, QWidget
 
 
@@ -660,8 +660,8 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert footer.layout().itemAt(0).spacerItem() is not None
     assert all(
         btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-        and btn.iconSize().width() == 27
-        and btn.iconSize().height() == 22
+        and btn.iconSize().width() == 24
+        and btn.iconSize().height() == 24
         and btn.height() == 68
         for btn in footer.findChildren(QToolButton)
     )
@@ -705,9 +705,9 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
         bar.height() == 93
         for bar in navs
     )
-    assert all(button.height() == 68 for bar in navs for button in bar._buttons)
+    assert all(button.height() == 48 for bar in navs for button in bar._buttons)
     assert all(
-        button.iconSize().width() == 27 and button.iconSize().height() == 22
+        button.iconSize() == QSize(24, 24)
         for bar in navs for button in bar._buttons
     )
     # Fixed actions and Results utilities share the neutral card treatment.
@@ -854,8 +854,10 @@ def test_header_and_results_footer_keep_spacing_without_rulers(tmp_path):
             if not button.isHidden():
                 button_top = button.mapTo(header, QPoint(0, 0)).y()
                 button_bottom = button_top + button.height()
-                assert abs(button_top - 12) <= 1
-                assert abs(header.height() - 1 - button_bottom - 12) <= 1
+                # The 48-pixel buttons are centered in the original 93-pixel header.
+                expected_margin = (header.height() - button.height()) / 2
+                assert abs(button_top - expected_margin) <= 1
+                assert abs(header.height() - button_bottom - expected_margin) <= 1
 
     footer = window._results_footer
     assert footer.frameShape() == QFrame.Shape.NoFrame
@@ -934,7 +936,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         for button in bar._buttons:
             if not button.isHidden():
                 assert button.width() == bar.FULL_WIDTH
-                assert button.height() == bar.COMPACT_SIZE
+                assert button.height() == bar.BUTTON_HEIGHT
                 assert abs(
                     button.mapTo(bar, QPoint(0, 0)).y()
                     - (bar.height() - button.height()) // 2
@@ -943,7 +945,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert all(not bar._compact for bar in columns)
     assert all(
         [button.width() for button in bar._buttons if not button.isHidden()]
-        == [160] * sum(not b.isHidden() for b in bar._buttons)
+        == [176] * sum(not b.isHidden() for b in bar._buttons)
         for bar in columns
     )
 
@@ -953,10 +955,10 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     results = columns[2]
     assert results._compact
     assert all(bar._compact for bar in columns)
-    assert [b.width() for b in results._buttons] == [90, 68, 68]
-    assert [b.width() for b in columns[1]._buttons] == [90, 68, 68]
-    assert window._recent_structures_button.width() == 90
-    assert all(b.height() == 68 for b in results._buttons)
+    assert [b.width() for b in results._buttons] == [98, 76, 76]
+    assert [b.width() for b in columns[1]._buttons] == [98, 76, 76]
+    assert window._recent_structures_button.width() == 98
+    assert all(b.height() == 48 for b in results._buttons)
     assert "width: 20px" in window._recent_results_button.styleSheet()
     assert window._recent_results_button.toolButtonStyle() == (
         Qt.ToolButtonStyle.ToolButtonIconOnly
@@ -980,12 +982,12 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         results.COMPACT_SIZE + results.MENU_EXTRA_WIDTH
     )
 
-    # Widening restores labels and the same 160-pixel widths.
+    # Widening restores labels and the same 176-pixel widths.
     window._layout_splitter.setSizes([1200, 900])
     application.processEvents()
     assert not results._compact
     assert window._result_actions_widget.load_result_button.text() == "Load Result"
-    assert [b.width() for b in results._buttons] == [160, 160, 160]
+    assert [b.width() for b in results._buttons] == [176, 176, 176]
     for button in results._buttons:
         assert not button.grab().isNull()
     assert all(not bar._compact for bar in columns)
