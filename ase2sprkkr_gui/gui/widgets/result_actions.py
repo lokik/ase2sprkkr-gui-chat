@@ -31,6 +31,7 @@ from ase2sprkkr_gui.gui.application.result_presentation import (
     present_result,
 )
 from ase2sprkkr_gui.gui.misc.resources import icon_path
+from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import CenteredIconPushButton
 
 _PLOT_ICON = icon_path("labplot-xy-interpolation-curve.svg")
 _STANDARD_ICONS = {
@@ -175,7 +176,7 @@ class ResultActionsWidget(QWidget):
             )
         )
         self.assign_project_button.clicked.connect(self._request_project_assignment)
-        self.load_result_button = QPushButton("Load Result", self)
+        self.load_result_button = CenteredIconPushButton("Load Result", self)
         self.load_result_button.setObjectName("resultsLoadButton")
         self.load_result_button.setToolTip(
             "Load one SPR-KKR output file into Results (Ctrl+Shift+O)"
@@ -190,7 +191,7 @@ class ResultActionsWidget(QWidget):
         self.load_result_button.clicked.connect(
             lambda _checked=False: self.loadResultRequested.emit()
         )
-        self.import_directory_button = QPushButton("Import Directory…", self)
+        self.import_directory_button = CenteredIconPushButton("Import Directory…", self)
         self.import_directory_button.setObjectName("resultsImportDirectoryButton")
         self.import_directory_button.setIcon(
             QIcon.fromTheme(

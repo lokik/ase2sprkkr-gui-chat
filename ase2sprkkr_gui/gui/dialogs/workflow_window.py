@@ -4,7 +4,7 @@ from threading import Thread
 from pathlib import Path
 from typing import Any, Callable
 
-from PyQt6.QtCore import QObject, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPainter, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -18,8 +18,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStyle,
-    QStyleOptionToolButton,
-    QStylePainter,
     QSizePolicy,
     QSplitter,
     QToolButton,
@@ -56,6 +54,7 @@ from ase2sprkkr_gui.gui.style import (
     heading_font,
     secondary_text_stylesheet,
 )
+from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import CenteredIconToolButton
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
 from ase2sprkkr_gui.gui.widgets.structures.overview import StructureOverviewWidget
 from ase2sprkkr_gui.gui.widgets.workflow_actions import WorkflowActionsWidget
@@ -116,7 +115,7 @@ def _navigation_button_stylesheet(palette: QPalette, selector: str) -> str:
     )
 
 
-class _RecentFooterButton(QToolButton):
+class _RecentFooterButton(CenteredIconToolButton):
     """Recent action with a compact filename suffix and the complete path tooltip."""
 
     def __init__(self, title: str, parent: QWidget):
@@ -143,52 +142,6 @@ class _RecentFooterButton(QToolButton):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._refresh_label()
-
-    def paintEvent(self, event) -> None:
-        # Native QToolButton places the icon beside the first line, not at
-        # the vertical middle of a two-line recent-file label.
-        if self._icon_only or not self._recent_path:
-            super().paintEvent(event)
-            return
-        option = QStyleOptionToolButton()
-        self.initStyleOption(option)
-        option.icon = QIcon()
-        option.text = ""
-        painter = QStylePainter(self)
-        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
-        rect = self.style().subControlRect(
-            QStyle.ComplexControl.CC_ToolButton, option,
-            QStyle.SubControl.SC_ToolButton, self,
-        )
-        icon_size = self.iconSize()
-        icon = self.icon().pixmap(
-            icon_size,
-            QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled,
-        )
-        icon_x = rect.left() + 7
-        painter.drawPixmap(
-            icon_x, rect.center().y() - icon.height() // 2, icon,
-        )
-        text_left = icon_x + icon_size.width() + 6
-        text_width = max(1, rect.right() - text_left - 3)
-        line_height = self.fontMetrics().height()
-        y = rect.center().y() - line_height
-        title = self.fontMetrics().elidedText(
-            self._title, Qt.TextElideMode.ElideRight, text_width,
-        )
-        filename = self.text().split("\n", 1)[-1]
-        painter.setPen(self.palette().color(
-            QPalette.ColorRole.ButtonText if self.isEnabled()
-            else QPalette.ColorRole.PlaceholderText
-        ))
-        painter.drawText(
-            QRect(text_left, y, text_width, line_height),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, title,
-        )
-        painter.drawText(
-            QRect(text_left, y + line_height, text_width, line_height),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, filename,
-        )
 
     def _refresh_label(self) -> None:
         if self._recent_path:
@@ -226,34 +179,33 @@ class _RecentFooterButton(QToolButton):
 
 
 class _HeaderActionBar(QWidget):
-    """Fixed-size action tiles that collapse together when a column narrows."""
+    """Column header which uses the same compact mode as its peers."""
 
     FULL_WIDTH = 160
-    COMPACT_SIZE = 42
+    BUTTON_HEIGHT = 68
+    COMPACT_SIZE = 68
     MENU_EXTRA_WIDTH = 22
+    VERTICAL_GAP = 12
+    BAR_HEIGHT = BUTTON_HEIGHT + VERTICAL_GAP * 2 + 1
 
-    def __init__(self, parent: QWidget, name: str, *, inset: int = 0):
+    layoutChanged = pyqtSignal()
+
+    def __init__(self, parent: QWidget, name: str):
         super().__init__(parent)
         self.setObjectName(name)
-        # With 42px buttons, this leaves roughly 12px from their lower
-        # edge to the rule, matching the visual gap from the rule to the
-        # following heading (including the parent's layout spacing).
-        self.setFixedHeight(66)
-        self.setMinimumSize(0, 66)
-        self.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
-        )
+        self.setFixedHeight(self.BAR_HEIGHT)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self._buttons: list[QAbstractButton] = []
         self._labels: dict[QAbstractButton, str] = {}
         self._tooltips: dict[QAbstractButton, str] = {}
         self._styles: dict[QAbstractButton, str] = {}
-        self._updating = False
         self._compact = False
+        self._mode_applied = False
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(inset, 0, inset, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACE_XS)
-        # Give the buttons priority up to FULL_WIDTH; only then expand gap.
-        layout.addStretch(0)
+        layout.addStretch(1)
 
     def register(self, button: QAbstractButton) -> None:
         self._buttons.append(button)
@@ -263,24 +215,34 @@ class _HeaderActionBar(QWidget):
         layout = self.layout()
         layout.removeWidget(button)
         layout.insertWidget(
-            layout.count() - 1, button, 1,
-            Qt.AlignmentFlag.AlignVCenter,
+            layout.count() - 1, button, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        button.setFixedHeight(self.COMPACT_SIZE)
+        button.setIconSize(QSize(24, 24))
+        button.setFixedHeight(self.BUTTON_HEIGHT)
         button.setMinimumWidth(0)
-        button.setMaximumWidth(self.FULL_WIDTH)
         button.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
+        self._mode_applied = False
+        self.refresh()
+
+    def set_button_label(self, button: QAbstractButton, title: str) -> None:
+        self._labels[button] = title
+        button.setAccessibleName(title)
+        # Icon-only tool buttons keep their logical text/accessible name;
+        # the painter suppresses the label without losing it for testing.
+        if isinstance(button, QToolButton) or not self._compact:
+            button.setText(title)
+        if self._compact:
+            button.setToolTip(f"{title}\n{self._tooltips[button]}")
         self.refresh()
 
     def minimumSizeHint(self) -> QSize:
-        # Prevent full-text button size hints from imposing a window minimum
-        # before the header can switch to its icon-only layout.
-        return QSize(0, self.height())
+        # The buttons' full text must not fix the window's minimum width.
+        return QSize(0, self.BAR_HEIGHT)
 
     def sizeHint(self) -> QSize:
-        return QSize(0, self.height())
+        return QSize(0, self.BAR_HEIGHT)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -288,79 +250,69 @@ class _HeaderActionBar(QWidget):
             self.palette().color(QPalette.ColorRole.Window),
             self.palette().color(QPalette.ColorRole.Mid), .42,
         )
+        # The line starts exactly at the heading's left edge.
         painter = QPainter(self)
-        inset = SPACE_SM
         painter.fillRect(
-            inset, self.height() - 1,
-            max(0, self.width() - 2 * inset), 1, line,
+            0, self.height() - 1,
+            max(0, self.width() - SPACE_SM), 1, line,
         )
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self.refresh()
 
-    def refresh(self) -> None:
-        if self._updating or not self._buttons:
-            return
-        visible = [button for button in self._buttons if not button.isHidden()]
-        count = len(visible)
-        if not count:
-            return
-        layout = self.layout()
-        margins = layout.contentsMargins()
+    def needs_compact(self) -> bool:
+        visible = sum(not button.isHidden() for button in self._buttons)
+        if not visible:
+            return False
         required = (
-            count * self.FULL_WIDTH
-            + (count - 1) * layout.spacing()
-            + margins.left() + margins.right()
+            visible * self.FULL_WIDTH
+            + (visible - 1) * self.layout().spacing()
         )
-        compact = self.width() < required
-        self._updating = True
-        try:
-            self._compact = compact
-            for button in self._buttons:
+        return self.width() < required
+
+    def refresh(self) -> None:
+        self.layoutChanged.emit()
+
+    def set_compact(self, compact: bool) -> None:
+        self._compact = compact
+        self._mode_applied = True
+        for button in self._buttons:
+            if compact:
+                width = self.COMPACT_SIZE + (
+                    self.MENU_EXTRA_WIDTH
+                    if isinstance(button, _RecentFooterButton) else 0
+                )
+            else:
+                width = self.FULL_WIDTH
+            if button.width() != width or button.minimumWidth() != width:
+                button.setFixedWidth(width)
+            if isinstance(button, _RecentFooterButton):
+                button.set_icon_only(compact)
+                button.setToolButtonStyle(
+                    Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                    else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                )
+                style = self._styles[button]
                 if compact:
-                    width = self.COMPACT_SIZE + (
-                        self.MENU_EXTRA_WIDTH
-                        if isinstance(button, _RecentFooterButton) else 0
-                    )
-                    button.setFixedWidth(width)
-                else:
-                    button.setMinimumWidth(0)
-                    button.setMaximumWidth(self.FULL_WIDTH)
-                    button.setSizePolicy(
-                        QSizePolicy.Policy.Ignored,
-                        QSizePolicy.Policy.Fixed,
-                    )
-                if isinstance(button, _RecentFooterButton):
-                    button.set_icon_only(compact)
-                    button.setToolButtonStyle(
-                        Qt.ToolButtonStyle.ToolButtonIconOnly if compact
-                        else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-                    )
-                    # Keep both click-on-latest and dropdown available.
-                    style = self._styles[button]
-                    if compact:
-                        style += (
-                            "QToolButton::menu-button { width: 20px; }"
-                        )
-                    button.setStyleSheet(style)
-                elif isinstance(button, QToolButton):
-                    button.setToolButtonStyle(
-                        Qt.ToolButtonStyle.ToolButtonIconOnly if compact
-                        else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-                    )
-                    button.setToolTip(
-                        f"{self._labels[button]}\n{self._tooltips[button]}"
-                        if compact else self._tooltips[button]
-                    )
-                elif isinstance(button, QPushButton):
-                    button.setText("" if compact else self._labels[button])
-                    button.setToolTip(
-                        f"{self._labels[button]}\n{self._tooltips[button]}"
-                        if compact else self._tooltips[button]
-                    )
-        finally:
-            self._updating = False
+                    style += "QToolButton::menu-button { width: 20px; }"
+                button.setStyleSheet(style)
+            elif isinstance(button, QToolButton):
+                button.setToolButtonStyle(
+                    Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                    else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                )
+                button.setText(self._labels[button])
+                button.setToolTip(
+                    f"{self._labels[button]}\n{self._tooltips[button]}"
+                    if compact else self._tooltips[button]
+                )
+            elif isinstance(button, QPushButton):
+                button.setText("" if compact else self._labels[button])
+                button.setToolTip(
+                    f"{self._labels[button]}\n{self._tooltips[button]}"
+                    if compact else self._tooltips[button]
+                )
 
 
 class WorkflowWindow(QMainWindow):
@@ -420,15 +372,14 @@ class WorkflowWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(SPACE_XXL, SPACE_SM, SPACE_XL, SPACE_XL)
+        root.setContentsMargins(SPACE_XXL, 0, SPACE_XL, 0)
         root.setSpacing(SPACE_SM)
 
 
         # Fixed navigation is separate from the scrollable guided cards.
         # Keep these controls small and neutral, like the Results controls.
         def navigation_group(parent: QWidget, name: str) -> _HeaderActionBar:
-            inset = SPACE_SM if name == "workflowResultsNavigation" else 0
-            return _HeaderActionBar(parent, name, inset=inset)
+            return _HeaderActionBar(parent, name)
 
         def navigation_button(
             group: _HeaderActionBar,
@@ -441,14 +392,14 @@ class WorkflowWindow(QMainWindow):
         ) -> QToolButton:
             button = (
                 _RecentFooterButton(label, group)
-                if recent_menu else QToolButton(group)
+                if recent_menu else CenteredIconToolButton(group)
             )
             if not recent_menu:
                 button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(18, 18))
+            button.setIconSize(QSize(24, 24))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedHeight(_HeaderActionBar.COMPACT_SIZE)
+            button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
             button.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
@@ -690,8 +641,10 @@ class WorkflowWindow(QMainWindow):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         footer_stack = QVBoxLayout(results_footer)
-        footer_stack.setContentsMargins(SPACE_SM, 0, SPACE_SM, SPACE_SM)
-        footer_stack.setSpacing(SPACE_SM)
+        footer_stack.setContentsMargins(
+            0, 0, 0, _HeaderActionBar.VERTICAL_GAP
+        )
+        footer_stack.setSpacing(_HeaderActionBar.VERTICAL_GAP)
         footer_separator = QFrame(results_footer)
         footer_separator.setObjectName("workflowResultsFooterSeparator")
         footer_separator.setFrameShape(QFrame.Shape.NoFrame)
@@ -713,12 +666,12 @@ class WorkflowWindow(QMainWindow):
             label: str, icon: QIcon, tooltip: str,
             callback: Callable[[], None],
         ) -> QToolButton:
-            button = QToolButton(results_footer)
+            button = CenteredIconToolButton(results_footer)
             button.setText(label)
             button.setIcon(icon)
             button.setIconSize(QSize(24, 24))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            button.setFixedHeight(62)
+            button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
             button.setSizePolicy(
                 QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
             )
@@ -759,10 +712,29 @@ class WorkflowWindow(QMainWindow):
         )
         self._results_footer = results_footer
 
-        # Avoid clipping the header or the fixed Results toolbar if the
-        # splitter is dragged towards the minimum allowed column width.
-        # The footer must not impose its full button labels on the
-        # minimum width of the Results column.
+        # All three headers switch modes together, even when only one column
+        # becomes too narrow for its full labels.
+        self._header_bars = (
+            structure_column_navigation, content_navigation, side_navigation,
+        )
+        self._structure_navigation = structure_column_navigation
+        self._calculate_navigation = content_navigation
+        self._syncing_headers = False
+        for bar in self._header_bars:
+            bar.layoutChanged.connect(self._sync_header_modes)
+        self._sync_header_modes()
+
+    def _sync_header_modes(self) -> None:
+        if getattr(self, "_syncing_headers", False):
+            return
+        self._syncing_headers = True
+        try:
+            compact = any(bar.needs_compact() for bar in self._header_bars)
+            for bar in self._header_bars:
+                if bar._compact != compact or not bar._mode_applied:
+                    bar.set_compact(compact)
+        finally:
+            self._syncing_headers = False
 
     def _open_recent(self, kind: str, path: str | None = None) -> None:
         """Use the latest path for the main button, or an explicit menu item."""
@@ -787,8 +759,9 @@ class WorkflowWindow(QMainWindow):
         self._start_over_button.setEnabled(has_workspace)
         self._structure_navigation.refresh()
         label = "Custom Calculation" if has_structure else "Custom Input File"
-        self._custom_button.setText(label)
-        self._custom_button.setAccessibleName(label)
+        self._calculate_navigation.set_button_label(
+            self._custom_button, label
+        )
 
         if snapshot == self._navigation_snapshot:
             return

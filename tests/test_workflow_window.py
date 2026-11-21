@@ -11,6 +11,9 @@ from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMess
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.dialogs import workflow_window as workflow_module
+from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import (
+    CenteredIconPushButton, CenteredIconToolButton,
+)
 from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
@@ -657,11 +660,38 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert all(
         btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
         and btn.iconSize().width() == 24
-        and btn.height() == 62
+        and btn.height() == 68
         for btn in footer.findChildren(QToolButton)
     )
     assert window._result_actions_widget.load_result_button.parentWidget() is navs[2]
+    assert all(
+        nav.layout().itemAt(nav.layout().count() - 1).spacerItem() is not None
+        for nav in navs
+    )
+    assert all(
+        nav.layout().itemAt(i).widget() is button
+        for nav in navs
+        for i, button in enumerate(nav._buttons)
+    )
     assert window._result_actions_widget.import_directory_button.parentWidget() is navs[2]
+    assert all(
+        isinstance(button, CenteredIconToolButton)
+        for button in (
+            window._recent_structures_button,
+            window._repeat_button,
+            window._recent_results_button,
+            window._project_browser_button,
+            window._settings_button,
+            window._close_button,
+        )
+    )
+    assert all(
+        isinstance(button, CenteredIconPushButton)
+        for button in (
+            window._result_actions_widget.load_result_button,
+            window._result_actions_widget.import_directory_button,
+        )
+    )
     assert [navs[2].layout().itemAt(i).widget() for i in range(3)] == [
         window._recent_results_button,
         window._result_actions_widget.load_result_button,
@@ -669,10 +699,10 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     ]
     assert window._result_actions_widget._import_controls_layout.count() == 0
     assert all(
-        bar.height() == 66
+        bar.height() == 93
         for bar in navs
     )
-    assert all(button.height() == 42 for bar in navs for button in bar._buttons)
+    assert all(button.height() == 68 for bar in navs for button in bar._buttons)
     # Fixed actions and Results utilities share the neutral card treatment.
     assert all(
         "border-left: 3px solid" in btn.styleSheet()
@@ -792,7 +822,9 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     application.processEvents()
     assert window.width() < 1350  # Must not be pinned by header labels.
     visible_and_within_columns()
-    assert window.findChild(QWidget, "workflowResultsNavigation")._compact
+    assert all(
+        bar._compact for bar in window._header_bars
+    )
     window.close()
 
 
@@ -810,22 +842,32 @@ def test_header_and_results_footer_have_mirrored_inset_separators(tmp_path):
     for header in headers:
         assert header.minimumSizeHint().width() == 0
         assert header.minimumWidth() == 0
-        assert header.height() == 66
-        # Keep a balanced gap between the centered buttons and the rule.
+        assert header.height() == 93
         for button in header._buttons:
             if not button.isHidden():
-                line_y = header.height() - 1
-                button_bottom = button.mapTo(
-                    header, QPoint(0, button.height())
-                ).y()
-                assert 10 <= line_y - button_bottom <= 14
+                button_top = button.mapTo(header, QPoint(0, 0)).y()
+                button_bottom = button_top + button.height()
+                assert abs(button_top - 12) <= 1
+                assert abs(header.height() - 1 - button_bottom - 12) <= 1
 
     footer = window._results_footer
     assert footer.frameShape() == QFrame.Shape.NoFrame
     assert footer.styleSheet() == ""
+    assert window.centralWidget().layout().contentsMargins().top() == 0
+    assert window.centralWidget().layout().contentsMargins().bottom() == 0
     separator = window.findChild(QFrame, "workflowResultsFooterSeparator")
-    assert separator.width() == footer.width() - 16
+    assert separator.width() == footer.width()
+    assert separator.x() == 0
     assert separator.height() == 1
+    assert footer.layout().contentsMargins().bottom() == 12
+    assert footer.layout().spacing() == 12
+    for button in footer.findChildren(QToolButton):
+        assert button.height() == 68
+        assert abs(
+            footer.height() - button.mapTo(
+                footer, QPoint(0, button.height())
+            ).y() - 12
+        ) <= 1
     window.close()
 
 
@@ -853,14 +895,23 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
                     - (bar.height() - button.height()) // 2
                 ) <= 2
     assert not window._result_actions_widget.load_result_button.text() == ""
+    assert all(not bar._compact for bar in columns)
+    assert all(
+        [button.width() for button in bar._buttons if not button.isHidden()]
+        == [160] * sum(not b.isHidden() for b in bar._buttons)
+        for bar in columns
+    )
 
     # A narrow Results pane switches all three controls to icon-only mode.
     window._layout_splitter.setSizes([1780, 330])
     application.processEvents()
     results = columns[2]
     assert results._compact
-    assert [b.width() for b in results._buttons] == [64, 42, 42]
-    assert all(b.height() == 42 for b in results._buttons)
+    assert all(bar._compact for bar in columns)
+    assert [b.width() for b in results._buttons] == [90, 68, 68]
+    assert [b.width() for b in columns[1]._buttons] == [90, 68, 68]
+    assert window._recent_structures_button.width() == 90
+    assert all(b.height() == 68 for b in results._buttons)
     assert "width: 20px" in window._recent_results_button.styleSheet()
     assert window._recent_results_button.toolButtonStyle() == (
         Qt.ToolButtonStyle.ToolButtonIconOnly
@@ -871,6 +922,15 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         "Load Result\\n"
     )
     assert window._recent_results_button.menu() is not None
+    # Exercise custom painters both with labels and with menu arrows.
+    for button in (
+        window._recent_results_button,
+        window._repeat_button,
+        window._result_actions_widget.load_result_button,
+        window._result_actions_widget.import_directory_button,
+        window._settings_button,
+    ):
+        assert not button.grab().isNull()
     assert window._recent_results_button.width() == (
         results.COMPACT_SIZE + results.MENU_EXTRA_WIDTH
     )
@@ -881,6 +941,9 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert not results._compact
     assert window._result_actions_widget.load_result_button.text() == "Load Result"
     assert [b.width() for b in results._buttons] == [160, 160, 160]
+    for button in results._buttons:
+        assert not button.grab().isNull()
+    assert all(not bar._compact for bar in columns)
     window.close()
 
 
