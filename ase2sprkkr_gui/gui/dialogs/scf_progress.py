@@ -94,9 +94,14 @@ class ScfProgressPage(QWidget):
 
         self.fermi_axis, self.error_axis = self.figure.subplots(2, 1, sharex=True)
         self.fermi_line, = self.fermi_axis.plot([], [], marker="o", markersize=3)
-        self.error_line, = self.error_axis.plot([], [], marker="o", markersize=3)
+        self.error_line, = self.error_axis.plot(
+            [], [], marker="o", markersize=3, label="Potential RMS (V)"
+        )
+        self.b_error_line, = self.error_axis.plot(
+            [], [], marker="s", markersize=3, label="Field RMS (B)"
+        )
         self.fermi_axis.set_ylabel("Fermi energy (Ry)")
-        self.error_axis.set_ylabel("Convergence error\nmax RMS(V, B)")
+        self.error_axis.set_ylabel("Convergence errors (RMS)")
         self.error_axis.set_xlabel("SCF iteration")
         self.error_axis.set_yscale("log")
         self.target_line = None
@@ -104,6 +109,7 @@ class ScfProgressPage(QWidget):
             axis.grid(True, alpha=0.3)
         # Show the convergence target before the first iteration if known.
         self._sync_target()
+        self.error_axis.legend(loc="upper right")
         self._set_error_limits()
 
         # Coalesce potentially frequent output callbacks into a single redraw.
@@ -134,7 +140,11 @@ class ScfProgressPage(QWidget):
 
     def _set_error_limits(self) -> None:
         """Keep the target and every measured error visible on the log axis."""
-        values = [max(item.convergence_error, 1e-16) for item in self.tracker.iterations]
+        values = [
+            max(abs(value), 1e-16)
+            for item in self.tracker.iterations
+            for value in (item.error, item.b_error)
+        ]
         if self.tracker.target_error is not None:
             values.append(self.tracker.target_error)
         if values:
@@ -146,9 +156,12 @@ class ScfProgressPage(QWidget):
         if iterations:
             x = [item.iteration for item in iterations]
             self.fermi_line.set_data(x, [item.fermi_energy for item in iterations])
-            # A zero reported error means convergence, not a valid log coordinate.
+            # Zero RMS errors are clamped only for the logarithmic display.
             self.error_line.set_data(
-                x, [max(item.convergence_error, 1e-16) for item in iterations]
+                x, [max(abs(item.error), 1e-16) for item in iterations]
+            )
+            self.b_error_line.set_data(
+                x, [max(abs(item.b_error), 1e-16) for item in iterations]
             )
             for axis in (self.fermi_axis, self.error_axis):
                 axis.relim()
