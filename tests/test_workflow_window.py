@@ -649,11 +649,15 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert [btn.text() for btn in footer.findChildren(QToolButton)] == [
         "Project Browser", "Settings", "Close",
     ]
-    assert footer.styleSheet().startswith("QGroupBox")
+    assert footer.frameShape() == QFrame.Shape.NoFrame
+    separator = window.findChild(QFrame, "workflowResultsFooterSeparator")
+    assert separator.parentWidget() is footer
+    assert separator.height() == 1
+    assert "background-color:" in separator.styleSheet()
     assert all(
         btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
         and btn.iconSize().width() == 24
-        and btn.minimumHeight() == 72
+        and btn.height() == 62
         for btn in footer.findChildren(QToolButton)
     )
     assert window._result_actions_widget.load_result_button.parentWidget() is navs[2]
@@ -665,7 +669,7 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     ]
     assert window._result_actions_widget._import_controls_layout.count() == 0
     assert all(
-        bar.height() == 56
+        bar.height() == 58
         for bar in navs
     )
     assert all(button.height() == 42 for bar in navs for button in bar._buttons)
@@ -773,9 +777,36 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     window._layout_splitter.moveSplitter(850, 1)
     application.processEvents()
     visible_and_within_columns()
-    window.resize(1450, 750)
+    window.resize(1100, 750)
     application.processEvents()
+    assert window.width() < 1350  # Must not be pinned by header labels.
     visible_and_within_columns()
+    assert window.findChild(QWidget, "workflowResultsNavigation")._compact
+    window.close()
+
+
+def test_header_and_results_footer_have_mirrored_inset_separators(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.showNormal()
+    window.resize(1600, 850)
+    application.processEvents()
+    headers = (
+        window.findChild(QWidget, "workflowStructureNavigation"),
+        window.findChild(QWidget, "workflowCalculationNavigation"),
+        window.findChild(QWidget, "workflowResultsNavigation"),
+    )
+    for header in headers:
+        assert header.minimumSizeHint().width() == 0
+        assert header.minimumWidth() == 0
+        assert header.height() == 58
+
+    footer = window._results_footer
+    assert footer.frameShape() == QFrame.Shape.NoFrame
+    assert footer.styleSheet() == ""
+    separator = window.findChild(QFrame, "workflowResultsFooterSeparator")
+    assert separator.width() == footer.width() - 16
+    assert separator.height() == 1
     window.close()
 
 

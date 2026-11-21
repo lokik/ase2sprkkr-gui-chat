@@ -4,12 +4,11 @@ from threading import Thread
 from pathlib import Path
 from typing import Any, Callable
 
-from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
+from PyQt6.QtCore import QObject, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QIcon, QKeySequence, QPainter, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLayout,
     QLabel,
@@ -19,6 +18,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStyle,
+    QStyleOptionToolButton,
+    QStylePainter,
     QSizePolicy,
     QSplitter,
     QToolButton,
@@ -52,7 +53,6 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XS,
     SPACE_XXL,
     button_stylesheet,
-    group_panel_stylesheet,
     heading_font,
     secondary_text_stylesheet,
 )
@@ -128,6 +128,52 @@ class _RecentFooterButton(QToolButton):
         super().resizeEvent(event)
         self._refresh_label()
 
+    def paintEvent(self, event) -> None:
+        # Native QToolButton places the icon beside the first line, not at
+        # the vertical middle of a two-line recent-file label.
+        if self._icon_only or not self._recent_path:
+            super().paintEvent(event)
+            return
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.icon = QIcon()
+        option.text = ""
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+        rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ToolButton, option,
+            QStyle.SubControl.SC_ToolButton, self,
+        )
+        icon_size = self.iconSize()
+        icon = self.icon().pixmap(
+            icon_size,
+            QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled,
+        )
+        icon_x = rect.left() + 7
+        painter.drawPixmap(
+            icon_x, rect.center().y() - icon.height() // 2, icon,
+        )
+        text_left = icon_x + icon_size.width() + 6
+        text_width = max(1, rect.right() - text_left - 3)
+        line_height = self.fontMetrics().height()
+        y = rect.center().y() - line_height
+        title = self.fontMetrics().elidedText(
+            self._title, Qt.TextElideMode.ElideRight, text_width,
+        )
+        filename = self.text().split("\n", 1)[-1]
+        painter.setPen(self.palette().color(
+            QPalette.ColorRole.ButtonText if self.isEnabled()
+            else QPalette.ColorRole.PlaceholderText
+        ))
+        painter.drawText(
+            QRect(text_left, y, text_width, line_height),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, title,
+        )
+        painter.drawText(
+            QRect(text_left, y + line_height, text_width, line_height),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, filename,
+        )
+
     def _refresh_label(self) -> None:
         if self._recent_path:
             # The folder prefix carries no useful information in a small
@@ -172,8 +218,8 @@ class _HeaderActionBar(QWidget):
     def __init__(self, parent: QWidget, name: str, *, inset: int = 0):
         super().__init__(parent)
         self.setObjectName(name)
-        self.setFixedHeight(56)
-        self.setMinimumWidth(0)
+        self.setFixedHeight(58)
+        self.setMinimumSize(0, 58)
         self.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
@@ -207,6 +253,27 @@ class _HeaderActionBar(QWidget):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
         self.refresh()
+
+    def minimumSizeHint(self) -> QSize:
+        # Prevent full-text button size hints from imposing a window minimum
+        # before the header can switch to its icon-only layout.
+        return QSize(0, self.height())
+
+    def sizeHint(self) -> QSize:
+        return QSize(0, self.height())
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        line = blend(
+            self.palette().color(QPalette.ColorRole.Window),
+            self.palette().color(QPalette.ColorRole.Mid), .42,
+        )
+        painter = QPainter(self)
+        inset = SPACE_SM
+        painter.fillRect(
+            inset, self.height() - 1,
+            max(0, self.width() - 2 * inset), 1, line,
+        )
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -589,19 +656,33 @@ class WorkflowWindow(QMainWindow):
             )
             side_navigation.register(button)
 
-        # Restore the original Results-only toolbar: a single framed group
-        # with three equally-sized icon-over-text buttons.
-        # Its three global commands are always visible, independently of scroll.
-        results_footer = QGroupBox("", side)
+        # A matching inset separator above the Results-only utility toolbar,
+        # without a blue enclosing frame.
+        results_footer = QFrame(side)
         results_footer.setObjectName("workflowResultsFooter")
+        results_footer.setFrameShape(QFrame.Shape.NoFrame)
         results_footer.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        footer_layout = QHBoxLayout(results_footer)
-        footer_layout.setContentsMargins(
-            SPACE_SM, SPACE_SM, SPACE_SM, SPACE_SM
+        footer_stack = QVBoxLayout(results_footer)
+        footer_stack.setContentsMargins(SPACE_SM, 0, SPACE_SM, SPACE_SM)
+        footer_stack.setSpacing(SPACE_SM)
+        footer_separator = QFrame(results_footer)
+        footer_separator.setObjectName("workflowResultsFooterSeparator")
+        footer_separator.setFrameShape(QFrame.Shape.NoFrame)
+        footer_separator.setFixedHeight(1)
+        line_color = blend(
+            self.palette().color(QPalette.ColorRole.Window),
+            self.palette().color(QPalette.ColorRole.Mid), .42,
         )
-        footer_layout.setSpacing(SPACE_XS)
+        footer_separator.setStyleSheet(
+            f"background-color: {line_color.name()};"
+        )
+        footer_stack.addWidget(footer_separator)
+        footer_row = QHBoxLayout()
+        footer_row.setContentsMargins(0, 0, 0, 0)
+        footer_row.setSpacing(SPACE_XS)
+        footer_stack.addLayout(footer_row)
 
         def footer_button(
             label: str, icon: QIcon, tooltip: str,
@@ -612,17 +693,17 @@ class WorkflowWindow(QMainWindow):
             button.setIcon(icon)
             button.setIconSize(QSize(24, 24))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            button.setMinimumHeight(72)
+            button.setFixedHeight(62)
             button.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
             )
             button.setStyleSheet(
-                button_stylesheet(self.palette(), selector="QToolButton")
+                button_stylesheet(button.palette(), selector="QToolButton")
             )
             button.setToolTip(tooltip)
             button.setAccessibleName(label)
             button.clicked.connect(callback)
-            footer_layout.addWidget(button, 1)
+            footer_row.addWidget(button, 1)
             return button
 
         self._project_browser_button = footer_button(
@@ -648,11 +729,6 @@ class WorkflowWindow(QMainWindow):
             "Close Ase2sprkkr (Ctrl+Q)", self.close,
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
-        results_footer.setStyleSheet(
-            group_panel_stylesheet(
-                self.palette(), self.palette().color(QPalette.ColorRole.Highlight)
-            )
-        )
         side_layout.addWidget(
             results_footer, alignment=Qt.AlignmentFlag.AlignBottom
         )
@@ -660,9 +736,8 @@ class WorkflowWindow(QMainWindow):
 
         # Avoid clipping the header or the fixed Results toolbar if the
         # splitter is dragged towards the minimum allowed column width.
-        side.setMinimumWidth(max(
-            side.minimumWidth(), results_footer.minimumSizeHint().width()
-        ))
+        # The footer must not impose its full button labels on the
+        # minimum width of the Results column.
 
     def _open_recent(self, kind: str, path: str | None = None) -> None:
         """Use the latest path for the main button, or an explicit menu item."""
