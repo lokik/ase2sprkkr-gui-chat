@@ -351,3 +351,78 @@ def test_dos_info_unknown_total_does_not_show_percentage():
     assert window._dos_progress.last_info.text() == "13 energy points done."
     assert window._dos_progress.progress.isHidden()
     window.close()
+
+
+def test_finished_monitor_adds_result_list_and_lazy_plot(_qt_application):
+    from types import SimpleNamespace
+    from matplotlib import pyplot as plt
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
+
+    calls = []
+
+    class PlotFile:
+        name = "dos"
+        display_name = "Density of states"
+        info = "DOS data"
+
+        def value_label(self):
+            return "<dos file>"
+
+        def actions(self):
+            return ("plot",)
+
+        def path(self):
+            return "/tmp/example.dos"
+
+        def parsed_file(self):
+            return self
+
+        def plot(self, *, show):
+            calls.append(show)
+            plt.figure()
+
+    result = SimpleNamespace(output_values={"dos": PlotFile()})
+    window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    window._on_finished(SimpleNamespace(result=result))
+
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output", "Results", "example.dos"
+    ]
+    browser = window._completed_pages.results_widget
+    assert isinstance(browser, ResultActionsWidget)
+    assert window._tabs.currentWidget() is browser
+    assert browser._row_count == 1
+    assert not calls
+
+    window._tabs.setCurrentIndex(2)
+    _qt_application.processEvents()
+    assert calls == [False]
+    assert window._tabs.widget(2).findChildren(FigureCanvasQTAgg)
+    window._tabs.setCurrentIndex(1)
+    window._tabs.setCurrentIndex(2)
+    _qt_application.processEvents()
+    assert calls == [False]
+    window.close()
+
+
+def test_finished_monitor_has_no_plots_when_output_is_not_plottable(_qt_application):
+    from types import SimpleNamespace
+
+    class File:
+        name = "output"
+        display_name = "Output file"
+        info = ""
+
+        def value_label(self):
+            return "example.out"
+
+        def actions(self):
+            return ("open",)
+
+    window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    window._on_finished(SimpleNamespace(output_values={"output": File()}))
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output", "Results"
+    ]
+    window.close()

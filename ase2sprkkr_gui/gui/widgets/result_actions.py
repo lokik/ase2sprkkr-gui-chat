@@ -127,11 +127,13 @@ class ResultActionsWidget(QWidget):
         empty_text: str = "No result loaded.",
         show_history_button: bool = True,
         show_assignment_controls: bool = True,
+        single_result: bool = False,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self._action_handler = action_handler
         self._show_values_without_actions = show_values_without_actions
+        self._single_result = single_result
         self._current_presentation: ResultPresentation | None = None
         self._empty_text = empty_text
         self._row_count = 0
@@ -216,6 +218,9 @@ class ResultActionsWidget(QWidget):
             )
             top_row.addWidget(button, 1)
         layout.addLayout(top_row)
+        if single_result:
+            self.load_result_button.hide()
+            self.import_directory_button.hide()
 
         self.show_all_values_checkbox = QCheckBox("Show all values", self)
         self.show_all_values_checkbox.setObjectName("resultsShowAllValues")
@@ -494,7 +499,9 @@ class ResultActionsWidget(QWidget):
         self._recompute_button.setEnabled(recompute is not None)
         self._recompute_button.setText("Recompute")
         self._recompute_button.setToolTip(recompute.label if recompute else "")
-        self._record_actions.setVisible(self._current_presentation is not None)
+        self._record_actions.setVisible(
+            self._current_presentation is not None and not self._single_result
+        )
 
     def _use_selected_state(self) -> None:
         result_id = self.selected_result_id

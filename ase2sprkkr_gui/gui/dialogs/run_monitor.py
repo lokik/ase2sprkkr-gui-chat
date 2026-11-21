@@ -145,13 +145,14 @@ class RunMonitorWindow(QDialog):
             info_page = self._bsf_progress
         else:
             info_page = None
+        # Every monitor can gain Results and Plot tabs after completion.
+        # Preserve INFO when the task supplies a live progress page.
+        self._tabs = QTabWidget(self)
         if info_page is not None:
-            self._tabs = QTabWidget(self)
             self._tabs.addTab(info_page, "INFO")
-            self._tabs.addTab(self._output, "Output")
-            layout.addWidget(self._tabs, 1)
-        else:
-            layout.addWidget(self._output, 1)
+        self._tabs.addTab(self._output, "Output")
+        layout.addWidget(self._tabs, 1)
+        self._completed_pages = None
 
         buttons = QHBoxLayout()
         self._stop_btn = QPushButton("Stop monitoring" if observation_only else "Stop", self)
@@ -377,5 +378,15 @@ class RunMonitorWindow(QDialog):
         try:
             if self._finished_callback is not None:
                 self._finished_callback(result)
+            # Adoption has completed, so output files and provenance are ready.
+            native_result = getattr(result, "result", result)
+            if hasattr(native_result, "output_values") and not self._close_requested:
+                try:
+                    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedRunPages
+
+                    self._completed_pages = CompletedRunPages(self._tabs, self)
+                    self._completed_pages.show_result(native_result)
+                except Exception:  # noqa: BLE001 - presentation must not invalidate a run
+                    logger.exception("Could not display completed calculation results")
         finally:
             self._stop_btn.setEnabled(False)
