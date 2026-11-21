@@ -40,7 +40,6 @@ def test_guided_has_preset_menu(tmp_path, monkeypatch):
 
 
 def test_replace_preset_resets_settings_but_preserves_dataset(tmp_path, monkeypatch):
-    from PyQt6.QtWidgets import QInputDialog
     from ase2sprkkr.input_parameters.presets import PresetStore
     from ase2sprkkr_gui.gui.flows import presets as preset_flows
     from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
@@ -72,7 +71,6 @@ def test_replace_preset_resets_settings_but_preserves_dataset(tmp_path, monkeypa
 
 
 def test_merge_preset_keeps_unmentioned_settings(tmp_path, monkeypatch):
-    from PyQt6.QtWidgets import QInputDialog
     from ase2sprkkr.input_parameters.presets import PresetStore
     from ase2sprkkr_gui.gui.flows import presets as preset_flows
     from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
@@ -117,7 +115,6 @@ def test_save_preset_does_not_change_editor_history(tmp_path, monkeypatch):
 
 
 def test_merge_and_resave_preserves_explicit_false_at_default(tmp_path, monkeypatch):
-    from PyQt6.QtWidgets import QInputDialog
     from ase2sprkkr.input_parameters.presets import PresetStore
     from ase2sprkkr_gui.gui.flows import presets as preset_flows
     from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
@@ -142,7 +139,6 @@ def test_merge_and_resave_preserves_explicit_false_at_default(tmp_path, monkeypa
 
 
 def test_guided_bsf_preset_can_switch_task_on_replace(tmp_path, monkeypatch):
-    from PyQt6.QtWidgets import QInputDialog
     from ase2sprkkr.input_parameters.presets import PresetStore
     from ase2sprkkr_gui.gui.flows import presets as preset_flows
     from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
@@ -166,7 +162,6 @@ def test_guided_bsf_preset_can_switch_task_on_replace(tmp_path, monkeypatch):
 
 
 def test_expert_schema_editor_discovers_both_bsf_tasks(tmp_path, monkeypatch):
-    from PyQt6.QtWidgets import QInputDialog
     from ase2sprkkr.input_parameters.presets import PresetStore
     from ase2sprkkr_gui.gui.flows import presets as preset_flows
     from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
