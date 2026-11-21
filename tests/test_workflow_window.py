@@ -660,7 +660,8 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert footer.layout().itemAt(0).spacerItem() is not None
     assert all(
         btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-        and btn.iconSize().width() == 24
+        and btn.iconSize().width() == 27
+        and btn.iconSize().height() == 22
         and btn.height() == 68
         for btn in footer.findChildren(QToolButton)
     )
@@ -705,6 +706,10 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
         for bar in navs
     )
     assert all(button.height() == 68 for bar in navs for button in bar._buttons)
+    assert all(
+        button.iconSize().width() == 27 and button.iconSize().height() == 22
+        for bar in navs for button in bar._buttons
+    )
     # Fixed actions and Results utilities share the neutral card treatment.
     assert all(
         "border-left: 3px solid" in btn.styleSheet()
