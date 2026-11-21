@@ -180,9 +180,9 @@ class _HeaderActionBar(QWidget):
 
     # Horizontal navigation buttons are deliberately wide and low; retain
     # the header height so only the buttons' silhouette changes.
-    FULL_WIDTH = 176
+    FULL_WIDTH = 200
     BUTTON_HEIGHT = 58
-    COMPACT_SIZE = 76
+    COMPACT_SIZE = BUTTON_HEIGHT  # Square icon-only main button.
     MENU_EXTRA_WIDTH = 22
     VERTICAL_GAP = 12  # Also used by the unchanged Results utility footer.
     BAR_HEIGHT = 93
@@ -222,7 +222,7 @@ class _HeaderActionBar(QWidget):
         self._button_row.addWidget(
             button, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        button.setIconSize(QSize(27, 22))
+        button.setIconSize(QSize(26, 26))
         button.setFixedHeight(self.BUTTON_HEIGHT)
         button.setMinimumWidth(0)
         button.setSizePolicy(
@@ -287,7 +287,7 @@ class _HeaderActionBar(QWidget):
                 )
                 style = self._styles[button]
                 if compact:
-                    style += "QToolButton::menu-button { width: 20px; }"
+                    style += "QToolButton::menu-button { width: 22px; }"
                 button.setStyleSheet(style)
             elif isinstance(button, QToolButton):
                 button.setToolButtonStyle(
@@ -498,6 +498,7 @@ class WorkflowWindow(QMainWindow):
 
         self._calculate_notice = QLabel(content)
         self._calculate_notice.setWordWrap(True)
+        self._calculate_notice.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self._calculate_notice.setStyleSheet(
             secondary_text_stylesheet(self.palette())
         )
@@ -656,7 +657,7 @@ class WorkflowWindow(QMainWindow):
             button = CenteredIconToolButton(results_footer)
             button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(27, 22))
+            button.setIconSize(QSize(26, 26))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             button.setFixedHeight(68)
             button.setSizePolicy(
@@ -853,7 +854,7 @@ class WorkflowWindow(QMainWindow):
         self._update_navigation(snapshot)
         if atoms is None:
             self._calculate_notice.setText(
-                "Create or load a structure to see available guided calculations."
+                "First, create or load the structure."
             )
         else:
             self._calculate_notice.setText(
