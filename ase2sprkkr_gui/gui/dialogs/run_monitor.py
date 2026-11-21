@@ -75,6 +75,7 @@ class RunMonitorWindow(QDialog):
         autostart: bool = True,
         observation_only: bool = False,
         scf: bool = False,
+        scf_tolerance: float | None = None,
     ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -113,7 +114,7 @@ class RunMonitorWindow(QDialog):
         self._output.setMaximumBlockCount(MAX_OUTPUT_BLOCKS)
         self._scf_progress: ScfProgressPage | None = None
         if scf:
-            self._scf_progress = ScfProgressPage(self)
+            self._scf_progress = ScfProgressPage(self, target_error=scf_tolerance)
             self._tabs = QTabWidget(self)
             self._tabs.addTab(self._scf_progress, "INFO")
             self._tabs.addTab(self._output, "Output")
