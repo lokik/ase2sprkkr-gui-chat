@@ -432,6 +432,7 @@ class WorkflowWindow(QMainWindow):
         )
         structure_layout = QVBoxLayout(structure_column)
         structure_layout.setContentsMargins(0, 0, 0, 0)
+        structure_layout.setSpacing(SPACE_SM)
         structure_column_navigation = navigation_group(
             structure_column, "workflowStructureNavigation"
         )
@@ -490,6 +491,7 @@ class WorkflowWindow(QMainWindow):
         )
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(SPACE_SM)
         content_navigation = navigation_group(
             content, "workflowCalculationNavigation"
         )
