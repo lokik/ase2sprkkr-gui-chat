@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from pathlib import Path
@@ -127,6 +128,9 @@ class WorkspaceController(QObject):
         self._workspace = workspace or WorkspaceState()
         self._conflict_resolver = conflict_resolver
         self._results = ResultStore()
+        self._external_result_batch_depth = 0
+        self._pending_external_result = None
+        self._pending_external_selection: int | None = None
         # A native CLUPOT may be opened read-only without its host POTFIL.
         # It is a loaded file, not an editable Atoms document or unsaved work.
         self._unresolved_cluster = None
@@ -796,6 +800,36 @@ class WorkspaceController(QObject):
             record=record,
         )
 
+    @contextmanager
+    def batch_external_results(self):
+        """Publish one result change and selection after a batch of imports."""
+        self._external_result_batch_depth += 1
+        try:
+            yield
+        finally:
+            self._external_result_batch_depth -= 1
+            if self._external_result_batch_depth == 0:
+                changed = self._pending_external_result
+                selected = self._pending_external_selection
+                self._pending_external_result = None
+                self._pending_external_selection = None
+                if changed is not None:
+                    self.resultChanged.emit(changed)
+                if selected is not None:
+                    self.resultSelectionRequested.emit(selected)
+
+    def _notify_external_result(self, result: Any | None, selected_id: int | None) -> None:
+        if self._external_result_batch_depth:
+            if result is not None:
+                self._pending_external_result = result
+            if selected_id is not None:
+                self._pending_external_selection = selected_id
+        else:
+            if result is not None:
+                self.resultChanged.emit(result)
+            if selected_id is not None:
+                self.resultSelectionRequested.emit(selected_id)
+
     def adopt_external_result(
         self,
         loaded: LoadedResult,
@@ -803,6 +837,7 @@ class WorkspaceController(QObject):
         select_result: bool = False,
     ) -> ResultAdoption:
         """Record an imported result without implicitly replacing the workspace."""
+        previous_count = len(self._results)
         record = self._results.add_external_result(
             loaded.result,
             atoms=loaded.atoms,
@@ -813,9 +848,10 @@ class WorkspaceController(QObject):
             persistent_ref=loaded.persistent_ref,
             source_versions=loaded.source_versions,
         )
-        self.resultChanged.emit(loaded.result)
-        if select_result:
-            self.resultSelectionRequested.emit(record.id)
+        self._notify_external_result(
+            loaded.result if len(self._results) != previous_count else None,
+            record.id if select_result else None,
+        )
         return self._result_adoption(loaded, record=record)
 
     def adopt_calculation_result(

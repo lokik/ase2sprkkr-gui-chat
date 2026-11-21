@@ -124,6 +124,7 @@ def load_result(
     output_fallback: str | Path | None = None,
     persistent_ref: str | None = None,
     embedding_host=None,
+    reusable_potential: LoadedResult | None = None,
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
     output, potential = _result_files(result, fallback_directory)
@@ -168,6 +169,16 @@ def load_result(
                 atoms, potential_error = result.potential.atoms, None
             except Exception as exc:  # noqa: BLE001 - corrupted native file
                 atoms, potential_error = None, exc
+        elif (
+            reusable_potential is not None
+            and not getattr(result, "is_embedded", False)
+            and reusable_potential.potential_path == potential
+            and reusable_potential.atoms is not None
+            and reusable_potential.potential_error is None
+        ):
+            # The selected output has already parsed exactly this POTFIL.
+            # Preserve the per-result manifest checks above and below.
+            atoms, potential_error = reusable_potential.atoms, None
         else:
             atoms, potential_error = _load_potential(
                 potential, embedding_host=embedding_host
@@ -235,11 +246,14 @@ def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
             result = TaskResult.from_file(path)
             if str(getattr(result, "task_name", "")).casefold() != "scf":
                 continue
-            candidate = load_result(
-                result, fallback_directory=directory, output_fallback=path
+            # Compare provenance before loading the potentially large POTFIL.
+            _output, potential = _result_files(result, directory)
+            if potential != target_potential:
+                continue
+            return load_result(
+                result, fallback_directory=directory, output_fallback=path,
+                reusable_potential=loaded,
             )
-            if candidate.potential_path == target_potential:
-                return candidate
         except Exception:  # noqa: BLE001 - optional, possibly corrupt output
             continue
     return None

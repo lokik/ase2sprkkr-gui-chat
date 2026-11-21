@@ -70,3 +70,31 @@ def test_persisted_result_enters_application_history_and_recompute(tmp_path):
     assert GuidedInputParametersDialog in seen_dialogs
     assert ProfileSelectionDialog in seen_dialogs
     assert gui.controller.input_parameters.task_name.lower() == 'dos'
+
+
+def test_reopening_persistent_run_does_not_reinterpret_its_potential(tmp_path, monkeypatch):
+    from ase2sprkkr_gui import main as gui_main
+
+    _application = QApplication.instance() or QApplication([])
+    source, run = _finished_dos_run(tmp_path)
+    gui = GuiApplication(
+        recent_files_path=tmp_path / "recent.json",
+        settings_path=tmp_path / "settings.json",
+        persistent_jobs=source,
+    )
+    gui.persistent_jobs_controller.load_result(run.id)
+    first = gui.controller.result_store.result_for_external_source(
+        None, persistent_ref=run.id,
+    )
+    assert first is not None
+
+    def should_not_reinterpret(*_args, **_kwargs):
+        raise AssertionError("already adopted result must not reparse its potential")
+
+    monkeypatch.setattr(gui_main, "interpret_result", should_not_reinterpret)
+    gui.persistent_jobs_controller.load_result(run.id)
+    again = gui.controller.result_store.result_for_external_source(
+        None, persistent_ref=run.id,
+    )
+    assert again is first
+    assert len(gui.controller.result_store.results) == 1

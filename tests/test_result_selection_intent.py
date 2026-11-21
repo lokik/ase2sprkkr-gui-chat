@@ -57,3 +57,43 @@ def test_explicit_import_selects_new_result_but_background_update_does_not(tmp_p
 
     window.close()
     widget.close()
+
+
+def test_result_import_rebuilds_tree_once_and_selection_does_not_rebuild(tmp_path, monkeypatch):
+    _application = QApplication.instance() or QApplication([])
+    gui = GuiApplication(
+        recent_files_path=tmp_path / "recent.json",
+        settings_path=tmp_path / "settings.json",
+    )
+    widget = ResultActionsWidget(lambda _value, _action: None)
+    window = QWidget()
+    window.result_actions_widget = widget
+    rebuilds = []
+    original = widget.set_model
+
+    def observe(model):
+        rebuilds.append(model)
+        return original(model)
+
+    monkeypatch.setattr(widget, "set_model", observe)
+    gui._wire_result_actions(window)
+    rebuilds.clear()  # Presenter initial projection.
+
+    first = gui.controller.adopt_external_result(_loaded("first"), select_result=True)
+    assert first.record is not None
+    assert len(rebuilds) == 1
+
+    second = gui.controller.adopt_external_result(_loaded("second"), select_result=True)
+    assert second.record is not None
+    assert len(rebuilds) == 2
+    assert widget.selected_result_id == second.record.id
+
+    with gui.controller.batch_external_results():
+        for name in ("third", "fourth", "fifth"):
+            final = gui.controller.adopt_external_result(_loaded(name), select_result=True)
+        assert len(rebuilds) == 2
+
+    assert len(rebuilds) == 3
+    assert widget.selected_result_id == final.record.id
+    window.close()
+    widget.close()

@@ -231,6 +231,13 @@ class GuiApplication(QObject):
         select_result: bool,
     ) -> None:
         """Bridge persistent execution results into normal workspace history."""
+        existing = self.controller.result_store.result_for_external_source(
+            None, persistent_ref=job_id,
+        )
+        if existing is not None:
+            if select_result:
+                self.controller.resultSelectionRequested.emit(existing.id)
+            return
         job = self.persistent_jobs.job(job_id)
         loaded = interpret_result(
             result,

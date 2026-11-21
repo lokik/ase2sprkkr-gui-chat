@@ -627,6 +627,18 @@ class ResultStore:
         imported: bool,
     ) -> ResultRecord:
         """Snapshot one result record completely before anything is committed."""
+        captured_files = capture_result_files(result)
+        output_version = None
+        if output_path is not None:
+            path = Path(output_path).expanduser().absolute()
+            # The stdout is normally among captured result files. Reuse its
+            # content digest instead of reading the full output a second time.
+            output_version = next(
+                (version for version in captured_files.values() if version.path == path),
+                None,
+            )
+            if output_version is None:
+                output_version = result_file_version(result, output_path)
         return ResultRecord(
             id=self._next_result_id,
             result=result,
@@ -636,13 +648,11 @@ class ResultStore:
             output_state_id=output_state_id,
             input_parameters=_snapshot_input_parameters(input_parameters),
             directory=directory,
-            result_files=capture_result_files(result),
+            result_files=captured_files,
             persistent_ref=persistent_ref,
             restart_scf=restart_scf,
             output_path=output_path,
-            output_version=(
-                result_file_version(result, output_path) if output_path is not None else None
-            ),
+            output_version=output_version,
             potential_path=potential_path,
             imported=imported,
         )
