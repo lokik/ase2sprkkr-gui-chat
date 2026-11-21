@@ -3,7 +3,7 @@ from __future__ import annotations
 from threading import Thread
 from typing import Any, Callable
 
-from PyQt6.QtCore import QEvent, QObject, QPoint, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
@@ -49,7 +49,6 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XXL,
     button_stylesheet,
     heading_font,
-    palette_tint,
     secondary_text_stylesheet,
 )
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
@@ -139,23 +138,33 @@ class _RecentFooterButton(QToolButton):
 
 
 class _AlignedNavigationPanel(QFrame):
-    """One painted footer, aligned with the three resizable content columns."""
+    """One footer with three layout-managed groups tracking the main columns.
 
-    def __init__(self, columns: tuple[QWidget, QWidget, QWidget], parent: QWidget):
+    The old absolute widget positioning could shift the whole navigation
+    offscreen. Let Qt position the groups and synchronize *only* their widths.
+    """
+
+    def __init__(
+        self, columns: tuple[QWidget, QWidget, QWidget],
+        gaps: tuple[int, int], parent: QWidget,
+    ):
         super().__init__(parent)
         self.setObjectName("workflowNavigation")
         self.setFixedHeight(52)
         self._columns = columns
         self.groups = tuple(QWidget(self) for _ in columns)
-        # Column widths and positions are determined by the existing splitter
-        # and inner horizontal layout, not by independent footer stretches.
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        for i, group in enumerate(self.groups):
+            layout.addWidget(group)
+            if i < len(gaps):
+                layout.addSpacing(gaps[i])
         for column in columns:
             column.installEventFilter(self)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched in self._columns and event.type() in (
-            QEvent.Type.Resize, QEvent.Type.Move,
-        ):
+        if watched in self._columns and event.type() == QEvent.Type.Resize:
             self._align_columns()
         return super().eventFilter(watched, event)
 
@@ -171,8 +180,9 @@ class _AlignedNavigationPanel(QFrame):
         if not self.isVisible():
             return
         for column, group in zip(self._columns, self.groups):
-            left = column.mapTo(self, QPoint(0, 0)).x()
-            group.setGeometry(left, 0, column.width(), self.height())
+            width = column.width()
+            if group.width() != width:
+                group.setFixedWidth(width)
 
 
 class WorkflowWindow(QMainWindow):
@@ -235,26 +245,6 @@ class WorkflowWindow(QMainWindow):
         root.setContentsMargins(SPACE_XXL, SPACE_XL, SPACE_XL, SPACE_XL)
         root.setSpacing(0)
 
-        # The workflow cards are the only visually inset region. A subtle
-        # backdrop follows the cards' actual height rather than the viewport.
-        cards_tint = palette_tint(
-            self.palette(), self.palette().color(QPalette.ColorRole.Mid),
-            light_amount=.11, dark_amount=.16,
-        )
-
-        def card_surface(parent: QWidget, object_name: str) -> tuple[QFrame, QVBoxLayout]:
-            surface = QFrame(parent)
-            surface.setObjectName(object_name)
-            surface.setFrameShape(QFrame.Shape.NoFrame)
-            surface.setStyleSheet(
-                f"QFrame#{object_name} {{ background-color: {cards_tint.name()}; "
-                "border-radius: 6px; }"
-            )
-            surface_layout = QVBoxLayout(surface)
-            surface_layout.setContentsMargins(SPACE_SM, SPACE_SM, SPACE_SM, SPACE_SM)
-            surface_layout.setSpacing(0)
-            return surface, surface_layout
-
         splitter = QSplitter(Qt.Orientation.Horizontal, central)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(8)
@@ -302,16 +292,12 @@ class WorkflowWindow(QMainWindow):
         self._structure_overview = StructureOverviewWidget(structure_body)
         self._structure_overview.visualizeRequested.connect(self._visualize_structure)
         structure_body_layout.addWidget(self._structure_overview)
-        self._structure_cards_surface, cards_layout = card_surface(
-            structure_body, "workflowStructureCardsSurface"
-        )
         self._structure_actions = WorkflowActionsWidget(
-            self._structure_cards_surface, column="structure",
+            structure_body, column="structure",
             excluded_commands=(ContinueRecent, StartOver, VisualizeStructure),
         )
         self._structure_actions.commandRequested.connect(self.execute_workflow_command)
-        cards_layout.addWidget(self._structure_actions)
-        structure_body_layout.addWidget(self._structure_cards_surface)
+        structure_body_layout.addWidget(self._structure_actions)
         structure_body_layout.addStretch(1)
         structure_scroll.setWidget(structure_body)
         structure_layout.addWidget(structure_scroll, 1)
@@ -336,30 +322,19 @@ class WorkflowWindow(QMainWindow):
         )
         content_layout.addWidget(self._calculate_notice)
 
-        action_scroll = QScrollArea(content)
-        action_scroll.setObjectName("workflowActionScrollArea")
-        action_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        action_scroll.setWidgetResizable(True)
-        action_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
-        calculation_body = QWidget(action_scroll)
-        calculation_body_layout = QVBoxLayout(calculation_body)
-        calculation_body_layout.setContentsMargins(0, 0, SPACE_SM, 0)
-        calculation_body_layout.setSpacing(0)
-        calculation_body_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        self._calculate_cards_surface, calc_cards_layout = card_surface(
-            calculation_body, "workflowCalculateCardsSurface"
-        )
         self._actions = WorkflowActionsWidget(
-            self._calculate_cards_surface, column="calculate",
+            content, column="calculate",
             excluded_commands=(CustomTask, RepeatRecentInput),
         )
         self._actions.commandRequested.connect(self.execute_workflow_command)
         for cards in (self._structure_actions, self._actions):
             cards.naturalCardHeightChanged.connect(self._sync_action_card_heights)
-        calc_cards_layout.addWidget(self._actions)
-        calculation_body_layout.addWidget(self._calculate_cards_surface)
-        calculation_body_layout.addStretch(1)
-        action_scroll.setWidget(calculation_body)
+        action_scroll = QScrollArea(content)
+        action_scroll.setObjectName("workflowActionScrollArea")
+        action_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        action_scroll.setWidgetResizable(True)
+        action_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        action_scroll.setWidget(self._actions)
         content_layout.addWidget(action_scroll, 1)
 
         action_columns_layout.addWidget(content, 1)
@@ -405,7 +380,8 @@ class WorkflowWindow(QMainWindow):
         # positioned from the real Structure / Calculate / Results geometry,
         # including splitter movements and window resizes.
         navigation = _AlignedNavigationPanel(
-            (structure_column, content, side), central,
+            (structure_column, content, side),
+            (action_columns_layout.spacing(), splitter.handleWidth()), central,
         )
         border = blend(
             self.palette().color(QPalette.ColorRole.Window),
@@ -572,6 +548,11 @@ class WorkflowWindow(QMainWindow):
             self.close,
         )
         self._close_button.setShortcut(QKeySequence("Ctrl+Q"))
+        # The Results navigation must never be clipped by the splitter,
+        # even with a narrower window or longer translated labels.
+        side.setMinimumWidth(max(
+            side.minimumWidth(), results_navigation.sizeHint().width()
+        ))
 
     def _open_recent(self, kind: str, path: str | None = None) -> None:
         """Use the latest path for the main button, or an explicit menu item."""
@@ -698,8 +679,6 @@ class WorkflowWindow(QMainWindow):
         self._subtitle.setVisible(bool(plan.subtitle) and (atoms is None or invalid_cluster))
         self._structure_actions.set_plan(plan)
         self._actions.set_plan(plan)
-        self._structure_cards_surface.setVisible(self._structure_actions.has_actions)
-        self._calculate_cards_surface.setVisible(self._actions.has_actions)
         self._update_navigation(snapshot)
         if atoms is None:
             self._calculate_notice.setText(

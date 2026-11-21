@@ -740,28 +740,16 @@ def test_workflow_navigation_has_three_compact_column_footers(
     assert gui._project_browser is None or not gui._project_browser.isVisible()
 
 
-def test_dynamic_cards_have_bounded_backdrops_but_results_do_not(tmp_path):
+def test_dynamic_cards_are_not_wrapped_in_extra_panels(tmp_path):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
-    window.showNormal()
-    window.resize(1650, 900)
-    application.processEvents()
-
-    structure_surface = window.findChild(QFrame, "workflowStructureCardsSurface")
-    calculation_surface = window.findChild(QFrame, "workflowCalculateCardsSurface")
-    assert structure_surface is window._structure_cards_surface
-    assert calculation_surface is window._calculate_cards_surface
-    assert structure_surface.isVisible()
-    assert calculation_surface.isHidden()
-    assert "background-color:" in structure_surface.styleSheet()
-    assert "border-radius: 6px" in calculation_surface.styleSheet()
+    assert window.findChild(QFrame, "workflowStructureCardsSurface") is None
+    assert window.findChild(QFrame, "workflowCalculateCardsSurface") is None
     assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
 
     gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
     application.processEvents()
-    assert calculation_surface.isVisible()
-    scroll = window.findChild(QWidget, "workflowActionScrollArea")
-    assert calculation_surface.height() < scroll.height()
+    assert window._actions.has_actions
     window.close()
 
 
@@ -782,11 +770,28 @@ def test_shared_footer_tracks_column_geometry_on_resize_and_splitter_move(tmp_pa
 
     def assert_aligned():
         assert panel.width() == window._layout_splitter.width()
-        for column, footer in zip(columns, footers):
-            assert footer.x() == column.mapTo(panel, QPoint(0, 0)).x()
+        gap1, gap2 = panel.layout().itemAt(1).spacerItem().sizeHint().width(), (
+            panel.layout().itemAt(3).spacerItem().sizeHint().width()
+        )
+        left = 0
+        for index, (column, footer) in enumerate(zip(columns, footers)):
+            assert footer.x() == left
             assert footer.width() == column.width()
             assert footer.y() == 0
             assert footer.height() == panel.height()
+            assert footer.x() + footer.width() <= panel.width()
+            left += column.width()
+            if index == 0:
+                left += gap1
+            elif index == 1:
+                left += gap2
+        assert window._recent_results_button.isVisible()
+        assert window._recent_results_button.mapTo(
+            panel, QPoint(window._recent_results_button.width() - 1, 0)
+        ).x() < panel.width()
+        assert window._close_button.mapTo(
+            panel, QPoint(window._close_button.width() - 1, 0)
+        ).x() < panel.width()
 
     assert_aligned()
     window._layout_splitter.moveSplitter(850, 1)
