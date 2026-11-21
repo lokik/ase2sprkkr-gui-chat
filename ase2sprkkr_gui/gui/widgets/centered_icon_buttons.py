@@ -1,7 +1,7 @@
 """Buttons with consistently centered icons and bounded, wrapped labels."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtCore import QRect, QSize, Qt
 from PyQt6.QtGui import QFont, QFontMetrics, QIcon, QPalette
 from PyQt6.QtWidgets import (
     QPushButton, QStyle, QStyleOptionButton, QStyleOptionToolButton,
@@ -31,11 +31,23 @@ def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
     bounds = rect.adjusted(7, 4, -7, -4)
     if bounds.width() <= 0 or bounds.height() <= 0:
         return
+    icon_size = button.iconSize()
+    # QIcon.pixmap() preserves the source aspect ratio, even when requested
+    # with non-square dimensions. Paint the slightly wider toolbar icons at
+    # the actual requested proportions, without changing button geometry.
+    edge = max(icon_size.width(), icon_size.height())
     icon = button.icon().pixmap(
-        button.iconSize(),
+        QSize(edge, edge),
         QIcon.Mode.Normal if button.isEnabled() else QIcon.Mode.Disabled,
     )
     ratio = max(1.0, icon.devicePixelRatioF())
+    if icon.width() and icon.height():
+        icon = icon.scaled(
+            QSize(round(icon_size.width() * ratio), round(icon_size.height() * ratio)),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        icon.setDevicePixelRatio(ratio)
     iw, ih = round(icon.width() / ratio), round(icon.height() / ratio)
     text = (
         "" if isinstance(button, QToolButton)
