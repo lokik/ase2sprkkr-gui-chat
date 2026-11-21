@@ -45,6 +45,7 @@ def badge_icon(base: QIcon, kind: Literal["recent", "reconverge", "new"]) -> QIc
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.scale(size / 48, size / 48)
 
         # Use the source image itself, notably the familiar bulk_crystal.png;
@@ -61,21 +62,22 @@ def badge_icon(base: QIcon, kind: Literal["recent", "reconverge", "new"]) -> QIc
         if kind == "recent":
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(center, 5.5, 5.5)
-            painter.setPen(QPen(QColor("#26384e"), 2, cap=Qt.PenCapStyle.RoundCap))
+            painter.setPen(QPen(QColor("#26384e"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawLine(QPointF(36, 32.6), center)
             painter.drawLine(center, QPointF(38.7, 37.5))
         elif kind == "reconverge":
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(
-                QColor("#087f83"), 2.5, cap=Qt.PenCapStyle.RoundCap,
-                join=Qt.PenJoinStyle.RoundJoin,
+                QColor("#087f83"), 2.5, Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin,
             ))
             painter.drawArc(QRectF(30.6, 30.6, 10.8, 10.8), 115 * 16, 285 * 16)
             painter.drawLine(QPointF(40.5, 31.6), QPointF(42.3, 31.5))
             painter.drawLine(QPointF(40.5, 31.6), QPointF(41.0, 34.0))
         elif kind == "new":
             painter.setPen(QPen(
-                QColor("#087f83"), 3, cap=Qt.PenCapStyle.RoundCap,
+                QColor("#087f83"), 3, Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
             ))
             painter.drawLine(QPointF(36, 31.3), QPointF(36, 40.7))
             painter.drawLine(QPointF(31.3, 36), QPointF(40.7, 36))
