@@ -232,8 +232,13 @@ class _HeaderActionBar(QWidget):
         self._mode_applied = False
         self.refresh()
 
-    def set_button_label(self, button: QAbstractButton, title: str) -> None:
+    def set_button_label(
+        self, button: QAbstractButton, title: str,
+        *, short_title: str | None = None,
+    ) -> None:
         self._labels[button] = title
+        if short_title is not None:
+            self._short_labels[button] = short_title
         button.setAccessibleName(title)
         # Reapply the current presentation even when its width has not changed.
         self._mode_applied = False
@@ -789,7 +794,8 @@ class WorkflowWindow(QMainWindow):
         self._structure_navigation.refresh()
         label = "Custom Calculation" if has_structure else "Custom Input File"
         self._calculate_navigation.set_button_label(
-            self._custom_button, label
+            self._custom_button, label,
+            short_title="Custom Calculation" if has_structure else "Custom Input",
         )
 
         if snapshot == self._navigation_snapshot:
