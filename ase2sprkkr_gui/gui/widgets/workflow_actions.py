@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.misc.resources import icon_path
-from ase2sprkkr_gui.gui.misc.icons import task_icon
+from ase2sprkkr_gui.gui.misc.icons import badge_icon, task_icon
 from ase2sprkkr_gui.gui.style import PANEL_RADIUS, SPACE_LG, SPACE_SM, heading_font
 from ase2sprkkr_gui.gui.widgets.action_card import configure_action_card
 from ase2sprkkr_gui.gui.workflow.model import (
@@ -356,10 +356,21 @@ class WorkflowActionsWidget(QWidget):
         if action.tooltip is not None:
             button.setToolTip(action.tooltip)
 
-        custom_icon = (
-            task_icon(action.command.backend_task)
-            if isinstance(action.command, RunTask) else QIcon()
-        )
+        if isinstance(action.command, RunTask):
+            custom_icon = task_icon(action.command.backend_task)
+        elif isinstance(action.command, ReconvergeScf) or (
+            isinstance(action.command, ConvergeHostScf)
+            and action.command.restart_scf
+        ):
+            custom_icon = badge_icon(
+                QIcon(str(icon_path("calculation-gear.svg"))), "reconverge",
+            )
+        elif isinstance(action.command, UseForNewCalculation):
+            custom_icon = badge_icon(
+                QIcon(str(icon_path("calculation-gear.svg"))), "new",
+            )
+        else:
+            custom_icon = QIcon()
         configure_action_card(
             button,
             action.title,
