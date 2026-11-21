@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QStyle,
     QSizePolicy,
-    QSplitter,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -209,7 +208,7 @@ class _HeaderActionBar(QWidget):
         # register() rehomes them here so they cannot land to its right.
         self._button_row = QHBoxLayout()
         self._button_row.setContentsMargins(0, 0, 0, 0)
-        self._button_row.setSpacing(SPACE_XS)
+        self._button_row.setSpacing(2)  # Header only; content-column gaps stay unchanged.
         layout.addLayout(self._button_row)
         layout.addStretch(1)
 
@@ -259,7 +258,7 @@ class _HeaderActionBar(QWidget):
             return False
         required = (
             visible * self.FULL_WIDTH
-            + (visible - 1) * self.layout().spacing()
+            + (visible - 1) * self._button_row.spacing()
         )
         return self.width() < required
 
@@ -415,19 +414,20 @@ class WorkflowWindow(QMainWindow):
             group.register(button)
             return button
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, central)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(8)
-        root.addWidget(splitter, 1)
-        self._layout_splitter = splitter
+        # Fixed equal thirds, without a draggable splitter. The first pair
+        # takes two shares; Results takes the third. Keep normal column gaps
+        # while allowing each navigation header to use the full column width.
+        columns_row = QHBoxLayout()
+        columns_row.setContentsMargins(0, 0, 0, 0)
+        columns_row.setSpacing(SPACE_SM)
+        root.addLayout(columns_row, 1)
+        self._columns_layout = columns_row
 
-        # Treat the first two columns as one resize unit. Their equal
-        # layout stretches keep them the same width when Results is resized.
-        action_columns = QWidget(splitter)
+        action_columns = QWidget(central)
         action_columns.setObjectName("workflowActionColumns")
         action_columns_layout = QHBoxLayout(action_columns)
         action_columns_layout.setContentsMargins(0, 0, 0, 0)
-        action_columns_layout.setSpacing(splitter.handleWidth())
+        action_columns_layout.setSpacing(SPACE_SM)
 
         # The first column owns both current-structure information and all
         # structural workflows. Its content scrolls as a single unit.
@@ -435,26 +435,31 @@ class WorkflowWindow(QMainWindow):
         structure_column.setObjectName("workflowStructureColumn")
         structure_column.setMinimumWidth(300)
         structure_layout = QVBoxLayout(structure_column)
-        structure_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+        structure_layout.setContentsMargins(0, 0, 0, 0)
         structure_column_navigation = navigation_group(
             structure_column, "workflowStructureNavigation"
         )
         structure_layout.addWidget(structure_column_navigation)
 
-        self._structure_title = QLabel("Structure", structure_column)
+        # Keep the existing right inset for ordinary content, but not for
+        # the navigation header: it needs the full width for three actions.
+        structure_detail = QWidget(structure_column)
+        structure_detail_layout = QVBoxLayout(structure_detail)
+        structure_detail_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+        self._structure_title = QLabel("Structure", structure_detail)
         self._structure_title.setObjectName("workflowStructureTitle")
         self._structure_title.setFont(
             heading_font(self._structure_title.font(), "dialog")
         )
         self._structure_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        structure_layout.addWidget(self._structure_title)
+        structure_detail_layout.addWidget(self._structure_title)
 
-        self._subtitle = QLabel(structure_column)
+        self._subtitle = QLabel(structure_detail)
         self._subtitle.setWordWrap(True)
         self._subtitle.setStyleSheet(secondary_text_stylesheet(self.palette()))
-        structure_layout.addWidget(self._subtitle)
+        structure_detail_layout.addWidget(self._subtitle)
 
-        structure_scroll = QScrollArea(structure_column)
+        structure_scroll = QScrollArea(structure_detail)
         structure_scroll.setObjectName("workflowStructureActionsScrollArea")
         structure_scroll.setFrameShape(QFrame.Shape.NoFrame)
         structure_scroll.setWidgetResizable(True)
@@ -475,7 +480,8 @@ class WorkflowWindow(QMainWindow):
         structure_body_layout.addWidget(self._structure_actions)
         structure_body_layout.addStretch(1)
         structure_scroll.setWidget(structure_body)
-        structure_layout.addWidget(structure_scroll, 1)
+        structure_detail_layout.addWidget(structure_scroll, 1)
+        structure_layout.addWidget(structure_detail, 1)
         action_columns_layout.addWidget(structure_column, 1)
 
         # Calculation commands have their own column, independently scrollable
@@ -484,25 +490,28 @@ class WorkflowWindow(QMainWindow):
         content.setObjectName("workflowCalculateColumn")
         content.setMinimumWidth(300)
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+        content_layout.setContentsMargins(0, 0, 0, 0)
         content_navigation = navigation_group(
             content, "workflowCalculationNavigation"
         )
         content_layout.addWidget(content_navigation)
 
-        title = QLabel("Calculate", content)
+        content_detail = QWidget(content)
+        content_detail_layout = QVBoxLayout(content_detail)
+        content_detail_layout.setContentsMargins(0, 0, SPACE_XL, 0)
+        title = QLabel("Calculate", content_detail)
         title.setObjectName("workflowCalculateTitle")
         title.setFont(heading_font(title.font(), "dialog"))
         title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        content_layout.addWidget(title)
+        content_detail_layout.addWidget(title)
 
-        self._calculate_notice = QLabel(content)
+        self._calculate_notice = QLabel(content_detail)
         self._calculate_notice.setWordWrap(True)
         self._calculate_notice.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self._calculate_notice.setStyleSheet(
             secondary_text_stylesheet(self.palette())
         )
-        content_layout.addWidget(self._calculate_notice)
+        content_detail_layout.addWidget(self._calculate_notice)
 
         self._actions = WorkflowActionsWidget(
             content, column="calculate",
@@ -511,19 +520,19 @@ class WorkflowWindow(QMainWindow):
         self._actions.commandRequested.connect(self.execute_workflow_command)
         for cards in (self._structure_actions, self._actions):
             cards.naturalCardHeightChanged.connect(self._sync_action_card_heights)
-        action_scroll = QScrollArea(content)
+        action_scroll = QScrollArea(content_detail)
         action_scroll.setObjectName("workflowActionScrollArea")
         action_scroll.setFrameShape(QFrame.Shape.NoFrame)
         action_scroll.setWidgetResizable(True)
         action_scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
         action_scroll.setWidget(self._actions)
-        content_layout.addWidget(action_scroll, 1)
+        content_detail_layout.addWidget(action_scroll, 1)
+        content_layout.addWidget(content_detail, 1)
 
         action_columns_layout.addWidget(content, 1)
-        splitter.addWidget(action_columns)
 
         # Results share the same borderless column treatment as the actions.
-        side = QWidget(splitter)
+        side = QWidget(central)
         side.setObjectName("workflowResultsColumn")
         side.setMinimumWidth(285)
         side.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -558,11 +567,8 @@ class WorkflowWindow(QMainWindow):
         result_actions_layout.addWidget(self._result_actions_widget, 1)
         side_layout.addWidget(self._result_actions, 1)
 
-        splitter.addWidget(side)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        # Allow room for the wider Results header actions at normal window sizes.
-        splitter.setSizes([880, 380])
+        columns_row.addWidget(action_columns, 2)
+        columns_row.addWidget(side, 1)
 
         # Stable commands belong to the headers of their workflow columns.
         # Recent Structures retains its position when Start from Scratch appears.
