@@ -185,55 +185,52 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     window.close()
 
 
-def test_column_headings_align_and_results_resize_both_action_columns(tmp_path):
+def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
-    window.show()
+    window.showNormal()
+    window.resize(1920, 850)
     application.processEvents()
 
     structure = window.findChild(QWidget, "workflowStructureColumn")
-    action_columns = window.findChild(QWidget, "workflowActionColumns")
-    assert structure is not None
-    assert action_columns is not None
-    calculate = window.findChild(QLabel, "workflowCalculateTitle")
-    results = window.findChild(QLabel, "workflowResultsTitle")
-    assert calculate is not None and results is not None
+    calculate = window.findChild(QWidget, "workflowCalculateColumn")
+    results = window.findChild(QWidget, "workflowResultsColumn")
+    columns = (structure, calculate, results)
+    assert all(column is not None for column in columns)
 
-    headings = (window._structure_title, calculate, results)
+    headings = (
+        window._structure_title,
+        window.findChild(QLabel, "workflowCalculateTitle"),
+        window.findChild(QLabel, "workflowResultsTitle"),
+    )
     assert len({heading.font().pointSizeF() for heading in headings}) == 1
     assert len({heading.mapTo(window, QPoint(0, 0)).y() for heading in headings}) == 1
 
-    # The initial calculation column now contains only its empty-state notice;
-    # the former Custom and Repeat cards are in the common bottom toolbar.
     assert not window._actions.has_actions
     assert window._calculate_notice.isVisible()
     assert window._calculate_notice.text() == "First, create or load the structure."
     assert window._calculate_notice.alignment() & Qt.AlignmentFlag.AlignHCenter
 
-    splitter = window._layout_splitter
-    assert isinstance(splitter, QSplitter)
-    assert splitter.count() == 2
-    assert splitter.widget(0) is action_columns
-    assert splitter.widget(1) is results.parentWidget()
+    row = window._columns_layout
+    assert row.count() == 3
+    assert [row.itemAt(i).widget() for i in range(3)] == list(columns)
+    assert [row.stretch(i) for i in range(3)] == [1, 1, 1]
+    assert not window.findChildren(QSplitter)
 
-    # Both action columns have equal stretch, and share the space released
-    # when the user makes the Results sidebar wider.
-    initial_pair_width = action_columns.width()
-    initial_structure_width = structure.width()
-    initial_calculation_width = calculate.parentWidget().width()
-    initial_results_width = splitter.widget(1).width()
-    assert abs(initial_structure_width - initial_calculation_width) <= 1
+    def equal_thirds():
+        widths = [column.width() for column in columns]
+        assert max(widths) - min(widths) <= 1
+        return widths
 
-    splitter.moveSplitter(splitter.sizes()[0] - 80, 1)
+    full_widths = equal_thirds()
+    assert min(full_widths) >= 3 * 200 + 2 * 2
+    assert not any(bar._compact for bar in window._header_bars)
+    window.resize(1360, 800)
     application.processEvents()
-
-    assert splitter.widget(1).width() > initial_results_width
-    assert action_columns.width() < initial_pair_width
-    assert structure.width() < initial_structure_width
-    assert calculate.parentWidget().width() < initial_calculation_width
-    assert abs(structure.width() - calculate.parentWidget().width()) <= 1
+    narrow_widths = equal_thirds()
+    assert all(narrow < full for narrow, full in zip(narrow_widths, full_widths))
+    assert all(bar._compact for bar in window._header_bars)
     window.close()
-
 
 
 def test_recent_potential_load_rebuilds_workflow_once(tmp_path, monkeypatch):
@@ -626,7 +623,8 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     gui, window = _workflow(tmp_path)
     root = window.centralWidget().layout()
     assert root.count() == 1
-    assert isinstance(root.itemAt(0).widget(), QSplitter)
+    assert root.itemAt(0).layout() is window._columns_layout
+    assert window._columns_layout.count() == 3
     assert window.findChild(QFrame, "workflowNavigation") is None
     structure = window.findChild(QWidget, "workflowStructureColumn")
     calculate = window.findChild(QWidget, "workflowCalculateColumn")
@@ -643,9 +641,9 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert footer is window._results_footer
     assert footer.parentWidget() is results
     assert results.layout().itemAt(results.layout().count() - 1).widget() is footer
-    assert structure.layout().indexOf(navs[0]) < structure.layout().indexOf(window._structure_title)
+    assert structure.layout().indexOf(navs[0]) < structure.layout().indexOf(window._structure_title.parentWidget())
     title = window.findChild(QLabel, "workflowCalculateTitle")
-    assert calculate.layout().indexOf(navs[1]) < calculate.layout().indexOf(title)
+    assert calculate.layout().indexOf(navs[1]) < calculate.layout().indexOf(title.parentWidget())
     results_title = window.findChild(QLabel, "workflowResultsTitle")
     assert results.layout().indexOf(navs[2]) < results.layout().indexOf(results_title)
     for heading in (window._structure_title, title, results_title):
@@ -824,9 +822,10 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     assert max(b.width() for b in utility_buttons) - min(
         b.width() for b in utility_buttons
     ) <= 1
-    window._layout_splitter.moveSplitter(850, 1)
+    window.resize(1920, 820)
     application.processEvents()
     visible_and_within_columns()
+    assert not any(bar._compact for bar in window._header_bars)
     window.resize(1100, 750)
     application.processEvents()
     assert window.width() < 1350  # Must not be pinned by header labels.
@@ -904,12 +903,10 @@ def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
                 )
 
     window.resize(2140, 900)
-    window._layout_splitter.setSizes([1200, 900])
     application.processEvents()
     check_positions()
     # All three headers must remain ordered in the smaller icon-only layout.
     window.resize(1360, 850)
-    window._layout_splitter.setSizes([770, 580])
     application.processEvents()
     check_positions()
     assert all(bar._compact for bar in window._header_bars)
@@ -925,7 +922,6 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     _gui, window = _workflow(tmp_path)
     window.showNormal()
     window.resize(2140, 900)
-    window._layout_splitter.setSizes([1200, 900])
     application.processEvents()
 
     columns = (
@@ -951,8 +947,8 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         for bar in columns
     )
 
-    # A narrow Results pane switches all three controls to icon-only mode.
-    window._layout_splitter.setSizes([1780, 330])
+    # Shrink the whole window: all equal columns collapse together.
+    window.resize(1360, 850)
     application.processEvents()
     results = columns[2]
     assert results._compact
@@ -985,8 +981,8 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         results.COMPACT_SIZE + results.MENU_EXTRA_WIDTH
     )
 
-    # Widening restores labels and the same 200-pixel widths.
-    window._layout_splitter.setSizes([1200, 900])
+    # Widening the window restores all 200-pixel buttons.
+    window.resize(2140, 900)
     application.processEvents()
     assert not results._compact
     assert window._result_actions_widget.load_result_button.text() == "Load Result"
@@ -1011,7 +1007,6 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
             gui.recent_files.remember(kind, entry)
     window.showNormal()
     window.resize(2140, 900)
-    window._layout_splitter.setSizes([1200, 900])
     application.processEvents()
     events = []
     monkeypatch.setattr(
@@ -1065,7 +1060,6 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
 
     window.showNormal()
     window.resize(1600, 800)
-    window._layout_splitter.setSizes([1250, 330])
     application.processEvents()
     assert window._recent_results_button.toolTip().startswith(
         "Recent Results\\n"
@@ -1209,14 +1203,12 @@ def test_save_embedded_cluster_from_shutdown_keeps_host_and_writes_both_files(
 def test_guided_structure_sidebar_tracks_current_structure(tmp_path):
     """Structure facts stay separate from actions and results."""
     from ase.build import bulk
-    from PyQt6.QtWidgets import QSplitter
-
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
     window.show()
     application.processEvents()
 
-    assert window._layout_splitter.count() == 3
+    assert window._columns_layout.count() == 3
     assert window._structure_overview.isHidden()
 
     atoms = bulk("Fe", "bcc", a=2.87, cubic=True)
@@ -1259,7 +1251,8 @@ def test_action_cards_are_equal_height_across_both_guided_columns(tmp_path):
     application.processEvents()
     assert len(card_heights()) == 1
 
-    window._layout_splitter.moveSplitter(window._layout_splitter.sizes()[0] - 60, 1)
+    window.showNormal()
+    window.resize(1400, 800)
     application.processEvents()
     assert len(card_heights()) == 1
     window.close()
