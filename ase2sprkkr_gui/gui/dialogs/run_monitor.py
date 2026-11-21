@@ -31,6 +31,7 @@ from ase2sprkkr_gui.gui.dialogs.dos_progress import DosProgressPage
 from ase2sprkkr_gui.gui.dialogs.bsf_progress import BsfProgressPage
 from ase2sprkkr_gui.gui.dialogs.spleed_progress import SpleedProgressPage
 from ase2sprkkr_gui.gui.dialogs.arpes_progress import ArpesProgressPage
+from ase2sprkkr_gui.gui.dialogs.xas_progress import XasProgressPage
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 
 
@@ -87,6 +88,7 @@ class RunMonitorWindow(QDialog):
         task_name: str | None = None,
         scf_tolerance: float | None = None,
         dos_total_points: int | None = None,
+        xas_total_points: int | None = None,
     ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -134,6 +136,7 @@ class RunMonitorWindow(QDialog):
         self._bsf_progress: BsfProgressPage | None = None
         self._spleed_progress: SpleedProgressPage | None = None
         self._arpes_progress: ArpesProgressPage | None = None
+        self._xas_progress: XasProgressPage | None = None
         task = (task_name or "").strip().lower()
         if task == "scf":
             self._scf_progress = ScfProgressPage(self, target_error=scf_tolerance)
@@ -153,6 +156,9 @@ class RunMonitorWindow(QDialog):
         elif task == "arpes":
             self._arpes_progress = ArpesProgressPage(self)
             info_page = self._arpes_progress
+        elif task == "xas":
+            self._xas_progress = XasProgressPage(self, total_points=xas_total_points)
+            info_page = self._xas_progress
         else:
             info_page = None
         # Every monitor can gain Results and Plot tabs after completion.
@@ -305,6 +311,8 @@ class RunMonitorWindow(QDialog):
             self._spleed_progress.consume(text, kind)
         if self._arpes_progress is not None:
             self._arpes_progress.consume(text, kind)
+        if self._xas_progress is not None:
+            self._xas_progress.consume(text, kind)
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()

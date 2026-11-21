@@ -20,6 +20,7 @@ from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow, RunMonitorW
 from ase2sprkkr_gui.gui.dialogs.run_conflict import SubmissionConflictDialog
 from ase2sprkkr_gui.gui.dialogs.scf_progress import scf_tolerance_from_parameters
 from ase2sprkkr.outputs.readers.dos import dos_total_points_from_parameters
+from ase2sprkkr.outputs.readers.xas import xas_total_points_from_parameters
 
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,9 @@ class SprkkrRunWindow(RunMonitorWindow):
                 getattr(request, "input_parameters", None)
             ),
             dos_total_points=dos_total_points_from_parameters(
+                getattr(request, "input_parameters", None)
+            ),
+            xas_total_points=xas_total_points_from_parameters(
                 getattr(request, "input_parameters", None)
             ),
             autostart=False,
