@@ -3,8 +3,8 @@ from __future__ import annotations
 from threading import Thread
 from typing import Any, Callable
 
-from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
+from PyQt6.QtCore import QEvent, QObject, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
     QMenu,
     QScrollArea,
     QStyle,
+    QStyleOptionToolButton,
+    QStylePainter,
     QSizePolicy,
     QSplitter,
     QToolButton,
@@ -96,7 +98,14 @@ def _check_recent_files(snapshot: RecentFilesSnapshot, signals: _RecentValidatio
 
 
 class _RecentFooterButton(QToolButton):
-    """A split-menu navigation button showing the most recent path."""
+    """Split button with a bold, wrapping title and recent filename.
+
+    The complete path is available in the tooltip; painting inside the main
+    split-button rect keeps all text away from Qt's native dropdown arrow.
+    """
+
+    MENU_WIDTH = 28
+    CONTENT_INSET = 10
 
     def __init__(self, title: str, parent: QWidget):
         super().__init__(parent)
@@ -104,8 +113,7 @@ class _RecentFooterButton(QToolButton):
         self._recent_path: str | None = None
         self._base_tooltip = ""
         self.setText(title)
-        # Keep the action name on one line; only the path may be elided.
-        self.setFixedWidth(194)
+        self.setFixedWidth(202)
 
     def set_recent_path(self, path: str | None) -> None:
         self._recent_path = path
@@ -115,34 +123,80 @@ class _RecentFooterButton(QToolButton):
         self._base_tooltip = tooltip
         self._refresh_label()
 
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        self._refresh_label()
-
     def _refresh_label(self) -> None:
-        if self._recent_path:
-            # Reserve space for the icon and the enlarged menu split control.
-            available = max(45, self.width() - 82)
-            short_path = self.fontMetrics().elidedText(
-                self._recent_path, Qt.TextElideMode.ElideMiddle, available
-            )
-            label = f"{self._title}\n{short_path}"
-            tooltip = f"{self._base_tooltip}\n{self._recent_path}"
-        else:
-            label = self._title
-            tooltip = self._base_tooltip
+        # Retain the readable text for accessibility and button inspection,
+        # while paintEvent provides proper per-line styling and wrapping.
+        filename = Path(self._recent_path).name if self._recent_path else ""
+        label = f"{self._title}\\n{filename}" if filename else self._title
+        tooltip = (
+            f"{self._base_tooltip}\\n{self._recent_path}"
+            if self._recent_path else self._base_tooltip
+        )
         if self.text() != label:
             self.setText(label)
         if self.toolTip() != tooltip:
             self.setToolTip(tooltip)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        # Draw the native surface and menu arrow, but paint the text ourselves:
+        # Qt's default two-line QToolButton text can intrude into the arrow.
+        option.text = ""
+        option.icon = QIcon()
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+
+        icon_size = self.iconSize()
+        icon_mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
+        pixmap = self.icon().pixmap(icon_size, icon_mode)
+        painter.drawPixmap(
+            self.CONTENT_INSET,
+            (self.height() - pixmap.height()) // 2,
+            pixmap,
+        )
+
+        text_x = self.CONTENT_INSET + icon_size.width() + 6
+        # Reserve a full native menu area, with a gap before its divider.
+        text_width = max(
+            1, self.width() - text_x - self.MENU_WIDTH - 14
+        )
+        painter.setPen(self.palette().color(
+            QPalette.ColorRole.ButtonText if self.isEnabled()
+            else QPalette.ColorRole.PlaceholderText
+        ))
+        title_font = QFont(self.font())
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        if self._recent_path:
+            painter.drawText(
+                QRect(text_x, 3, text_width, 27),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                | Qt.TextFlag.TextWordWrap,
+                self._title,
+            )
+            painter.setFont(self.font())
+            # A basename is much more useful in a compact toolbar than a
+            # path prefix such as /home/...; the full path is in the tooltip.
+            filename = Path(self._recent_path).name
+            painter.drawText(
+                QRect(text_x, 29, text_width, self.height() - 32),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                | Qt.TextFlag.TextWordWrap,
+                filename,
+            )
+        else:
+            painter.drawText(
+                QRect(text_x, 4, text_width, self.height() - 8),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                | Qt.TextFlag.TextWordWrap,
+                self._title,
+            )
 
 
 class _AlignedNavigationPanel(QFrame):
-    """One footer with three layout-managed groups tracking the main columns.
-
-    The old absolute widget positioning could shift the whole navigation
-    offscreen. Let Qt position the groups and synchronize *only* their widths.
-    """
+    """One top toolbar with three groups aligned to the workflow columns."""
 
     def __init__(
         self, columns: tuple[QWidget, QWidget, QWidget],
@@ -150,7 +204,7 @@ class _AlignedNavigationPanel(QFrame):
     ):
         super().__init__(parent)
         self.setObjectName("workflowNavigation")
-        self.setFixedHeight(60)
+        self.setFixedHeight(70)
         self._columns = columns
         self.groups = tuple(QWidget(self) for _ in columns)
         layout = QHBoxLayout(self)
@@ -376,9 +430,8 @@ class WorkflowWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([880, 380])
 
-        # A single continuous footer sits below the splitter. The groups are
-        # positioned from the real Structure / Calculate / Results geometry,
-        # including splitter movements and window resizes.
+        # A single top toolbar aligns its three groups with the three main
+        # columns, including splitter movements and window resizes.
         navigation = _AlignedNavigationPanel(
             (structure_column, content, side),
             (action_columns_layout.spacing(), splitter.handleWidth()), central,
@@ -393,17 +446,16 @@ class WorkflowWindow(QMainWindow):
         )
         navigation.setStyleSheet(
             f"QFrame#workflowNavigation {{ background-color: {toolbar_color.name()}; "
-            f"border: none; border-top: 1px solid {border.name()}; }}"
+            f"border: none; border-bottom: 1px solid {border.name()}; }}"
         )
-        root.addWidget(navigation)
+        root.insertWidget(0, navigation)
         self._navigation_panel = navigation
 
         def navigation_group(group: QWidget, object_name: str) -> QWidget:
             group.setObjectName(object_name)
             group_layout = QHBoxLayout(group)
-            inset = SPACE_SM if object_name == "workflowResultsNavigation" else 0
             group_layout.setContentsMargins(
-                SPACE_SM + inset, SPACE_XS + 2, SPACE_SM + inset, SPACE_XS + 2
+                SPACE_SM, SPACE_XS + 2, SPACE_SM, SPACE_XS + 2
             )
             group_layout.setSpacing(SPACE_XS)
             return group
@@ -426,7 +478,7 @@ class WorkflowWindow(QMainWindow):
             button.setIcon(icon)
             button.setIconSize(QSize(20, 20))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedHeight(46)
+            button.setFixedHeight(56)
             button.setAutoRaise(True)
             # Fixed/natural widths keep this a toolbar rather than stretched
             # workflow cards. Recent buttons reserve room for their two lines.
@@ -565,7 +617,6 @@ class WorkflowWindow(QMainWindow):
             "Browse projects and past calculations",
             lambda: self.projectBrowserRequested.emit(),
         )
-        results_navigation.layout().addStretch(1)
         add_separator(results_navigation)
         self._close_button = add_navigation_button(
             results_navigation,
