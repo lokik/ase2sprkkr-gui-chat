@@ -10,9 +10,13 @@ from ase2sprkkr.outputs.readers.dos import DosProgressParser
 class DosProgressPage(QWidget):
     """Display only explicitly reported DOS energy-point completion."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, parent: QWidget | None = None, *, total_points: int | None = None
+    ) -> None:
         super().__init__(parent)
-        self.parser = DosProgressParser(on_info=self._on_info)
+        self.parser = DosProgressParser(
+            on_info=self._on_info, total_points=total_points
+        )
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Latest INFO", self))
 
@@ -39,7 +43,7 @@ class DosProgressPage(QWidget):
             return
         self.last_info.setText(line)
         self.events.appendPlainText(line)
-        if kind == "dos_progress":
+        if kind == "dos_progress" and data.total is not None:
             self.progress.setRange(0, data.total)
             self.progress.setValue(data.completed)
             self.progress.show()
