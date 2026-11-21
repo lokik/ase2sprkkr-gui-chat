@@ -178,14 +178,14 @@ class _RecentFooterButton(CenteredIconToolButton):
 class _HeaderActionBar(QWidget):
     """Column header which uses the same compact mode as its peers."""
 
-    FULL_WIDTH = 160
-    ICON_SIZE = QSize(27, 22)
-    BUTTON_HEIGHT = 68
-    COMPACT_SIZE = 68
+    # Horizontal navigation buttons are deliberately wide and low; retain
+    # the header height so only the buttons' silhouette changes.
+    FULL_WIDTH = 176
+    BUTTON_HEIGHT = 48
+    COMPACT_SIZE = 76
     MENU_EXTRA_WIDTH = 22
-    VERTICAL_GAP = 12
-    # Preserve the original 93 px header height, without a divider line.
-    BAR_HEIGHT = BUTTON_HEIGHT + VERTICAL_GAP * 2 + 1
+    VERTICAL_GAP = 12  # Also used by the unchanged Results utility footer.
+    BAR_HEIGHT = 93
 
     layoutChanged = pyqtSignal()
 
@@ -222,7 +222,7 @@ class _HeaderActionBar(QWidget):
         self._button_row.addWidget(
             button, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        button.setIconSize(self.ICON_SIZE)
+        button.setIconSize(QSize(24, 24))
         button.setFixedHeight(self.BUTTON_HEIGHT)
         button.setMinimumWidth(0)
         button.setSizePolicy(
@@ -560,7 +560,8 @@ class WorkflowWindow(QMainWindow):
         splitter.addWidget(side)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([880, 380])
+        # Allow room for the wider Results header actions at normal window sizes.
+        splitter.setSizes([850, 410])
 
         # Stable commands belong to the headers of their workflow columns.
         # Recent Structures retains its position when Start from Scratch appears.
@@ -655,9 +656,9 @@ class WorkflowWindow(QMainWindow):
             button = CenteredIconToolButton(results_footer)
             button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(_HeaderActionBar.ICON_SIZE)
+            button.setIconSize(QSize(24, 24))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
+            button.setFixedHeight(68)
             button.setSizePolicy(
                 QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
             )
