@@ -203,3 +203,41 @@ def test_bsf_relative_kk_import_can_switch_to_ek_and_edit_both_references(applic
         assert dialog.session.value(('ENERGY', name)) is None
         assert dialog.session.value(('ENERGY', name + 'EV')) is not None
     dialog.close()
+
+
+@pytest.mark.parametrize('old_upper_bound', [None, -1.0])
+def test_bsfkk_relative_fixed_energy_tracks_hidden_upper_bound(
+    application, old_upper_bound
+):
+    """An implicit/old EMAX must never become -13.6057 eV relative to EF."""
+    parameters = InputParameters.create('bsfkk')
+    parameters.TASK.set({
+        'KA': [[0., 0., 0.]], 'K1': [1., 0., 0.],
+        'K2': [0., 1., 0.], 'NK1': 60, 'NK2': 60,
+    })
+    if old_upper_bound is not None:
+        parameters.ENERGY.EMAX.set(old_upper_bound)
+
+    dialog = GuidedInputParametersDialog('bsf', parameters)
+    editor = dialog.editors_for(('ENERGY', 'EMIN'))[-1].control
+    editor.units.setCurrentText('eV')
+    editor.relative.setChecked(True)
+    editor.number.setValue(0.)
+    assert editor.commit()
+
+    current = dialog.session.result()
+    assert current.ENERGY.EMINEV() == pytest.approx(0.)
+    assert current.ENERGY.EMAXEV() == pytest.approx(0.)
+    assert current.ENERGY.EMAX() is None
+    assert not current.ENERGY.EMAX.is_set()
+    assert not current.ENERGY.EMAXEV.is_set()
+    source = current.to_string(validate=False)
+    assert 'EMINEV=0.0' in source
+    assert 'EMAXEV=0.0' in source
+    assert 'EMAXEV=-13.605' not in source
+
+    # Editing only the fixed energy should continue to synchronize its bound.
+    editor.number.setValue(-0.5)
+    assert editor.commit()
+    assert dialog.session.working_parameters.ENERGY.EMAXEV() == pytest.approx(-0.5)
+    dialog.close()
