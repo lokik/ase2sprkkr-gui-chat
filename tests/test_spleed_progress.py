@@ -48,3 +48,21 @@ def test_spleed_info_ignores_stderr_lines():
     window._append_output(diagram([(11., 2.)]), "stderr")
     assert window._spleed_progress.last_info.text() == "Preparing SPLEED calculation..."
     window.close()
+
+
+
+def test_spleed_info_without_nout1_header_accepts_native_six_column_stdout():
+    """spec_rslabsub.f emits WRITE(*,99004) without NOUT1's diagram label."""
+    app = QApplication.instance() or QApplication([])
+    window = RunMonitorWindow(
+        lambda cancellation: object(), task_name="SPLEED", autostart=False
+    )
+    row = "  ".join(f"{v:12.5E}" for v in (11., .5, 0., 0., 0., 0.))
+    assert len(row) == 82
+    window._append_output(row[:30], "stdout")
+    window._append_output(row[30:] + "\nnext output section\n", "stdout")
+    page = window._spleed_progress
+    assert "spectral output" in page.events.toPlainText()
+    assert "E = 11 eV" in page.events.toPlainText()
+    assert "spectral output: 1 points read" in page.events.toPlainText()
+    window.close()
