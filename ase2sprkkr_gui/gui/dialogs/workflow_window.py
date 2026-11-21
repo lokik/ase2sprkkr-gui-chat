@@ -36,7 +36,7 @@ from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceControl
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
 from ase2sprkkr_gui.gui.dialogs.settings import edit_settings
 from ase2sprkkr_gui.gui.misc.colors import blend
-from ase2sprkkr_gui.gui.misc.icons import settings_icon
+from ase2sprkkr_gui.gui.misc.icons import badge_icon, settings_icon
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
@@ -593,7 +593,7 @@ class WorkflowWindow(QMainWindow):
         self._recent_structures_button = navigation_button(
             structure_column_navigation,
             "Recent Structures",
-            QIcon(str(icon_path("bulk_crystal.png"))),
+            badge_icon(QIcon(str(icon_path("bulk_crystal.png"))), "recent"),
             "Open the latest structure or choose another",
             lambda: self._open_recent("structure"),
             short_title="Recent",
@@ -611,7 +611,7 @@ class WorkflowWindow(QMainWindow):
         self._repeat_button = navigation_button(
             content_navigation,
             "Repeat Calculation",
-            QIcon(str(icon_path("system-run.svg"))),
+            badge_icon(QIcon(str(icon_path("calculation-gear.svg"))), "recent"),
             "Repeat the most recent input or choose another",
             lambda: self._open_recent("input"),
             short_title="Repeat",
@@ -640,7 +640,7 @@ class WorkflowWindow(QMainWindow):
         self._recent_results_button = navigation_button(
             side_navigation,
             "Recent Results",
-            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
+            badge_icon(QIcon(str(icon_path("result-graph.svg"))), "recent"),
             "Open the latest result or choose another",
             lambda: self._open_recent("output"),
             short_title="Recent",
