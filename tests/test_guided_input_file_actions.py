@@ -36,6 +36,40 @@ def test_undo_redo_are_in_top_right_header_not_footer():
     dialog.close()
 
 
+def test_page_focus_has_no_native_tail_and_keeps_selected_border():
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    app, dialog = _dialog()
+    dialog.show()
+    app.processEvents()
+    first, second = dialog.spec.pages[:2]
+    first_label = dialog._navigation[first.id].label
+    second_label = dialog._navigation[second.id].label
+
+    # The original selected tile styling must NOT be changed.
+    assert "border: 3px solid" in first_label.styleSheet()
+    assert "border: 1px solid" in second_label.styleSheet()
+    stylesheet = dialog.navigation.styleSheet()
+    assert "outline: 0" in stylesheet
+    assert "QListWidget::item:selected, QListWidget::item:hover" in stylesheet
+    assert "background: transparent" in stylesheet
+
+    rect = dialog.navigation.visualItemRect(dialog._navigation[second.id].item)
+    QTest.mouseClick(dialog.navigation.viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
+    assert dialog.navigation.currentRow() == 1
+    assert dialog.pages.currentIndex() == 1
+    assert "border: 3px solid" in second_label.styleSheet()
+    assert "border: 1px solid" in first_label.styleSheet()
+
+    dialog.navigation.setFocus()
+    QTest.keyClick(dialog.navigation, Qt.Key.Key_Up)
+    assert dialog.navigation.currentRow() == 0
+    assert dialog.pages.currentIndex() == 0
+    assert "border: 3px solid" in first_label.styleSheet()
+    dialog.close()
+
+
 def test_page_navigation_is_below_pages_and_run_controls_share_file_action_row():
     _app, dialog = _dialog()
     root = dialog.layout()

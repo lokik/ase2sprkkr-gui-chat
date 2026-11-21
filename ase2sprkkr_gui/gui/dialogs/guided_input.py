@@ -196,8 +196,12 @@ class GuidedInputParametersDialog(QDialog):
         self.navigation.setMaximumWidth(280)
         self.navigation.setSpacing(SPACE_SM)
         self.navigation.setStyleSheet(
-            f"QListWidget {{ border: 0; padding: {SPACE_SM}px; background: palette(base); }}"
+            # The page QLabel already draws the selected 3px accent border.
+            # Suppress only the list view's own focus outline and the native
+            # row highlight, which otherwise protrude beyond the tile.
+            f"QListWidget {{ border: 0; outline: 0; padding: {SPACE_SM}px; background: palette(base); }}"
             "QListWidget::item { border: 0; }"
+            "QListWidget::item:selected, QListWidget::item:hover { background: transparent; }"
         )
         self.pages = QStackedWidget(self)
 
