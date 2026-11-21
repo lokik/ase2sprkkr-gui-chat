@@ -621,8 +621,13 @@ def test_workflow_navigation_has_three_compact_column_footers(
     gui, window = _workflow(tmp_path)
 
     root = window.centralWidget().layout()
-    assert root.count() == 1
+    assert root.count() == 2
     assert isinstance(root.itemAt(0).widget(), QSplitter)
+    navigation = window.findChild(QFrame, "workflowNavigation")
+    assert navigation is window._navigation_panel
+    assert root.itemAt(1).widget() is navigation
+    assert "background-color:" in navigation.styleSheet()
+    assert "border-top: 1px" in navigation.styleSheet()
 
     columns = (
         window.findChild(QWidget, "workflowStructureColumn"),
@@ -636,9 +641,9 @@ def test_workflow_navigation_has_three_compact_column_footers(
     )
     assert all(columns) and all(footers)
     for column, footer in zip(columns, footers):
-        assert footer.parentWidget() is column
-        assert column.layout().itemAt(column.layout().count() - 1).widget() is footer
-        assert footer.layout().contentsMargins().bottom() == 0
+        assert footer.parentWidget() is navigation
+        assert not column.isAncestorOf(footer)
+        assert footer.layout().contentsMargins().bottom() == 4
     assert not window._result_actions.isAncestorOf(footers[2])
     assert [len(footer.findChildren(QToolButton)) for footer in footers] == [
         3, 3, 3,
@@ -739,6 +744,39 @@ def test_workflow_navigation_has_three_compact_column_footers(
     application.processEvents()
     assert not window.isVisible()
     assert gui._project_browser is None or not gui._project_browser.isVisible()
+
+
+def test_shared_footer_tracks_column_geometry_on_resize_and_splitter_move(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.showNormal()
+    window.resize(1650, 820)
+    application.processEvents()
+
+    columns = (
+        window.findChild(QWidget, "workflowStructureColumn"),
+        window.findChild(QWidget, "workflowCalculateColumn"),
+        window.findChild(QWidget, "workflowResultsColumn"),
+    )
+    panel = window._navigation_panel
+    footers = panel.groups
+
+    def assert_aligned():
+        assert panel.width() == window._layout_splitter.width()
+        for column, footer in zip(columns, footers):
+            assert footer.x() == column.mapTo(panel, QPoint(0, 0)).x()
+            assert footer.width() == column.width()
+            assert footer.y() == 0
+            assert footer.height() == panel.height()
+
+    assert_aligned()
+    window._layout_splitter.moveSplitter(850, 1)
+    application.processEvents()
+    assert_aligned()
+    window.resize(1450, 750)
+    application.processEvents()
+    assert_aligned()
+    window.close()
 
 
 def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatch):

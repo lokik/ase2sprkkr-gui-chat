@@ -3,7 +3,7 @@ from __future__ import annotations
 from threading import Thread
 from typing import Any, Callable
 
-from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
@@ -49,6 +49,7 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XXL,
     action_card_stylesheet,
     heading_font,
+    palette_tint,
     secondary_text_stylesheet,
 )
 from ase2sprkkr_gui.gui.widgets.action_card import action_card_accent
@@ -138,6 +139,43 @@ class _RecentFooterButton(QToolButton):
             self.setToolTip(tooltip)
 
 
+class _AlignedNavigationPanel(QFrame):
+    """One painted footer, aligned with the three resizable content columns."""
+
+    def __init__(self, columns: tuple[QWidget, QWidget, QWidget], parent: QWidget):
+        super().__init__(parent)
+        self.setObjectName("workflowNavigation")
+        self.setFixedHeight(52)
+        self._columns = columns
+        self.groups = tuple(QWidget(self) for _ in columns)
+        # Column widths and positions are determined by the existing splitter
+        # and inner horizontal layout, not by independent footer stretches.
+        for column in columns:
+            column.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched in self._columns and event.type() in (
+            QEvent.Type.Resize, QEvent.Type.Move,
+        ):
+            self._align_columns()
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._align_columns()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._align_columns()
+
+    def _align_columns(self) -> None:
+        if not self.isVisible():
+            return
+        for column, group in zip(self._columns, self.groups):
+            left = column.mapTo(self, QPoint(0, 0)).x()
+            group.setGeometry(left, 0, column.width(), self.height())
+
+
 class WorkflowWindow(QMainWindow):
     """Primary task-oriented Ase2sprkkr application window."""
 
@@ -196,7 +234,7 @@ class WorkflowWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(SPACE_XXL, SPACE_XL, SPACE_XL, SPACE_XL)
-        root.setSpacing(SPACE_SM)
+        root.setSpacing(0)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, central)
         splitter.setChildrenCollapsible(False)
@@ -329,18 +367,33 @@ class WorkflowWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([880, 380])
 
-        # Each footer belongs to its content column, outside the scroll area.
-        # No extra full-width panel or separator consumes vertical space.
-        def navigation_group(column: QWidget, object_name: str) -> QWidget:
-            group = QWidget(column)
+        # A single continuous footer sits below the splitter. The groups are
+        # positioned from the real Structure / Calculate / Results geometry,
+        # including splitter movements and window resizes.
+        navigation = _AlignedNavigationPanel(
+            (structure_column, content, side), central,
+        )
+        background = palette_tint(
+            self.palette(), self.palette().color(QPalette.ColorRole.Mid),
+            light_amount=.09, dark_amount=.16,
+        )
+        border = blend(
+            self.palette().color(QPalette.ColorRole.Window),
+            self.palette().color(QPalette.ColorRole.Mid), .35,
+        )
+        navigation.setStyleSheet(
+            f"QFrame#workflowNavigation {{ background-color: {background.name()}; "
+            f"border-top: 1px solid {border.name()}; }}"
+        )
+        root.addWidget(navigation)
+        self._navigation_panel = navigation
+
+        def navigation_group(group: QWidget, object_name: str) -> QWidget:
             group.setObjectName(object_name)
             group_layout = QHBoxLayout(group)
             inset = SPACE_SM if object_name == "workflowResultsNavigation" else 0
             group_layout.setContentsMargins(inset, SPACE_XS, inset, SPACE_XS)
             group_layout.setSpacing(SPACE_XS)
-            # No painted group background: the three separate tints would
-            # form misaligned patches when the splitter widths change.
-            column.layout().addWidget(group)
             return group
 
         def add_navigation_button(
@@ -409,7 +462,7 @@ class WorkflowWindow(QMainWindow):
             group.layout().addWidget(separator)
 
         structure_navigation = navigation_group(
-            structure_column, "workflowStructureNavigation"
+            navigation.groups[0], "workflowStructureNavigation"
         )
         self._settings_button = add_navigation_button(
             structure_navigation,
@@ -437,7 +490,7 @@ class WorkflowWindow(QMainWindow):
         structure_navigation.layout().addStretch(1)
 
         calculation_navigation = navigation_group(
-            content, "workflowCalculationNavigation"
+            navigation.groups[1], "workflowCalculationNavigation"
         )
         calculation_navigation.layout().addStretch(1)
         self._repeat_button = add_navigation_button(
@@ -468,7 +521,7 @@ class WorkflowWindow(QMainWindow):
         calculation_navigation.layout().addStretch(1)
 
         results_navigation = navigation_group(
-            side, "workflowResultsNavigation"
+            navigation.groups[2], "workflowResultsNavigation"
         )
         self._recent_results_button = add_navigation_button(
             results_navigation,
