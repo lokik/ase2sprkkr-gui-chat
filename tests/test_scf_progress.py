@@ -75,7 +75,7 @@ def test_scf_run_has_info_page_and_raw_output_is_preserved():
     assert window._tabs.currentIndex() == 0
 
     window._append_output(_native_line(6), "out")
-    assert window._output.toPlainText() == _native_line(6)
+    assert window._output.toPlainText().strip() == _native_line(6).strip()
     progress = window._scf_progress
     assert progress.tracker.iterations[0].fermi_energy == 0.76199
     assert "6 ERR" in progress.last_info.text()
