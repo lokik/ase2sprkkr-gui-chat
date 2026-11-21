@@ -150,7 +150,7 @@ class _AlignedNavigationPanel(QFrame):
     ):
         super().__init__(parent)
         self.setObjectName("workflowNavigation")
-        self.setFixedHeight(52)
+        self.setFixedHeight(60)
         self._columns = columns
         self.groups = tuple(QWidget(self) for _ in columns)
         layout = QHBoxLayout(self)
@@ -387,9 +387,13 @@ class WorkflowWindow(QMainWindow):
             self.palette().color(QPalette.ColorRole.Window),
             self.palette().color(QPalette.ColorRole.Mid), .35,
         )
+        toolbar_color = blend(
+            self.palette().color(QPalette.ColorRole.Window),
+            self.palette().color(QPalette.ColorRole.Mid), .10,
+        )
         navigation.setStyleSheet(
-            f"QFrame#workflowNavigation {{ background: transparent; border: none; "
-            f"border-top: 1px solid {border.name()}; }}"
+            f"QFrame#workflowNavigation {{ background-color: {toolbar_color.name()}; "
+            f"border: none; border-top: 1px solid {border.name()}; }}"
         )
         root.addWidget(navigation)
         self._navigation_panel = navigation
@@ -398,7 +402,9 @@ class WorkflowWindow(QMainWindow):
             group.setObjectName(object_name)
             group_layout = QHBoxLayout(group)
             inset = SPACE_SM if object_name == "workflowResultsNavigation" else 0
-            group_layout.setContentsMargins(inset, SPACE_XS, inset, SPACE_XS)
+            group_layout.setContentsMargins(
+                SPACE_SM + inset, SPACE_XS + 2, SPACE_SM + inset, SPACE_XS + 2
+            )
             group_layout.setSpacing(SPACE_XS)
             return group
 
@@ -418,9 +424,10 @@ class WorkflowWindow(QMainWindow):
             if not recent_menu:
                 button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(18, 18))
+            button.setIconSize(QSize(20, 20))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedHeight(44)
+            button.setFixedHeight(46)
+            button.setAutoRaise(True)
             # Fixed/natural widths keep this a toolbar rather than stretched
             # workflow cards. Recent buttons reserve room for their two lines.
             if not recent_menu:
@@ -429,11 +436,31 @@ class WorkflowWindow(QMainWindow):
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
             palette = button.palette()
-            mid = palette.color(QPalette.ColorRole.Mid).name()
+            text = palette.color(QPalette.ColorRole.ButtonText)
+            accent = palette.color(QPalette.ColorRole.Highlight)
+            hover = blend(toolbar_color, accent, .10)
+            pressed = blend(toolbar_color, accent, .18)
+            mid = blend(toolbar_color, palette.color(QPalette.ColorRole.Mid), .45)
             button.setStyleSheet(
-                button_stylesheet(palette, selector="QToolButton")
-                + "QToolButton { padding: 3px 6px; } "
-                + f"QToolButton::menu-button {{ width: 28px; border-left: 1px solid {mid}; }}"
+                "QToolButton {"
+                f"color: {text.name()}; background: transparent; "
+                "border: 1px solid transparent; border-radius: 5px; "
+                "padding: 4px 7px; "
+                "}"
+                "QToolButton:hover {"
+                f"background-color: {hover.name()}; "
+                f"border-color: {mid.name()}; "
+                "}"
+                "QToolButton:pressed {"
+                f"background-color: {pressed.name()}; "
+                "}"
+                "QToolButton:disabled {"
+                f"color: {palette.color(QPalette.ColorRole.PlaceholderText).name()}; "
+                "}"
+                "QToolButton::menu-button {"
+                "width: 28px; "
+                f"border-left: 1px solid {mid.name()}; "
+                "}"
             )
             if recent_menu:
                 button.set_base_tooltip(tooltip)
@@ -451,9 +478,16 @@ class WorkflowWindow(QMainWindow):
 
         def add_separator(group: QWidget) -> None:
             separator = QFrame(group)
-            separator.setFrameShape(QFrame.Shape.VLine)
-            separator.setFrameShadow(QFrame.Shadow.Sunken)
-            group.layout().addWidget(separator)
+            separator.setFrameShape(QFrame.Shape.NoFrame)
+            separator.setFixedSize(1, 25)
+            separator.setStyleSheet(
+                "background-color: "
+                + blend(toolbar_color, self.palette().color(QPalette.ColorRole.Mid), .6).name()
+                + ";"
+            )
+            group.layout().addWidget(
+                separator, alignment=Qt.AlignmentFlag.AlignVCenter
+            )
 
         structure_navigation = navigation_group(
             navigation.groups[0], "workflowStructureNavigation"
@@ -465,7 +499,6 @@ class WorkflowWindow(QMainWindow):
         )
         self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
         add_separator(structure_navigation)
-        structure_navigation.layout().addStretch(1)
         self._start_over_button = add_navigation_button(
             structure_navigation,
             "Start from Scratch",
@@ -481,12 +514,10 @@ class WorkflowWindow(QMainWindow):
             lambda: self._open_recent("structure"),
             recent_menu=True,
         )
-        structure_navigation.layout().addStretch(1)
 
         calculation_navigation = navigation_group(
             navigation.groups[1], "workflowCalculationNavigation"
         )
-        calculation_navigation.layout().addStretch(1)
         self._repeat_button = add_navigation_button(
             calculation_navigation,
             "Repeat Calculation",
@@ -512,7 +543,6 @@ class WorkflowWindow(QMainWindow):
             "Choose a registered SPR-KKR task and configure its parameters",
             self._custom_task,
         )
-        calculation_navigation.layout().addStretch(1)
 
         results_navigation = navigation_group(
             navigation.groups[2], "workflowResultsNavigation"

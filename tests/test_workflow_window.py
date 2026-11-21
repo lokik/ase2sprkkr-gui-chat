@@ -626,7 +626,7 @@ def test_workflow_navigation_has_three_compact_column_footers(
     navigation = window.findChild(QFrame, "workflowNavigation")
     assert navigation is window._navigation_panel
     assert root.itemAt(1).widget() is navigation
-    assert "background: transparent" in navigation.styleSheet()
+    assert "background-color:" in navigation.styleSheet()
     assert "border-top: 1px" in navigation.styleSheet()
 
     columns = (
@@ -643,17 +643,20 @@ def test_workflow_navigation_has_three_compact_column_footers(
     for column, footer in zip(columns, footers):
         assert footer.parentWidget() is navigation
         assert not column.isAncestorOf(footer)
-        assert footer.layout().contentsMargins().bottom() == 4
+        assert footer.layout().contentsMargins().bottom() == 6
     assert not window._result_actions.isAncestorOf(footers[2])
     assert [len(footer.findChildren(QToolButton)) for footer in footers] == [
         3, 3, 3,
     ]
-    assert footers[0].layout().itemAt(1).widget().frameShape() == QFrame.Shape.VLine
-    assert footers[2].layout().itemAt(3).widget().frameShape() == QFrame.Shape.VLine
-    # Global actions stay at the outer edges; the context actions face inward.
-    assert footers[0].layout().itemAt(2).spacerItem() is not None
-    assert footers[1].layout().itemAt(0).spacerItem() is not None
-    assert footers[1].layout().itemAt(4).spacerItem() is not None
+    assert footers[0].layout().itemAt(1).widget().width() == 1
+    assert footers[2].layout().itemAt(3).widget().width() == 1
+    # Navigation is compact and left aligned within each workflow column.
+    assert all(
+        item.spacerItem() is None
+        for group in footers[:2]
+        for item in (group.layout().itemAt(i) for i in range(group.layout().count()))
+    )
+    # Only Close is separated to the right edge.
     assert footers[2].layout().itemAt(2).spacerItem() is not None
 
     buttons = [button for footer in footers for button in footer.findChildren(QToolButton)]
@@ -674,22 +677,24 @@ def test_workflow_navigation_has_three_compact_column_footers(
         "Recent Results", "Project Browser", "Close",
     ]
     assert all(not button.icon().isNull() for button in buttons)
-    assert all(button.height() == 44 for button in buttons)
+    assert all(button.height() == 46 for button in buttons)
     assert all(
         button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         for button in buttons
     )
-    assert all(button.iconSize().width() == 18 for button in buttons)
+    assert all(button.iconSize().width() == 20 for button in buttons)
     assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
-    assert footers[2].layout().contentsMargins().left() == 8
-    assert footers[2].layout().contentsMargins().right() == 8
+    assert footers[2].layout().contentsMargins().left() == 16
+    assert footers[2].layout().contentsMargins().right() == 16
     assert window._repeat_button.width() <= 194
     assert window._recent_structures_button.minimumWidth() == 194
 
     assert all(not footer.styleSheet() for footer in footers)
     assert all(
-        "border-left: 3px solid" not in button.styleSheet()
-        and "background-color:" in button.styleSheet()
+        "border: 1px solid transparent" in button.styleSheet()
+        and "background: transparent" in button.styleSheet()
+        and "QToolButton:hover" in button.styleSheet()
+        and button.autoRaise()
         for button in buttons
     )
     assert all(
