@@ -51,7 +51,9 @@ def _draw_content(
     two_line: bool = False,
 ) -> None:
     """Paint inside the clickable rect, never into the split-menu arrow."""
-    bounds = rect.adjusted(7, 2 if two_line else 4, -7, -2 if two_line else -4)
+    # Reclaim the 2px top/bottom padding for stacked header labels.
+    # Horizontal padding still protects text from the split-menu arrow.
+    bounds = rect.adjusted(7, 0 if two_line else 4, -7, 0 if two_line else -4)
     if bounds.width() <= 0 or bounds.height() <= 0:
         return
     icon = button.icon().pixmap(
@@ -94,7 +96,7 @@ def _draw_content(
             title_metrics = QFontMetrics(title_font)
             file_metrics = QFontMetrics(file_font)
             row_height = title_metrics.height()
-            total_height = ih + 2 + 2 * row_height
+            total_height = ih + 2 * row_height
             if total_height > bounds.height():
                 # Keep the icon size, but allow the text to adapt to a large
                 # system font within the fixed-height navigation button.
@@ -103,11 +105,11 @@ def _draw_content(
                 title_metrics = QFontMetrics(title_font)
                 file_metrics = QFontMetrics(file_font)
                 row_height = title_metrics.height()
-                total_height = ih + 2 + 2 * row_height
+                total_height = ih + 2 * row_height
 
             icon_y = bounds.top() + max(0, (bounds.height() - total_height) // 2)
             painter.drawPixmap(bounds.center().x() - iw // 2, icon_y, icon)
-            text_y = icon_y + ih + 2
+            text_y = icon_y + ih
             title_lines = (
                 [title_metrics.elidedText(
                     title, Qt.TextElideMode.ElideRight, bounds.width(),
@@ -228,10 +230,16 @@ class CenteredIconToolButton(QToolButton):
             )
             if menu_rect.isValid() and menu_rect.left() > main_rect.left():
                 main_rect.setRight(min(main_rect.right(), menu_rect.left() - 1))
+        two_line = bool(self.property("twoLineUnderIcon"))
+        if two_line:
+            # A theme may inset the style subcontrol by a few pixels; use
+            # the full button height while retaining its menu-free width.
+            main_rect.setTop(self.rect().top())
+            main_rect.setBottom(self.rect().bottom())
         _draw_content(
             painter, self, main_rect,
             under=self.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
-            two_line=bool(self.property("twoLineUnderIcon")),
+            two_line=two_line,
         )
 
 
@@ -249,6 +257,9 @@ class CenteredIconPushButton(QPushButton):
             QStyle.SubElement.SE_PushButtonContents, option, self,
         )
         two_line = bool(self.property("twoLineUnderIcon"))
+        if two_line:
+            content_rect.setTop(self.rect().top())
+            content_rect.setBottom(self.rect().bottom())
         _draw_content(
             painter, self, content_rect, under=two_line, two_line=two_line,
         )
