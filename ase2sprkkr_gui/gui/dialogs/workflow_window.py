@@ -148,14 +148,11 @@ class _RecentFooterButton(CenteredIconToolButton):
             # The folder prefix carries no useful information in a small
             # button. Keep the filename's end, including its extension.
             filename = Path(self._recent_path).name
-            suffix = "…/" + filename
-            available = max(35, self.width() - 72)
-            short_path = self.fontMetrics().elidedText(
-                suffix, Qt.TextElideMode.ElideLeft, available
-            )
+            # Keep the full suffix in the logical label; the centered painter
+            # elides it to the actual text area, excluding the menu arrow.
             label = (
                 self._title if self._icon_only
-                else f"{self._title}\n{short_path}"
+                else f"{self._title}\n…/{filename}"
             )
             caption = (
                 "Recent Calculation"
@@ -205,6 +202,13 @@ class _HeaderActionBar(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACE_XS)
+        # A dedicated button row keeps all buttons before the stretch.
+        # Results import buttons are initially moved into the outer layout;
+        # register() rehomes them here so they cannot land to its right.
+        self._button_row = QHBoxLayout()
+        self._button_row.setContentsMargins(0, 0, 0, 0)
+        self._button_row.setSpacing(SPACE_XS)
+        layout.addLayout(self._button_row)
         layout.addStretch(1)
 
     def register(self, button: QAbstractButton) -> None:
@@ -212,10 +216,9 @@ class _HeaderActionBar(QWidget):
         self._labels[button] = button.text()
         self._tooltips[button] = button.toolTip()
         self._styles[button] = button.styleSheet()
-        layout = self.layout()
-        layout.removeWidget(button)
-        layout.insertWidget(
-            layout.count() - 1, button, 0, Qt.AlignmentFlag.AlignVCenter
+        self.layout().removeWidget(button)
+        self._button_row.addWidget(
+            button, 0, Qt.AlignmentFlag.AlignVCenter
         )
         button.setIconSize(QSize(24, 24))
         button.setFixedHeight(self.BUTTON_HEIGHT)

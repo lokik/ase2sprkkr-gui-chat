@@ -1,90 +1,122 @@
-"""Navigation buttons with icon placement independent of Qt text layout."""
+"""Buttons with consistently centered icons and bounded, wrapped labels."""
 from __future__ import annotations
 
 from PyQt6.QtCore import QRect, Qt
-from PyQt6.QtGui import QIcon, QPalette
+from PyQt6.QtGui import QFont, QFontMetrics, QIcon, QPalette
 from PyQt6.QtWidgets import (
     QPushButton, QStyle, QStyleOptionButton, QStyleOptionToolButton,
     QStylePainter, QToolButton,
 )
 
 
+def _wrap_title(text: str, metrics: QFontMetrics, width: int) -> list[str]:
+    """Wrap an action title to at most two lines, eliding the last one."""
+    words = text.split()
+    if not words:
+        return []
+    lines = []
+    while words and len(lines) < 2:
+        line = words.pop(0)
+        while words and metrics.horizontalAdvance(line + " " + words[0]) <= width:
+            line += " " + words.pop(0)
+        if words and len(lines) == 1:
+            line += " " + " ".join(words)
+            words.clear()
+        lines.append(metrics.elidedText(line, Qt.TextElideMode.ElideRight, width))
+    return lines
+
+
 def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
-    """Center the icon in the click region (excluding a split-menu arrow)."""
-    bounds = rect.adjusted(6, 3, -6, -3)
+    """Paint inside the clickable rect, never into the split-menu arrow."""
+    bounds = rect.adjusted(7, 4, -7, -4)
     if bounds.width() <= 0 or bounds.height() <= 0:
         return
-
     icon = button.icon().pixmap(
         button.iconSize(),
         QIcon.Mode.Normal if button.isEnabled() else QIcon.Mode.Disabled,
     )
-    # Pixmap dimensions can be physical pixels on high-DPI screens.
     ratio = max(1.0, icon.devicePixelRatioF())
-    icon_width = round(icon.width() / ratio)
-    icon_height = round(icon.height() / ratio)
+    iw, ih = round(icon.width() / ratio), round(icon.height() / ratio)
     text = (
         "" if isinstance(button, QToolButton)
         and button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
         else button.text()
     )
-    lines = text.splitlines() if text else []
-    metrics = button.fontMetrics()
-    gap = 5
-    line_height = metrics.height()
-    text_height = len(lines) * line_height
+    title, *remainder = text.split("\n", 1)
+    filename = remainder[0] if remainder else ""
+    enabled_role = (
+        QPalette.ColorRole.ButtonText if button.isEnabled()
+        else QPalette.ColorRole.PlaceholderText
+    )
+    painter.save()
+    painter.setClipRect(bounds)
+    painter.setPen(button.palette().color(enabled_role))
+    try:
+        if not title:
+            painter.drawPixmap(
+                bounds.center().x() - iw // 2,
+                bounds.center().y() - ih // 2, icon,
+            )
+            return
 
-    if under and lines:
-        block_height = icon_height + gap + text_height
-        icon_y = bounds.center().y() - block_height // 2
-        icon_x = bounds.center().x() - icon_width // 2
-        painter.drawPixmap(icon_x, icon_y, icon)
-        for i, line in enumerate(lines):
+        base_font = button.font()
+        if under:
+            metrics = QFontMetrics(base_font)
+            label = metrics.elidedText(
+                title, Qt.TextElideMode.ElideRight, bounds.width(),
+            )
+            block_height = ih + 4 + metrics.height()
+            y = bounds.center().y() - block_height // 2
+            painter.drawPixmap(bounds.center().x() - iw // 2, y, icon)
             painter.drawText(
-                QRect(
-                    bounds.left(), icon_y + icon_height + gap + i * line_height,
-                    bounds.width(), line_height,
-                ),
-                Qt.AlignmentFlag.AlignCenter,
-                metrics.elidedText(
-                    line, Qt.TextElideMode.ElideRight, bounds.width()
+                QRect(bounds.left(), y + ih + 4, bounds.width(), metrics.height()),
+                Qt.AlignmentFlag.AlignCenter, label,
+            )
+            return
+
+        title_font = QFont(base_font)
+        title_font.setBold(True)
+        title_metrics = QFontMetrics(title_font)
+        small_font = QFont(base_font)
+        small_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .90))
+        small_metrics = QFontMetrics(small_font)
+
+        gap = 7
+        text_x = bounds.left() + iw + gap
+        width = max(1, bounds.right() - text_x + 1)
+        title_lines = _wrap_title(title, title_metrics, width)
+        title_h = len(title_lines) * title_metrics.height()
+        file_h = small_metrics.height() if filename else 0
+        block_h = title_h + file_h
+        top = bounds.center().y() - block_h // 2
+
+        # The icon aligns with the complete text block, not its first line.
+        painter.drawPixmap(
+            bounds.left(), bounds.center().y() - ih // 2, icon,
+        )
+        painter.setFont(title_font)
+        for i, line in enumerate(title_lines):
+            painter.drawText(
+                QRect(text_x, top + i * title_metrics.height(),
+                      width, title_metrics.height()),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                line,
+            )
+        if filename:
+            painter.setFont(small_font)
+            painter.drawText(
+                QRect(text_x, top + title_h, width, file_h),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                small_metrics.elidedText(
+                    filename, Qt.TextElideMode.ElideLeft, width,
                 ),
             )
-        return
-
-    if not lines:
-        # Icon-only: center within the main button, *not* within the
-        # main button plus its separate dropdown arrow.
-        painter.drawPixmap(
-            bounds.center().x() - icon_width // 2,
-            bounds.center().y() - icon_height // 2,
-            icon,
-        )
-        return
-
-    available_text = max(1, bounds.width() - icon_width - gap)
-    actual_text_width = min(
-        available_text, max(metrics.horizontalAdvance(line) for line in lines)
-    )
-    block_width = icon_width + gap + actual_text_width
-    icon_x = bounds.center().x() - block_width // 2
-    painter.drawPixmap(
-        icon_x, bounds.center().y() - icon_height // 2, icon
-    )
-    text_x = icon_x + icon_width + gap
-    text_y = bounds.center().y() - text_height // 2
-    for i, line in enumerate(lines):
-        painter.drawText(
-            QRect(text_x, text_y + i * line_height, actual_text_width, line_height),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            metrics.elidedText(
-                line, Qt.TextElideMode.ElideRight, actual_text_width,
-            ),
-        )
+    finally:
+        painter.restore()
 
 
 class CenteredIconToolButton(QToolButton):
-    """Toolbutton that centers icons beside, above, or without labels."""
+    """Toolbutton with a centered icon in labeled, compact and split modes."""
 
     def paintEvent(self, event) -> None:
         option = QStyleOptionToolButton()
@@ -97,10 +129,6 @@ class CenteredIconToolButton(QToolButton):
             QStyle.ComplexControl.CC_ToolButton, option,
             QStyle.SubControl.SC_ToolButton, self,
         )
-        painter.setPen(self.palette().color(
-            QPalette.ColorRole.ButtonText if self.isEnabled()
-            else QPalette.ColorRole.PlaceholderText
-        ))
         _draw_content(
             painter, self, main_rect,
             under=self.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
@@ -108,7 +136,7 @@ class CenteredIconToolButton(QToolButton):
 
 
 class CenteredIconPushButton(QPushButton):
-    """Pushbutton with the same centered icon arrangement as the toolbuttons."""
+    """Pushbutton with the same icon/text positioning as the toolbuttons."""
 
     def paintEvent(self, event) -> None:
         option = QStyleOptionButton()
@@ -117,11 +145,7 @@ class CenteredIconPushButton(QPushButton):
         option.text = ""
         painter = QStylePainter(self)
         painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
-        rect = self.style().subElementRect(
+        content_rect = self.style().subElementRect(
             QStyle.SubElement.SE_PushButtonContents, option, self,
         )
-        painter.setPen(self.palette().color(
-            QPalette.ColorRole.ButtonText if self.isEnabled()
-            else QPalette.ColorRole.PlaceholderText
-        ))
-        _draw_content(painter, self, rect)
+        _draw_content(painter, self, content_rect)

@@ -665,11 +665,12 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     )
     assert window._result_actions_widget.load_result_button.parentWidget() is navs[2]
     assert all(
-        nav.layout().itemAt(nav.layout().count() - 1).spacerItem() is not None
+        nav.layout().itemAt(0).layout() is nav._button_row
+        and nav.layout().itemAt(1).spacerItem() is not None
         for nav in navs
     )
     assert all(
-        nav.layout().itemAt(i).widget() is button
+        nav._button_row.itemAt(i).widget() is button
         for nav in navs
         for i, button in enumerate(nav._buttons)
     )
@@ -692,7 +693,7 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
             window._result_actions_widget.import_directory_button,
         )
     )
-    assert [navs[2].layout().itemAt(i).widget() for i in range(3)] == [
+    assert [navs[2]._button_row.itemAt(i).widget() for i in range(3)] == [
         window._recent_results_button,
         window._result_actions_widget.load_result_button,
         window._result_actions_widget.import_directory_button,
@@ -868,6 +869,43 @@ def test_header_and_results_footer_have_mirrored_inset_separators(tmp_path):
                 footer, QPoint(0, button.height())
             ).y() - 12
         ) <= 1
+    window.close()
+
+
+def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.showNormal()
+
+    def check_positions():
+        for header in window._header_bars:
+            buttons = [button for button in header._buttons if button.isVisible()]
+            assert header._button_row.count() == len(header._buttons)
+            assert header.layout().itemAt(0).layout() is header._button_row
+            assert header.layout().itemAt(1).spacerItem() is not None
+            assert buttons
+            # The first action starts at the column's left edge.
+            assert abs(buttons[0].mapTo(header, QPoint(0, 0)).x()) <= 1
+            for left, right in zip(buttons, buttons[1:]):
+                assert right.mapTo(header, QPoint(0, 0)).x() >= (
+                    left.mapTo(header, QPoint(0, 0)).x()
+                    + left.width() + header._button_row.spacing() - 1
+                )
+
+    window.resize(2140, 900)
+    window._layout_splitter.setSizes([1200, 900])
+    application.processEvents()
+    check_positions()
+    # All three headers must remain ordered in the smaller icon-only layout.
+    window.resize(1360, 850)
+    window._layout_splitter.setSizes([770, 580])
+    application.processEvents()
+    check_positions()
+    assert all(bar._compact for bar in window._header_bars)
+    # In particular, Results buttons must not jump to the far right.
+    results = window._header_bars[2]
+    assert window._result_actions_widget.load_result_button.x() >= 0
+    assert window._result_actions_widget.import_directory_button.x() >= 0
     window.close()
 
 
