@@ -9,21 +9,34 @@ from ase2sprkkr_gui.gui.dialogs.expert_input import InputParametersDialog
 from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
 
 
-def test_expert_has_preset_buttons():
+def test_expert_has_preset_buttons(tmp_path, monkeypatch):
+    from ase2sprkkr.input_parameters.presets import PresetStore
+    from ase2sprkkr_gui.gui.flows import presets as preset_flows
+
+    monkeypatch.setattr(preset_flows, "PresetStore", lambda: PresetStore(tmp_path))
     app = QApplication.instance() or QApplication([])
     dialog = InputParametersDialog(InputParameters.for_task("DOS"))
-    assert dialog.load_preset_btn.text() == "Replace by preset…"
-    assert dialog.merge_preset_btn.text() == "Load preset…"
+    assert dialog.load_preset_btn.text() == "Replace by preset"
+    assert dialog.merge_preset_btn.text() == "Load preset"
     assert dialog.save_preset_btn.text() == "Save as preset…"
+    assert not dialog.load_preset_btn.isEnabled()
+    assert not dialog.merge_preset_btn.isEnabled()
 
 
-def test_guided_has_preset_menu():
+def test_guided_has_preset_menu(tmp_path, monkeypatch):
+    from ase2sprkkr.input_parameters.presets import PresetStore
+    from ase2sprkkr_gui.gui.flows import presets as preset_flows
+
+    monkeypatch.setattr(preset_flows, "PresetStore", lambda: PresetStore(tmp_path))
     app = QApplication.instance() or QApplication([])
     dialog = GuidedInputParametersDialog("dos", InputParameters.for_task("DOS"))
     assert dialog.presets_btn.text() == "Presets…"
     assert [a.text() for a in dialog.presets_menu.actions()] == [
-        "Replace by preset…", "Load preset…", "Save as preset…",
+        "Replace by preset", "Load preset", "Save as preset…",
     ]
+    assert not dialog.replace_preset_menu.menuAction().isEnabled()
+    assert not dialog.merge_preset_menu.menuAction().isEnabled()
+    assert dialog.presets_menu.actions()[-1].isEnabled()
 
 
 def test_replace_preset_resets_settings_but_preserves_dataset(tmp_path, monkeypatch):
@@ -45,10 +58,7 @@ def test_replace_preset_resets_settings_but_preserves_dataset(tmp_path, monkeypa
     original.CONTROL.DATASET.set("my_dataset")
     session = InputParametersSession(original)
     monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
-    monkeypatch.setattr(QInputDialog, "getItem",
-                        lambda *_args, **_kwargs: ("preset_1", True))
-
-    assert preset_flows.load_preset(session, None)
+    assert preset_flows.load_preset(session, None, name="preset_1")
     result = session.result()
     assert int(result.ENERGY.NE()[0]) == 402
     assert result.TAU.NKTAB() != 777
@@ -76,10 +86,7 @@ def test_merge_preset_keeps_unmentioned_settings(tmp_path, monkeypatch):
     original.TAU.NKTAB.set(711)
     session = InputParametersSession(original)
     monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
-    monkeypatch.setattr(QInputDialog, "getItem",
-                        lambda *_args, **_kwargs: ("mesh", True))
-
-    assert preset_flows.load_preset(session, None, clear_first=False)
+    assert preset_flows.load_preset(session, None, name="mesh", clear_first=False)
     assert int(session.result().ENERGY.NE()[0]) == 451
     assert session.result().TAU.NKTAB() == 711
     assert session.undo_stack.count() == 1
@@ -122,10 +129,7 @@ def test_merge_and_resave_preserves_explicit_false_at_default(tmp_path, monkeypa
     source.save_preset("with_symmetry", store=store)
     session = InputParametersSession(InputParameters.for_task("DOS"))
     monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
-    monkeypatch.setattr(QInputDialog, "getItem",
-                        lambda *_args, **_kwargs: ("with_symmetry", True))
-
-    assert preset_flows.load_preset(session, None, clear_first=False)
+    assert preset_flows.load_preset(session, None, name="with_symmetry", clear_first=False)
     assert session.result().CONTROL.NOSYM.is_set()
     session.undo_stack.undo()
     assert not session.result().CONTROL.NOSYM.is_set()
@@ -151,11 +155,9 @@ def test_guided_bsf_preset_can_switch_task_on_replace(tmp_path, monkeypatch):
     original = InputParameters.for_task("BSFKK")
     session = InputParametersSession(original)
     monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
-    monkeypatch.setattr(QInputDialog, "getItem",
-                        lambda *_args, **_kwargs: ("task:bsfek.ek_mesh", True))
-
     assert preset_flows.load_preset(
-        session, None, compatible_tasks=("bsfek", "bsfkk"),
+        session, None, name="task:bsfek.ek_mesh",
+        compatible_tasks=("bsfek", "bsfkk"),
     )
     assert session.result().task_name == "BSFEK"
     assert session.undo_stack.count() == 1
@@ -180,24 +182,17 @@ def test_expert_schema_editor_discovers_both_bsf_tasks(tmp_path, monkeypatch):
     original = InputParameters.for_definition("BSF")
     original.ENERGY.NE.set([2])
     session = InputParametersSession(original)
-    selected = []
-
-    def get_item(_parent, _title, _message, choices, **kwargs):
-        selected.extend(choices)
-        return "task:bsfkk.kk", True
-
     monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
-    monkeypatch.setattr(QInputDialog, "getItem", get_item)
-    assert preset_flows.load_preset(session, None)
-    assert "task:bsfek.ek" in selected
-    assert "task:bsfkk.kk" in selected
+    names = preset_flows.available_presets(session)
+    assert "task:bsfek.ek" in names
+    assert "task:bsfkk.kk" in names
+    assert preset_flows.load_preset(session, None, name="task:bsfkk.kk")
     assert session.result().task_name == "BSFKK"
     session.undo_stack.undo()
     assert session.result().task_name == "BSFEK"
 
 
-def test_guided_rejects_task_outside_supported_family(tmp_path, monkeypatch):
-    from PyQt6.QtWidgets import QInputDialog, QMessageBox
+def test_guided_hides_task_presets_outside_supported_family(tmp_path, monkeypatch):
     from ase2sprkkr.input_parameters.presets import PresetStore
     from ase2sprkkr_gui.gui.flows import presets as preset_flows
     from ase2sprkkr_gui.gui.input_parameters.session import InputParametersSession
@@ -207,53 +202,114 @@ def test_guided_rejects_task_outside_supported_family(tmp_path, monkeypatch):
     source = InputParameters.for_task("BSFEK")
     source.ENERGY.NE.set([220])
     source.save_preset("task:bsfek.ek", store=store)
-    original = InputParameters.for_task("BSFKK")
-    session = InputParametersSession(original)
-    messages = []
+    session = InputParametersSession(InputParameters.for_task("BSFKK"))
     monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
 
-    def unexpected_picker(*_args, **_kwargs):
-        raise AssertionError("An incompatible preset must not appear in the picker")
-
-    monkeypatch.setattr(QInputDialog, "getItem", unexpected_picker)
-    monkeypatch.setattr(QMessageBox, "information",
-                        lambda *_args: messages.append(_args[-1]))
-
-    assert not preset_flows.load_preset(
-        session, None, compatible_tasks=("bsfkk",),
-    )
-    assert messages == ["No saved BSF presets."]
+    assert preset_flows.available_presets(
+        session, compatible_tasks=("bsfkk",),
+    ) == ()
     assert session.undo_stack.count() == 0
-    assert session.result().task_name == "BSFKK"
 
 
 
-def test_expert_buttons_dispatch_replace_and_merge(monkeypatch):
+def test_expert_buttons_dispatch_replace_and_merge(tmp_path, monkeypatch):
+    from ase2sprkkr.input_parameters.presets import PresetStore
     from ase2sprkkr_gui.gui.flows import presets as preset_flows
 
     app = QApplication.instance() or QApplication([])
+    store = PresetStore(tmp_path)
+    source = InputParameters.for_task("DOS")
+    source.ENERGY.NE.set([251])
+    source.save_preset("mesh", store=store)
+    monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
     dialog = InputParametersDialog(InputParameters.for_task("DOS"))
-    actions = []
-    monkeypatch.setattr(
-        preset_flows, "load_preset",
-        lambda _session, _parent, **options: actions.append(options["clear_first"]),
-    )
-    dialog.load_preset_btn.click()
-    dialog.merge_preset_btn.click()
-    assert actions == [True, False]
-
-
-def test_guided_menu_dispatches_replace_and_merge(monkeypatch):
-    from ase2sprkkr_gui.gui.flows import presets as preset_flows
-
-    app = QApplication.instance() or QApplication([])
-    dialog = GuidedInputParametersDialog("dos", InputParameters.for_task("DOS"))
-    actions = []
+    selections = []
     monkeypatch.setattr(dialog, "_commit_pending", lambda: True)
     monkeypatch.setattr(
         preset_flows, "load_preset",
-        lambda _session, _parent, **options: actions.append(options["clear_first"]),
+        lambda _session, _parent, **options: selections.append(
+            (options["name"], options["clear_first"])
+        ) or True,
     )
-    for action in dialog.presets_menu.actions()[:2]:
-        action.trigger()
-    assert actions == [True, False]
+    assert dialog.load_preset_btn.isEnabled()
+    assert dialog.merge_preset_btn.isEnabled()
+    dialog.replace_preset_menu.actions()[0].trigger()
+    dialog.merge_preset_menu.actions()[0].trigger()
+    assert selections == [
+        ("input_parameters:dos.mesh", True),
+        ("input_parameters:dos.mesh", False),
+    ]
+
+
+def test_guided_menu_dispatches_replace_and_merge(tmp_path, monkeypatch):
+    from ase2sprkkr.input_parameters.presets import PresetStore
+    from ase2sprkkr_gui.gui.flows import presets as preset_flows
+
+    app = QApplication.instance() or QApplication([])
+    store = PresetStore(tmp_path)
+    source = InputParameters.for_task("DOS")
+    source.ENERGY.NE.set([252])
+    source.save_preset("mesh", store=store)
+    monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
+    dialog = GuidedInputParametersDialog("dos", InputParameters.for_task("DOS"))
+    selections = []
+    monkeypatch.setattr(dialog, "_commit_pending", lambda: True)
+    monkeypatch.setattr(
+        preset_flows, "load_preset",
+        lambda _session, _parent, **options: selections.append(
+            (options["name"], options["clear_first"])
+        ) or True,
+    )
+    assert [action.text() for action in dialog.replace_preset_menu.actions()] == [
+        "mesh (DOS input parameters)"
+    ]
+    dialog.replace_preset_menu.actions()[0].trigger()
+    dialog.merge_preset_menu.actions()[0].trigger()
+    assert selections == [
+        ("input_parameters:dos.mesh", True),
+        ("input_parameters:dos.mesh", False),
+    ]
+
+
+def test_multiple_presets_and_incompatible_merge_action(tmp_path, monkeypatch):
+    from ase2sprkkr.input_parameters.presets import PresetStore
+    from ase2sprkkr_gui.gui.flows import presets as preset_flows
+
+    app = QApplication.instance() or QApplication([])
+    store = PresetStore(tmp_path)
+    for task, name, ne in (("BSFEK", "ek", 250), ("BSFKK", "kk", 1)):
+        source = InputParameters.for_task(task)
+        source.ENERGY.NE.set([ne])
+        source.save_preset(f"task:{task.lower()}.{name}", store=store)
+    monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
+
+    dialog = GuidedInputParametersDialog("bsf", InputParameters.for_task("BSFEK"))
+    replace = dialog.replace_preset_menu.actions()
+    merge = dialog.merge_preset_menu.actions()
+    assert [action.data() for action in replace] == [
+        "task:bsfek.ek", "task:bsfkk.kk",
+    ]
+    assert all(action.isEnabled() for action in replace)
+    assert merge[0].isEnabled()
+    assert not merge[1].isEnabled()
+    assert "use Replace by preset" in merge[1].toolTip()
+
+
+def test_preset_save_refreshes_choices(tmp_path, monkeypatch):
+    from ase2sprkkr.input_parameters.presets import PresetStore
+    from ase2sprkkr_gui.gui.flows import presets as preset_flows
+
+    app = QApplication.instance() or QApplication([])
+    store = PresetStore(tmp_path)
+    monkeypatch.setattr(preset_flows, "PresetStore", lambda: store)
+    dialog = InputParametersDialog(InputParameters.for_task("DOS"))
+    assert not dialog.load_preset_btn.isEnabled()
+    source = InputParameters.for_task("DOS")
+    source.ENERGY.NE.set([255])
+    source.save_preset("saved", store=store)
+    dialog._refresh_preset_menus()
+    assert dialog.load_preset_btn.isEnabled()
+    assert dialog.merge_preset_btn.isEnabled()
+    assert dialog.replace_preset_menu.actions()[0].data() == (
+        "input_parameters:dos.saved"
+    )
