@@ -614,92 +614,51 @@ def test_cancel_new_2d_prompts_to_keep_or_discard_3d(tmp_path, monkeypatch, keep
     window.close()
 
 
-def test_workflow_navigation_has_three_compact_column_footers(
+def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     tmp_path, monkeypatch
 ):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
-
     root = window.centralWidget().layout()
-    assert root.count() == 2
+    assert root.count() == 1
     assert isinstance(root.itemAt(0).widget(), QSplitter)
-    navigation = window.findChild(QFrame, "workflowNavigation")
-    assert navigation is window._navigation_panel
-    assert root.itemAt(1).widget() is navigation
-    assert "background-color:" in navigation.styleSheet()
-    assert "border-top: 1px" in navigation.styleSheet()
-
-    columns = (
-        window.findChild(QWidget, "workflowStructureColumn"),
-        window.findChild(QWidget, "workflowCalculateColumn"),
-        window.findChild(QWidget, "workflowResultsColumn"),
-    )
-    footers = (
+    assert window.findChild(QFrame, "workflowNavigation") is None
+    structure = window.findChild(QWidget, "workflowStructureColumn")
+    calculate = window.findChild(QWidget, "workflowCalculateColumn")
+    results = window.findChild(QWidget, "workflowResultsColumn")
+    navs = (
         window.findChild(QWidget, "workflowStructureNavigation"),
         window.findChild(QWidget, "workflowCalculationNavigation"),
         window.findChild(QWidget, "workflowResultsNavigation"),
     )
-    assert all(columns) and all(footers)
-    for column, footer in zip(columns, footers):
-        assert footer.parentWidget() is navigation
-        assert not column.isAncestorOf(footer)
-        assert footer.layout().contentsMargins().bottom() == 6
-    assert not window._result_actions.isAncestorOf(footers[2])
-    assert [len(footer.findChildren(QToolButton)) for footer in footers] == [
-        3, 3, 3,
+    assert [nav.parentWidget() for nav in navs] == [
+        structure, calculate, results,
     ]
-    assert footers[0].layout().itemAt(1).widget().width() == 1
-    assert footers[2].layout().itemAt(3).widget().width() == 1
-    # Navigation is compact and left aligned within each workflow column.
-    assert all(
-        item.spacerItem() is None
-        for group in footers[:2]
-        for item in (group.layout().itemAt(i) for i in range(group.layout().count()))
-    )
-    # Only Close is separated to the right edge.
-    assert footers[2].layout().itemAt(2).spacerItem() is not None
-
-    buttons = [button for footer in footers for button in footer.findChildren(QToolButton)]
-    assert buttons == [
-        window._settings_button,
-        window._start_over_button,
-        window._recent_structures_button,
-        window._repeat_button,
-        window._load_input_button,
-        window._custom_button,
-        window._recent_results_button,
-        window._project_browser_button,
-        window._close_button,
+    footer = window.findChild(QFrame, "workflowResultsFooter")
+    assert footer is window._results_footer
+    assert footer.parentWidget() is results
+    assert results.layout().itemAt(results.layout().count() - 1).widget() is footer
+    assert structure.layout().indexOf(navs[0]) > structure.layout().indexOf(window._structure_title)
+    title = window.findChild(QLabel, "workflowCalculateTitle")
+    assert calculate.layout().indexOf(navs[1]) > calculate.layout().indexOf(title)
+    results_title = window.findChild(QLabel, "workflowResultsTitle")
+    assert results.layout().indexOf(navs[2]) > results.layout().indexOf(results_title)
+    assert not structure.isAncestorOf(footer)
+    assert not calculate.isAncestorOf(footer)
+    assert [len(nav.findChildren(QToolButton)) for nav in navs] == [2, 3, 1]
+    assert [btn.text() for btn in footer.findChildren(QToolButton)] == [
+        "Project Browser", "Settings", "Close",
     ]
-    assert [button.text() for button in buttons] == [
-        "Settings", "Start from Scratch", "Recent Structures",
-        "Repeat Calculation", "Load Input File", "Custom Input File",
-        "Recent Results", "Project Browser", "Close",
-    ]
-    assert all(not button.icon().isNull() for button in buttons)
-    assert all(button.height() == 46 for button in buttons)
     assert all(
-        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-        for button in buttons
-    )
-    assert all(button.iconSize().width() == 20 for button in buttons)
-    assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
-    assert footers[2].layout().contentsMargins().left() == 16
-    assert footers[2].layout().contentsMargins().right() == 16
-    assert window._repeat_button.width() <= 194
-    assert window._recent_structures_button.minimumWidth() == 194
-
-    assert all(not footer.styleSheet() for footer in footers)
-    assert all(
-        "border: 1px solid transparent" in button.styleSheet()
-        and "background: transparent" in button.styleSheet()
-        and "QToolButton:hover" in button.styleSheet()
-        and button.autoRaise()
-        for button in buttons
-    )
-    assert all(
-        button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
-        for button in buttons
+        btn.icon().isNull() is False
+        for btn in (
+            window._recent_structures_button,
+            window._repeat_button,
+            window._recent_results_button,
+            window._project_browser_button,
+            window._settings_button,
+            window._close_button,
+        )
     )
     assert window._start_over_button.isHidden()
     assert not window._start_over_button.isEnabled()
@@ -717,24 +676,17 @@ def test_workflow_navigation_has_three_compact_column_footers(
         lambda *_args, **_kwargs: actions.append("custom"),
     )
     monkeypatch.setattr(
-        workflow_module,
-        "edit_settings",
+        workflow_module, "edit_settings",
         lambda settings, parent: actions.append(("settings", settings, parent)),
     )
     window.projectBrowserRequested.connect(lambda: actions.append("projects"))
-
     window._project_browser_button.click()
     window._load_input_button.click()
     window._custom_button.click()
     window._settings_button.click()
-
     assert actions == [
-        "projects",
-        "load",
-        "custom",
-        ("settings", gui.settings, window),
+        "projects", "load", "custom", ("settings", gui.settings, window),
     ]
-    # The application composition root still opens the non-modal browser.
     assert gui._project_browser is not None
     assert gui._project_browser.isVisible()
     window.show()
@@ -758,53 +710,46 @@ def test_dynamic_cards_are_not_wrapped_in_extra_panels(tmp_path):
     window.close()
 
 
-def test_shared_footer_tracks_column_geometry_on_resize_and_splitter_move(tmp_path):
+def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
     window.showNormal()
     window.resize(1650, 820)
     application.processEvents()
 
-    columns = (
-        window.findChild(QWidget, "workflowStructureColumn"),
-        window.findChild(QWidget, "workflowCalculateColumn"),
-        window.findChild(QWidget, "workflowResultsColumn"),
+    structure = window.findChild(QWidget, "workflowStructureColumn")
+    calculate = window.findChild(QWidget, "workflowCalculateColumn")
+    results = window.findChild(QWidget, "workflowResultsColumn")
+    controls = (
+        (structure, window._recent_structures_button),
+        (calculate, window._repeat_button),
+        (calculate, window._load_input_button),
+        (calculate, window._custom_button),
+        (results, window._recent_results_button),
+        (results, window._project_browser_button),
+        (results, window._settings_button),
+        (results, window._close_button),
     )
-    panel = window._navigation_panel
-    footers = panel.groups
 
-    def assert_aligned():
-        assert panel.width() == window._layout_splitter.width()
-        gap1, gap2 = panel.layout().itemAt(1).spacerItem().sizeHint().width(), (
-            panel.layout().itemAt(3).spacerItem().sizeHint().width()
-        )
-        left = 0
-        for index, (column, footer) in enumerate(zip(columns, footers)):
-            assert footer.x() == left
-            assert footer.width() == column.width()
-            assert footer.y() == panel.contentsRect().top()
-            assert footer.height() == panel.contentsRect().height()
-            assert footer.x() + footer.width() <= panel.width()
-            left += column.width()
-            if index == 0:
-                left += gap1
-            elif index == 1:
-                left += gap2
-        assert window._recent_results_button.isVisible()
-        assert window._recent_results_button.mapTo(
-            panel, QPoint(window._recent_results_button.width() - 1, 0)
-        ).x() < panel.width()
-        assert window._close_button.mapTo(
-            panel, QPoint(window._close_button.width() - 1, 0)
-        ).x() < panel.width()
+    def visible_and_within_columns():
+        for column, button in controls:
+            assert button.isVisible()
+            right = button.mapTo(
+                column, QPoint(button.width() - 1, 0)
+            ).x()
+            assert right < column.width()
+            assert button.mapTo(column, QPoint(0, 0)).x() >= 0
+        footer = window._results_footer
+        assert footer.y() >= window._result_actions.y()
+        assert footer.y() + footer.height() <= results.height()
 
-    assert_aligned()
+    visible_and_within_columns()
     window._layout_splitter.moveSplitter(850, 1)
     application.processEvents()
-    assert_aligned()
+    visible_and_within_columns()
     window.resize(1450, 750)
     application.processEvents()
-    assert_aligned()
+    visible_and_within_columns()
     window.close()
 
 
