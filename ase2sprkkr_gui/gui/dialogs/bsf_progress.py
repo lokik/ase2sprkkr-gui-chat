@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QPlainTextEdit, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QLabel, QPlainTextEdit, QProgressBar, QVBoxLayout, QWidget
 
 from ase2sprkkr.outputs.readers.bsf import BsfProgressParser
 
@@ -23,6 +23,18 @@ class BsfProgressPage(QWidget):
         )
         layout.addWidget(self.last_info)
 
+        self.rank_progress_label = QLabel(
+            "Approximate progress of the reporting MPI rank", self
+        )
+        self.rank_progress_label.hide()
+        layout.addWidget(self.rank_progress_label)
+
+        self.progress = QProgressBar(self)
+        self.progress.setFormat("%p%")
+        self.progress.hide()
+        layout.addWidget(self.progress)
+        self._rank_total: int | None = None
+
         self.events = QPlainTextEdit(self)
         self.events.setReadOnly(True)
         self.events.setMaximumBlockCount(1024)
@@ -34,6 +46,15 @@ class BsfProgressPage(QWidget):
             return
         self.last_info.setText(line)
         self.events.appendPlainText(line)
+        if kind == "bsf_rank_progress":
+            self._rank_total = data.total
+            self.progress.setRange(0, data.total)
+            # IE is printed when its k-loop begins; completed loops = entered-1.
+            self.progress.setValue(data.completed)
+            self.rank_progress_label.show()
+            self.progress.show()
+        elif kind == "bsf_finished" and self._rank_total:
+            self.progress.setValue(self._rank_total)
 
     def consume(self, text: str, kind: str) -> None:
         if kind.lower() not in {"err", "stderr"} and text:
