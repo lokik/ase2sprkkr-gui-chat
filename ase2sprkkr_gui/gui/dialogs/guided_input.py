@@ -268,10 +268,12 @@ class GuidedInputParametersDialog(QDialog):
         ))
         self.presets_btn.setStyleSheet(button_stylesheet(self.palette()))
         self.presets_menu = QMenu(self.presets_btn)
-        self.presets_menu.addAction("Replace by preset…", self._replace_preset)
-        self.presets_menu.addAction("Load preset…", self._merge_preset)
+        self.replace_preset_menu = self.presets_menu.addMenu("Replace by preset")
+        self.merge_preset_menu = self.presets_menu.addMenu("Load preset")
         self.presets_menu.addAction("Save as preset…", self._save_preset)
+        self.presets_menu.aboutToShow.connect(self._refresh_preset_menus)
         self.presets_btn.setMenu(self.presets_menu)
+        self._refresh_preset_menus()
         file_actions.addWidget(self.presets_btn)
         self.edit_input_button = QPushButton("Edit input file…", self)
         self.edit_input_button.setIcon(QIcon.fromTheme(
@@ -528,23 +530,26 @@ class GuidedInputParametersDialog(QDialog):
             return
         edit_input_parameters_file(self.session, self)
 
-    def _replace_preset(self) -> None:
-        if self._commit_pending():
-            preset_flows.load_preset(
-                self.session, self, clear_first=True,
-                compatible_tasks=self._compatible_backend_tasks,
-            )
+    def _refresh_preset_menus(self) -> None:
+        preset_flows.populate_preset_menus(
+            self.replace_preset_menu,
+            self.merge_preset_menu,
+            self.session,
+            self,
+            on_select=self._apply_preset,
+            compatible_tasks=self._compatible_backend_tasks,
+        )
 
-    def _merge_preset(self) -> None:
-        if self._commit_pending():
-            preset_flows.load_preset(
-                self.session, self, clear_first=False,
-                compatible_tasks=self._compatible_backend_tasks,
-            )
+    def _apply_preset(self, name: str, clear_first: bool) -> None:
+        if self._commit_pending() and preset_flows.load_preset(
+            self.session, self, name=name, clear_first=clear_first,
+            compatible_tasks=self._compatible_backend_tasks,
+        ):
+            self._refresh_preset_menus()
 
     def _save_preset(self) -> None:
-        if self._commit_pending():
-            preset_flows.save_preset(self.session, self)
+        if self._commit_pending() and preset_flows.save_preset(self.session, self):
+            self._refresh_preset_menus()
 
     def _save_input(self) -> None:
         """Save the current isolated draft without accepting the calculation."""
