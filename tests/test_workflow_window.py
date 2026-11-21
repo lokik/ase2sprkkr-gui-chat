@@ -904,9 +904,12 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
         assert "width: 28px" in button.styleSheet()
         # The label is the actual filename, without a clipped path prefix.
         assert button.text().split("\n", 1)[1] == paths[kind][1].name
-        # The painter keeps the title and basename to the left of the
-        # 28 px menu control (plus an explicit gutter).
-        assert button.width() - button.MENU_WIDTH - 14 > 36
+        # The expanded painter reserves the 28 px arrow and gutter.
+        # Compact buttons keep only the icon and the separate arrow.
+        if window._navigation_panel._compact:
+            assert button.width() == 56
+        else:
+            assert button.width() - button.MENU_WIDTH - 14 > 36
         button.click()
         button.menu().actions()[1].trigger()
 
