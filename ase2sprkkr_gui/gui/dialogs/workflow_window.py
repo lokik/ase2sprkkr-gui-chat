@@ -621,7 +621,7 @@ class WorkflowWindow(QMainWindow):
             ),
             "Load, edit, save or calculate from an SPR-KKR input file",
             self._load_input_file,
-            short_title="Load",
+            short_title="Load Input",
         )
         self._custom_button = navigation_button(
             content_navigation,
@@ -629,7 +629,7 @@ class WorkflowWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
             "Choose a registered SPR-KKR task and configure its parameters",
             self._custom_task,
-            short_title="Custom",
+            short_title="Custom Input",
         )
 
         self._recent_results_button = navigation_button(
@@ -654,9 +654,16 @@ class WorkflowWindow(QMainWindow):
             side_navigation.register(
                 button,
                 short_title=(
-                    "Load" if button is self._result_actions_widget.load_result_button
-                    else "Import"
+                    "Load Result"
+                    if button is self._result_actions_widget.load_result_button
+                    else "Import Directory"
                 ),
+            )
+            side_navigation.set_button_label(
+                button,
+                "Load Result File"
+                if button is self._result_actions_widget.load_result_button
+                else "Import All From Directory",
             )
 
         # Keep the Results-only utility toolbar at its original height and
