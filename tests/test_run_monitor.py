@@ -229,3 +229,26 @@ def test_jxc_monitor_uses_task_specific_info_events():
     assert "JXC results written" in window._jxc_progress.last_info.text()
     assert "number of TAU(I,J)" in window._output.toPlainText()
     window.close()
+
+
+
+def test_dos_monitor_uses_structured_progress_and_preserves_raw_output():
+    app = QApplication.instance() or QApplication([])
+    window = RunMonitorWindow(
+        lambda cancellation: object(), task_name="DOS", autostart=False
+    )
+    assert window._dos_progress is not None
+    assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
+    assert not window._dos_progress.progress.isVisible()
+
+    window._append_output("13/300 do", "out")
+    assert window._dos_progress.last_info.text() == "Preparing DOS calculation..."
+    window._append_output("ne.\n14/300 done.\n", "out")
+    assert window._dos_progress.last_info.text() == "14/300 done."
+    assert window._dos_progress.progress.maximum() == 300
+    assert window._dos_progress.progress.value() == 14
+    assert window._output.toPlainText() == "13/300 done.\n14/300 done.\n"
+
+    window._append_output("15/300 done.\n", "stderr")
+    assert window._dos_progress.progress.value() == 14
+    window.close()
