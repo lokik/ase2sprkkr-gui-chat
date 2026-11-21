@@ -233,6 +233,7 @@ class ResultActionsWidget(QWidget):
         self._record_actions = QWidget(self)
         record_actions_layout = QHBoxLayout(self._record_actions)
         record_actions_layout.setContentsMargins(0, 0, 0, 0)
+        record_actions_layout.setSpacing(top_row.spacing())
         self._recompute_button = QPushButton("Recompute", self._record_actions)
         self._recompute_button.setIcon(
             QIcon.fromTheme(
@@ -245,20 +246,23 @@ class ResultActionsWidget(QWidget):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
         record_actions_layout.addWidget(self._recompute_button, 1)
+        # The middle slot mirrors Assign to Project in the selection row.
+        record_actions_layout.addWidget(QWidget(self._record_actions), 1)
         values_slot = QWidget(self._record_actions)
         values_slot_layout = QHBoxLayout(values_slot)
         values_slot_layout.setContentsMargins(0, 0, 0, 0)
-        values_slot_layout.addWidget(
-            self.show_all_values_checkbox, alignment=Qt.AlignmentFlag.AlignVCenter
-        )
         values_slot_layout.addStretch(1)
+        values_slot_layout.addWidget(
+            self.show_all_values_checkbox,
+            alignment=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+        )
         values_slot.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
-        record_actions_layout.addWidget(values_slot, 2)
+        record_actions_layout.addWidget(values_slot, 1)
         # Show all values is independent of whether Recompute is applicable,
         # but neither control is useful until a result is selected.
-        self._recompute_button.hide()
+        self._recompute_button.setEnabled(False)
         self._record_actions.hide()
 
         self._result_file_warning = QLabel("", self)
@@ -486,7 +490,7 @@ class ResultActionsWidget(QWidget):
             else use_state.label if use_state else "Use this structure"
         )
         self._use_state_button.setToolTip(use_state.label if use_state else "")
-        self._recompute_button.setVisible(recompute is not None)
+        self._recompute_button.setEnabled(recompute is not None)
         self._recompute_button.setText("Recompute")
         self._recompute_button.setToolTip(recompute.label if recompute else "")
         self._record_actions.setVisible(self._current_presentation is not None)

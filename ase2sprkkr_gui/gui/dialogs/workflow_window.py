@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from threading import Thread
+from pathlib import Path
 from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
+    QAbstractButton,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -14,6 +16,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QMenu,
+    QPushButton,
     QScrollArea,
     QStyle,
     QSizePolicy,
@@ -98,16 +101,15 @@ def _check_recent_files(snapshot: RecentFilesSnapshot, signals: _RecentValidatio
 
 
 class _RecentFooterButton(QToolButton):
-    """A split-menu navigation button showing the most recent path."""
+    """Recent action with a compact filename suffix and the complete path tooltip."""
 
     def __init__(self, title: str, parent: QWidget):
         super().__init__(parent)
         self._title = title
         self._recent_path: str | None = None
         self._base_tooltip = ""
+        self._icon_only = False
         self.setText(title)
-        # Keep the action name on one line; only the path may be elided.
-        self.setFixedWidth(194)
 
     def set_recent_path(self, path: str | None) -> None:
         self._recent_path = path
@@ -117,26 +119,157 @@ class _RecentFooterButton(QToolButton):
         self._base_tooltip = tooltip
         self._refresh_label()
 
+    def set_icon_only(self, compact: bool) -> None:
+        if self._icon_only != compact:
+            self._icon_only = compact
+            self._refresh_label()
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._refresh_label()
 
     def _refresh_label(self) -> None:
         if self._recent_path:
-            # Reserve space for the icon and the enlarged menu split control.
-            available = max(45, self.width() - 82)
+            # The folder prefix carries no useful information in a small
+            # button. Keep the filename's end, including its extension.
+            filename = Path(self._recent_path).name
+            suffix = "…/" + filename
+            available = max(35, self.width() - 72)
             short_path = self.fontMetrics().elidedText(
-                self._recent_path, Qt.TextElideMode.ElideMiddle, available
+                suffix, Qt.TextElideMode.ElideLeft, available
             )
-            label = f"{self._title}\n{short_path}"
-            tooltip = f"{self._base_tooltip}\n{self._recent_path}"
+            label = (
+                self._title if self._icon_only
+                else f"{self._title}\n{short_path}"
+            )
+            caption = (
+                "Recent Calculation"
+                if self._icon_only and self._title == "Repeat Calculation"
+                else self._title
+            )
+            tooltip = (
+                f"{caption}\n{self._recent_path}"
+                if self._icon_only
+                else f"{self._base_tooltip}\n{self._recent_path}"
+            )
         else:
             label = self._title
-            tooltip = self._base_tooltip
+            tooltip = (
+                self._title if self._icon_only else self._base_tooltip
+            )
         if self.text() != label:
             self.setText(label)
         if self.toolTip() != tooltip:
             self.setToolTip(tooltip)
+
+
+class _HeaderActionBar(QWidget):
+    """Fixed-size action tiles that collapse together when a column narrows."""
+
+    FULL_WIDTH = 160
+    COMPACT_SIZE = 42
+
+    def __init__(self, parent: QWidget, name: str, *, inset: int = 0):
+        super().__init__(parent)
+        self.setObjectName(name)
+        self.setFixedHeight(56)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        self._buttons: list[QAbstractButton] = []
+        self._labels: dict[QAbstractButton, str] = {}
+        self._tooltips: dict[QAbstractButton, str] = {}
+        self._styles: dict[QAbstractButton, str] = {}
+        self._updating = False
+        self._compact = False
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(inset, 0, inset, 0)
+        layout.setSpacing(SPACE_XS)
+        # Give the buttons priority up to FULL_WIDTH; only then expand gap.
+        layout.addStretch(0)
+
+    def register(self, button: QAbstractButton) -> None:
+        self._buttons.append(button)
+        self._labels[button] = button.text()
+        self._tooltips[button] = button.toolTip()
+        self._styles[button] = button.styleSheet()
+        layout = self.layout()
+        layout.removeWidget(button)
+        layout.insertWidget(
+            layout.count() - 1, button, 1,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        button.setFixedHeight(self.COMPACT_SIZE)
+        button.setMinimumWidth(0)
+        button.setMaximumWidth(self.FULL_WIDTH)
+        button.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        self.refresh()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.refresh()
+
+    def refresh(self) -> None:
+        if self._updating or not self._buttons:
+            return
+        visible = [button for button in self._buttons if not button.isHidden()]
+        count = len(visible)
+        if not count:
+            return
+        layout = self.layout()
+        margins = layout.contentsMargins()
+        required = (
+            count * self.FULL_WIDTH
+            + (count - 1) * layout.spacing()
+            + margins.left() + margins.right()
+        )
+        compact = self.width() < required
+        self._updating = True
+        try:
+            self._compact = compact
+            for button in self._buttons:
+                if compact:
+                    button.setFixedWidth(self.COMPACT_SIZE)
+                else:
+                    button.setMinimumWidth(0)
+                    button.setMaximumWidth(self.FULL_WIDTH)
+                    button.setSizePolicy(
+                        QSizePolicy.Policy.Ignored,
+                        QSizePolicy.Policy.Fixed,
+                    )
+                if isinstance(button, _RecentFooterButton):
+                    button.set_icon_only(compact)
+                    button.setToolButtonStyle(
+                        Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                        else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                    )
+                    # Keep both click-on-latest and dropdown available.
+                    style = self._styles[button]
+                    if compact:
+                        style += (
+                            "QToolButton::menu-button { width: 14px; }"
+                        )
+                    button.setStyleSheet(style)
+                elif isinstance(button, QToolButton):
+                    button.setToolButtonStyle(
+                        Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                        else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+                    )
+                    button.setToolTip(
+                        f"{self._labels[button]}\n{self._tooltips[button]}"
+                        if compact else self._tooltips[button]
+                    )
+                elif isinstance(button, QPushButton):
+                    button.setText("" if compact else self._labels[button])
+                    button.setToolTip(
+                        f"{self._labels[button]}\n{self._tooltips[button]}"
+                        if compact else self._tooltips[button]
+                    )
+        finally:
+            self._updating = False
 
 
 class WorkflowWindow(QMainWindow):
@@ -196,31 +329,24 @@ class WorkflowWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(SPACE_XXL, SPACE_XL, SPACE_XL, SPACE_XL)
+        root.setContentsMargins(SPACE_XXL, SPACE_SM, SPACE_XL, SPACE_XL)
         root.setSpacing(SPACE_SM)
 
 
         # Fixed navigation is separate from the scrollable guided cards.
         # Keep these controls small and neutral, like the Results controls.
-        def navigation_group(parent: QWidget, name: str) -> QWidget:
-            group = QWidget(parent)
-            group.setObjectName(name)
-            layout = QHBoxLayout(group)
+        def navigation_group(parent: QWidget, name: str) -> _HeaderActionBar:
             inset = SPACE_SM if name == "workflowResultsNavigation" else 0
-            layout.setContentsMargins(inset, 0, inset, 0)
-            layout.setSpacing(SPACE_XS)
-            group.setFixedHeight(46)
-            return group
+            return _HeaderActionBar(parent, name, inset=inset)
 
         def navigation_button(
-            group: QWidget,
+            group: _HeaderActionBar,
             label: str,
             icon: QIcon,
             tooltip: str,
             callback: Callable[[], None],
             *,
             recent_menu: bool = False,
-            height: int = 40,
         ) -> QToolButton:
             button = (
                 _RecentFooterButton(label, group)
@@ -231,9 +357,9 @@ class WorkflowWindow(QMainWindow):
             button.setIcon(icon)
             button.setIconSize(QSize(18, 18))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setFixedHeight(height)
+            button.setFixedHeight(_HeaderActionBar.COMPACT_SIZE)
             button.setSizePolicy(
-                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
             mid = button.palette().color(QPalette.ColorRole.Mid).name()
             button.setStyleSheet(
@@ -251,7 +377,7 @@ class WorkflowWindow(QMainWindow):
                 button.setToolTip(tooltip)
             button.setAccessibleName(label)
             button.clicked.connect(callback)
-            group.layout().addWidget(button)
+            group.register(button)
             return button
 
         splitter = QSplitter(Qt.Orientation.Horizontal, central)
@@ -400,6 +526,7 @@ class WorkflowWindow(QMainWindow):
 
         # Stable commands belong to the headers of their workflow columns.
         # Recent Structures retains its position when Start from Scratch appears.
+        self._structure_navigation = structure_column_navigation
         self._recent_structures_button = navigation_button(
             structure_column_navigation,
             "Recent Structures",
@@ -415,7 +542,6 @@ class WorkflowWindow(QMainWindow):
             "Clear the current workspace; existing results are kept",
             self._start_over,
         )
-        structure_column_navigation.layout().addStretch(1)
 
         self._repeat_button = navigation_button(
             content_navigation,
@@ -442,7 +568,6 @@ class WorkflowWindow(QMainWindow):
             "Choose a registered SPR-KKR task and configure its parameters",
             self._custom_task,
         )
-        content_navigation.layout().addStretch(1)
 
         self._recent_results_button = navigation_button(
             side_navigation,
@@ -452,11 +577,17 @@ class WorkflowWindow(QMainWindow):
             lambda: self._open_recent("output"),
             recent_menu=True,
         )
-        self._recent_results_button.setFixedWidth(174)
         self._result_actions_widget.move_import_controls_to(
             side_navigation.layout()
         )
-        side_navigation.layout().addStretch(1)
+        for button in (
+            self._result_actions_widget.load_result_button,
+            self._result_actions_widget.import_directory_button,
+        ):
+            button.setStyleSheet(
+                button_stylesheet(button.palette(), selector="QPushButton")
+            )
+            side_navigation.register(button)
 
         # Restore the original Results-only toolbar: a single framed group
         # with three equally-sized icon-over-text buttons.
@@ -529,18 +660,8 @@ class WorkflowWindow(QMainWindow):
 
         # Avoid clipping the header or the fixed Results toolbar if the
         # splitter is dragged towards the minimum allowed column width.
-        structure_column.setMinimumWidth(max(
-            structure_column.minimumWidth(),
-            structure_column_navigation.sizeHint().width() + SPACE_XL,
-        ))
-        content.setMinimumWidth(max(
-            content.minimumWidth(),
-            content_navigation.sizeHint().width() + SPACE_XL,
-        ))
         side.setMinimumWidth(max(
-            side.minimumWidth(),
-            side_navigation.sizeHint().width(),
-            results_footer.sizeHint().width(),
+            side.minimumWidth(), results_footer.minimumSizeHint().width()
         ))
 
     def _open_recent(self, kind: str, path: str | None = None) -> None:
@@ -564,6 +685,7 @@ class WorkflowWindow(QMainWindow):
         )
         self._start_over_button.setVisible(has_workspace)
         self._start_over_button.setEnabled(has_workspace)
+        self._structure_navigation.refresh()
         label = "Custom Calculation" if has_structure else "Custom Input File"
         self._custom_button.setText(label)
         self._custom_button.setAccessibleName(label)

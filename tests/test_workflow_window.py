@@ -665,6 +665,11 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     ]
     assert window._result_actions_widget._import_controls_layout.count() == 0
     assert all(
+        bar.height() == 56
+        for bar in navs
+    )
+    assert all(button.height() == 42 for bar in navs for button in bar._buttons)
+    assert all(
         btn.icon().isNull() is False
         for btn in (
             window._recent_structures_button,
@@ -774,6 +779,57 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     window.close()
 
 
+def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    _gui, window = _workflow(tmp_path)
+    window.showNormal()
+    window.resize(2140, 900)
+    window._layout_splitter.setSizes([1200, 900])
+    application.processEvents()
+
+    columns = (
+        window.findChild(QWidget, "workflowStructureNavigation"),
+        window.findChild(QWidget, "workflowCalculationNavigation"),
+        window.findChild(QWidget, "workflowResultsNavigation"),
+    )
+    for bar in columns:
+        assert not bar._compact
+        for button in bar._buttons:
+            if not button.isHidden():
+                assert button.width() == bar.FULL_WIDTH
+                assert button.height() == bar.COMPACT_SIZE
+                assert abs(
+                    button.mapTo(bar, QPoint(0, 0)).y()
+                    - (bar.height() - button.height()) // 2
+                ) <= 2
+    assert not window._result_actions_widget.load_result_button.text() == ""
+
+    # A narrow Results pane switches all three controls to icon-only mode.
+    window._layout_splitter.setSizes([1780, 330])
+    application.processEvents()
+    results = columns[2]
+    assert results._compact
+    assert all(b.width() == 42 for b in results._buttons)
+    assert all(b.height() == 42 for b in results._buttons)
+    assert window._recent_results_button.toolButtonStyle() == (
+        Qt.ToolButtonStyle.ToolButtonIconOnly
+    )
+    assert window._result_actions_widget.load_result_button.text() == ""
+    assert window._result_actions_widget.import_directory_button.text() == ""
+    assert window._result_actions_widget.load_result_button.toolTip().startswith(
+        "Load Result\\n"
+    )
+    assert window._recent_results_button.menu() is not None
+
+    # Widening restores labels and the same 160-pixel widths.
+    window._layout_splitter.setSizes([1200, 900])
+    application.processEvents()
+    assert not results._compact
+    assert window._result_actions_widget.load_result_button.text() == "Load Result"
+    assert [b.width() for b in results._buttons] == [160, 160, 160]
+    window.close()
+
+
 def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
@@ -786,6 +842,9 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
         for entry in entries:
             entry.write_text("test")
             gui.recent_files.remember(kind, entry)
+    window.showNormal()
+    window.resize(2140, 900)
+    window._layout_splitter.setSizes([1200, 900])
     application.processEvents()
     events = []
     monkeypatch.setattr(
@@ -809,6 +868,8 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
             "output": "Recent Results",
         }[kind]
         assert "\n" in button.text()
+        assert "…/" + paths[kind][1].name in button.text()
+        assert str(tmp_path) not in button.text()
         assert str(paths[kind][1]) in button.toolTip()
         assert "width: 28px" in button.styleSheet()
         button.click()
@@ -834,6 +895,15 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
     assert output_menu.actions()[-1].text() == "Load all results"
     output_menu.actions()[-1].trigger()
     assert events[-1] == LoadAllRecentResults()
+
+    window.showNormal()
+    window.resize(1600, 800)
+    window._layout_splitter.setSizes([1250, 330])
+    application.processEvents()
+    assert window._recent_results_button.toolTip().startswith(
+        "Recent Results\\n"
+    )
+    assert window._repeat_button.toolTip().find(str(paths["input"][1])) > 0
 
     gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
     application.processEvents()
