@@ -87,6 +87,19 @@ def test_recent_filename_is_confined_to_split_button_body():
     )
 
 
+def test_nonsquare_toolbar_icons_keep_requested_painted_proportions():
+    button = _button("Recent Results")
+    button.setIconSize(QSize(27, 22))
+    painter = _PainterRecorder()
+    _draw_content(painter, button, QRect(0, 0, 160, 68))
+
+    assert len(painter.icons) == 1
+    _, _, icon = painter.icons[0]
+    dpr = max(1.0, icon.devicePixelRatioF())
+    assert round(icon.width() / dpr) == 27
+    assert round(icon.height() / dpr) == 22
+
+
 def test_compact_and_footer_icons_are_centered_in_their_own_body():
     for mode, under in (
         (Qt.ToolButtonStyle.ToolButtonIconOnly, False),
