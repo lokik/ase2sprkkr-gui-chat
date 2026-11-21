@@ -19,14 +19,19 @@ def test_bsf_ek_info_reports_energy_indices_without_fabricated_progress():
     assert window._bsf_progress.progress.isHidden()
 
     stdout = (
-        "MPI calculation with NPROCS = 4\n"\n        "E(k)-relation mode for:\n"
+        "MPI calculation with NPROCS = 4\n"
+        "E(k)-relation mode for:\n"
         "with  NE =  200  NK =  297\n"
-        "IE= 151 E= -0.8079 0.0010 all matrices set up - enter k-loop\n"\n        "IE= 175 E= -0.9020 0.0010 all matrices set up - enter k-loop\n"
+        "IE= 151 E= -0.8079 0.0010 all matrices set up - enter k-loop\n"
+        "IE= 175 E= -0.9020 0.0010 all matrices set up - enter k-loop\n"
     )
     window._append_output(stdout[:51], "out")
     window._append_output(stdout[51:], "out")
     assert "energy loop 25/50" in window._bsf_progress.last_info.text()
-    assert "NE=200" in window._bsf_progress.events.toPlainText()\n    assert window._bsf_progress.progress.maximum() == 50\n    assert window._bsf_progress.progress.value() == 24\n    assert not window._bsf_progress.progress.isHidden()
+    assert "NE=200" in window._bsf_progress.events.toPlainText()
+    assert window._bsf_progress.progress.maximum() == 50
+    assert window._bsf_progress.progress.value() == 24
+    assert not window._bsf_progress.progress.isHidden()
     assert window._output.toPlainText().strip() == stdout.strip()
     window.close()
 
@@ -47,7 +52,8 @@ def test_bsf_kk_info_shows_mesh_and_aggregates_native_warnings():
     )
     window._append_output(stdout, "out")
     progress = window._bsf_progress
-    assert progress.parser.mode == "KK"\n    assert progress.progress.isHidden()
+    assert progress.parser.mode == "KK"
+    assert progress.progress.isHidden()
     assert progress.parser.negative_warnings == 101
     assert "101" in progress.last_info.text()
     assert "60 × 60" in progress.events.toPlainText()
