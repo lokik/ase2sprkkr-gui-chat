@@ -105,9 +105,7 @@ def _navigation_button_stylesheet(palette: QPalette, selector: str) -> str:
         palette.color(QPalette.ColorRole.Mid), .78,
     )
     return (
-        action_card_stylesheet(
-            palette, accent, selector, accent_width=3,
-        )
+        action_card_stylesheet(palette, accent, selector)
         + f"{selector} {{ padding: 3px 7px; }}"
         + f"{selector}:disabled {{ color: "
         f"{palette.color(QPalette.ColorRole.PlaceholderText).name()}; }}"

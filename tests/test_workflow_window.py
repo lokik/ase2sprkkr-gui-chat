@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMess
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.dialogs import workflow_window as workflow_module
+from ase2sprkkr_gui.gui.style import ACTION_ACCENT_WIDTH
 from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import (
     CenteredIconPushButton, CenteredIconToolButton,
 )
@@ -739,12 +740,12 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     )
     # Fixed actions and Results utilities share the neutral card treatment.
     assert all(
-        "border-left: 3px solid" in btn.styleSheet()
+        f"border-left: {ACTION_ACCENT_WIDTH}px solid" in btn.styleSheet()
         and "background-color:" in btn.styleSheet()
         for bar in navs for btn in bar._buttons
     )
     assert all(
-        "border-left: 3px solid" in btn.styleSheet()
+        f"border-left: {ACTION_ACCENT_WIDTH}px solid" in btn.styleSheet()
         and "background-color:" in btn.styleSheet()
         for btn in footer.findChildren(QToolButton)
     )
