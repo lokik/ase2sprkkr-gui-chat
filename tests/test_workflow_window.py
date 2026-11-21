@@ -646,6 +646,8 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert calculate.layout().indexOf(navs[1]) < calculate.layout().indexOf(title)
     results_title = window.findChild(QLabel, "workflowResultsTitle")
     assert results.layout().indexOf(navs[2]) < results.layout().indexOf(results_title)
+    for heading in (window._structure_title, title, results_title):
+        assert heading.alignment() & Qt.AlignmentFlag.AlignHCenter
     assert not structure.isAncestorOf(footer)
     assert not calculate.isAncestorOf(footer)
     assert [len(nav.findChildren(QToolButton)) for nav in navs] == [2, 3, 1]
@@ -653,10 +655,9 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
         "Project Browser", "Settings", "Close",
     ]
     assert footer.frameShape() == QFrame.Shape.NoFrame
-    separator = window.findChild(QFrame, "workflowResultsFooterSeparator")
-    assert separator.parentWidget() is footer
-    assert separator.height() == 1
-    assert "background-color:" in separator.styleSheet()
+    # The footer is retained, but its horizontal ruler is removed.
+    assert window.findChild(QWidget, "workflowResultsFooterSeparator") is None
+    assert footer.layout().itemAt(0).spacerItem() is not None
     assert all(
         btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
         and btn.iconSize().width() == 24
@@ -829,7 +830,7 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     window.close()
 
 
-def test_header_and_results_footer_have_mirrored_inset_separators(tmp_path):
+def test_header_and_results_footer_keep_spacing_without_rulers(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
     window.showNormal()
@@ -856,10 +857,11 @@ def test_header_and_results_footer_have_mirrored_inset_separators(tmp_path):
     assert footer.styleSheet() == ""
     assert window.centralWidget().layout().contentsMargins().top() == 0
     assert window.centralWidget().layout().contentsMargins().bottom() == 0
-    separator = window.findChild(QFrame, "workflowResultsFooterSeparator")
-    assert separator.width() == footer.width()
-    assert separator.x() == 0
-    assert separator.height() == 1
+    # Removing the visible lines must not alter the original 93-px headers
+    # or the utility footer's 68-px controls and 12-px vertical spacing.
+    assert window.findChild(QWidget, "workflowResultsFooterSeparator") is None
+    assert footer.layout().itemAt(0).spacerItem() is not None
+    assert footer.layout().itemAt(0).spacerItem().sizeHint().height() == 1
     assert footer.layout().contentsMargins().bottom() == 12
     assert footer.layout().spacing() == 12
     for button in footer.findChildren(QToolButton):

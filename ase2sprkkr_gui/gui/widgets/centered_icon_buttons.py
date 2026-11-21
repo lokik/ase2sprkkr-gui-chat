@@ -82,17 +82,33 @@ def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
         small_metrics = QFontMetrics(small_font)
 
         gap = 7
-        text_x = bounds.left() + iw + gap
-        width = max(1, bounds.right() - text_x + 1)
-        title_lines = _wrap_title(title, title_metrics, width)
+        # Calculate everything within the *main* button subcontrol. A split
+        # button's arrow area never contributes to the available text width.
+        available_width = max(1, bounds.width() - iw - gap)
+        title_lines = _wrap_title(title, title_metrics, available_width)
+        file_label = (
+            small_metrics.elidedText(
+                filename, Qt.TextElideMode.ElideLeft, available_width,
+            ) if filename else ""
+        )
+        text_width = max(
+            [title_metrics.horizontalAdvance(line) for line in title_lines]
+            + ([small_metrics.horizontalAdvance(file_label)] if file_label else [0])
+        )
+        # Center the *icon and text together*, rather than pinning the icon to
+        # the left edge. This also centers icons for wrapped labels.
+        block_width = iw + gap + text_width
+        icon_x = bounds.left() + max(0, (bounds.width() - block_width) // 2)
+        text_x = icon_x + iw + gap
+        width = min(available_width, max(1, bounds.right() - text_x + 1))
         title_h = len(title_lines) * title_metrics.height()
         file_h = small_metrics.height() if filename else 0
         block_h = title_h + file_h
         top = bounds.center().y() - block_h // 2
 
-        # The icon aligns with the complete text block, not its first line.
+        # Align the icon with the complete centered text block.
         painter.drawPixmap(
-            bounds.left(), bounds.center().y() - ih // 2, icon,
+            icon_x, bounds.center().y() - ih // 2, icon,
         )
         painter.setFont(title_font)
         for i, line in enumerate(title_lines):
@@ -107,9 +123,7 @@ def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
             painter.drawText(
                 QRect(text_x, top + title_h, width, file_h),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                small_metrics.elidedText(
-                    filename, Qt.TextElideMode.ElideLeft, width,
-                ),
+                file_label,
             )
     finally:
         painter.restore()

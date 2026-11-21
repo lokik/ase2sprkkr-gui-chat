@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QKeySequence, QPainter, QPalette, QResizeEvent
+from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QFrame,
@@ -183,6 +183,7 @@ class _HeaderActionBar(QWidget):
     COMPACT_SIZE = 68
     MENU_EXTRA_WIDTH = 22
     VERTICAL_GAP = 12
+    # Preserve the original 93 px header height, without a divider line.
     BAR_HEIGHT = BUTTON_HEIGHT + VERTICAL_GAP * 2 + 1
 
     layoutChanged = pyqtSignal()
@@ -246,19 +247,6 @@ class _HeaderActionBar(QWidget):
 
     def sizeHint(self) -> QSize:
         return QSize(0, self.BAR_HEIGHT)
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        line = blend(
-            self.palette().color(QPalette.ColorRole.Window),
-            self.palette().color(QPalette.ColorRole.Mid), .42,
-        )
-        # The line starts exactly at the heading's left edge.
-        painter = QPainter(self)
-        painter.fillRect(
-            0, self.height() - 1,
-            max(0, self.width() - SPACE_SM), 1, line,
-        )
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -457,6 +445,7 @@ class WorkflowWindow(QMainWindow):
         self._structure_title.setFont(
             heading_font(self._structure_title.font(), "dialog")
         )
+        self._structure_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         structure_layout.addWidget(self._structure_title)
 
         self._subtitle = QLabel(structure_column)
@@ -503,6 +492,7 @@ class WorkflowWindow(QMainWindow):
         title = QLabel("Calculate", content)
         title.setObjectName("workflowCalculateTitle")
         title.setFont(heading_font(title.font(), "dialog"))
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         content_layout.addWidget(title)
 
         self._calculate_notice = QLabel(content)
@@ -548,6 +538,7 @@ class WorkflowWindow(QMainWindow):
         result_actions_title.setFont(
             heading_font(result_actions_title.font(), "dialog")
         )
+        result_actions_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         side_layout.addWidget(result_actions_title)
 
         self._result_actions = QFrame(side)
@@ -635,8 +626,8 @@ class WorkflowWindow(QMainWindow):
             )
             side_navigation.register(button)
 
-        # A matching inset separator above the Results-only utility toolbar,
-        # without a blue enclosing frame.
+        # Keep the Results-only utility toolbar at its original height and
+        # distance from the window edge, without an enclosing ruler.
         results_footer = QFrame(side)
         results_footer.setObjectName("workflowResultsFooter")
         results_footer.setFrameShape(QFrame.Shape.NoFrame)
@@ -648,18 +639,9 @@ class WorkflowWindow(QMainWindow):
             0, 0, 0, _HeaderActionBar.VERTICAL_GAP
         )
         footer_stack.setSpacing(_HeaderActionBar.VERTICAL_GAP)
-        footer_separator = QFrame(results_footer)
-        footer_separator.setObjectName("workflowResultsFooterSeparator")
-        footer_separator.setFrameShape(QFrame.Shape.NoFrame)
-        footer_separator.setFixedHeight(1)
-        line_color = blend(
-            self.palette().color(QPalette.ColorRole.Window),
-            self.palette().color(QPalette.ColorRole.Mid), .42,
-        )
-        footer_separator.setStyleSheet(
-            f"background-color: {line_color.name()};"
-        )
-        footer_stack.addWidget(footer_separator)
+        # Preserve the one-pixel layout height previously occupied by the
+        # separator; removing the line must not shift the footer controls.
+        footer_stack.addSpacing(1)
         footer_row = QHBoxLayout()
         footer_row.setContentsMargins(0, 0, 0, 0)
         footer_row.setSpacing(SPACE_XS)
