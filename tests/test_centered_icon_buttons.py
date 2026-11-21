@@ -140,7 +140,7 @@ def test_two_line_header_wraps_label_below_centered_icon():
 
 def test_recent_header_shows_title_and_filename_in_two_rows():
     button = _button(
-        "Recent Results\\nFe2_SCF.out",
+        "Recent Results\nFe2_SCF.out",
         Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
     )
     button.setProperty("twoLineUnderIcon", True)
