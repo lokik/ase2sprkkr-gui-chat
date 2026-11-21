@@ -315,3 +315,38 @@ def test_run_monitor_save_cancel_and_error_do_not_discard_output(tmp_path, monke
     window._copy_output_btn.click()
     assert app.clipboard().text() == "kept\nmore\n"
     window.close()
+
+
+
+def test_dos_info_native_energy_blocks_count_points_not_atomic_components():
+    app = QApplication.instance() or QApplication([])
+    window = RunMonitorWindow(
+        lambda cancellation: object(),
+        task_name="DOS",
+        dos_total_points=300,
+        autostart=False,
+    )
+    window._append_output("13 E= 0.4061 0.0100 IT= 1 Ti\n", "out")
+    window._append_output("13 E= 0.4061 0.0100 IT= 2 Co\n", "out")
+    assert window._dos_progress.last_info.text() == "Calculating density of states..."
+    assert not window._dos_progress.progress.isVisible()
+
+    window._append_output("14 E= 0.4081 0.0100 IT= 1 Ti\n", "out")
+    assert window._dos_progress.last_info.text() == "13/300 done."
+    assert window._dos_progress.progress.maximum() == 300
+    assert window._dos_progress.progress.value() == 13
+    window._append_output("14 E= 0.4081 0.0100 IT= 2 Co\n", "out")
+    assert window._dos_progress.progress.value() == 13
+    window.close()
+
+
+def test_dos_info_unknown_total_does_not_show_percentage():
+    app = QApplication.instance() or QApplication([])
+    window = RunMonitorWindow(
+        lambda cancellation: object(), task_name="DOS", autostart=False
+    )
+    window._append_output("13 E= 0.4061 0.0100 IT= 1 Ti\n", "out")
+    window._append_output("14 E= 0.4081 0.0100 IT= 1 Ti\n", "out")
+    assert window._dos_progress.last_info.text() == "13 energy points done."
+    assert not window._dos_progress.progress.isVisible()
+    window.close()
