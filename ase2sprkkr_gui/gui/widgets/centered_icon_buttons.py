@@ -26,6 +26,26 @@ def _wrap_title(text: str, metrics: QFontMetrics, width: int) -> list[str]:
     return lines
 
 
+def _wrap_header_title(text: str, metrics: QFontMetrics, width: int) -> list[str]:
+    """Split a command into two balanced lines, even if it fits on one."""
+    words = text.split()
+    if len(words) < 2:
+        return [metrics.elidedText(text, Qt.TextElideMode.ElideRight, width)] if text else []
+    options = []
+    for split in range(1, len(words)):
+        left, right = " ".join(words[:split]), " ".join(words[split:])
+        a, b = metrics.horizontalAdvance(left), metrics.horizontalAdvance(right)
+        options.append((
+            (max(0, max(a, b) - width), abs(a - b), max(a, b)),
+            (left, right),
+        ))
+    _, lines = min(options, key=lambda candidate: candidate[0])
+    return [
+        metrics.elidedText(line, Qt.TextElideMode.ElideRight, width)
+        for line in lines
+    ]
+
+
 def _draw_content(
     painter, button, rect: QRect, *, under: bool = False,
     two_line: bool = False,
@@ -92,7 +112,7 @@ def _draw_content(
                 [title_metrics.elidedText(
                     title, Qt.TextElideMode.ElideRight, bounds.width(),
                 )] if filename else
-                _wrap_title(title, title_metrics, bounds.width())
+                _wrap_header_title(title, title_metrics, bounds.width())
             )
             painter.setFont(title_font)
             for row, line in enumerate(title_lines):
