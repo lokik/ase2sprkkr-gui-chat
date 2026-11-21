@@ -207,6 +207,8 @@ def test_column_headings_align_and_results_resize_both_action_columns(tmp_path):
     # the former Custom and Repeat cards are in the common bottom toolbar.
     assert not window._actions.has_actions
     assert window._calculate_notice.isVisible()
+    assert window._calculate_notice.text() == "First, create or load the structure."
+    assert window._calculate_notice.alignment() & Qt.AlignmentFlag.AlignHCenter
 
     splitter = window._layout_splitter
     assert isinstance(splitter, QSplitter)
@@ -660,8 +662,8 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert footer.layout().itemAt(0).spacerItem() is not None
     assert all(
         btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-        and btn.iconSize().width() == 27
-        and btn.iconSize().height() == 22
+        and btn.iconSize().width() == 26
+        and btn.iconSize().height() == 26
         and btn.height() == 68
         for btn in footer.findChildren(QToolButton)
     )
@@ -707,7 +709,7 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     )
     assert all(button.height() == 58 for bar in navs for button in bar._buttons)
     assert all(
-        button.iconSize() == QSize(27, 22)
+        button.iconSize() == QSize(26, 26)
         for bar in navs for button in bar._buttons
     )
     # Fixed actions and Results utilities share the neutral card treatment.
@@ -854,7 +856,7 @@ def test_header_and_results_footer_keep_spacing_without_rulers(tmp_path):
             if not button.isHidden():
                 button_top = button.mapTo(header, QPoint(0, 0)).y()
                 button_bottom = button_top + button.height()
-                # The 48-pixel buttons are centered in the original 93-pixel header.
+                # The 58-pixel buttons are centered in the original 93-pixel header.
                 expected_margin = (header.height() - button.height()) / 2
                 assert abs(button_top - expected_margin) <= 1
                 assert abs(header.height() - button_bottom - expected_margin) <= 1
@@ -945,7 +947,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert all(not bar._compact for bar in columns)
     assert all(
         [button.width() for button in bar._buttons if not button.isHidden()]
-        == [176] * sum(not b.isHidden() for b in bar._buttons)
+        == [200] * sum(not b.isHidden() for b in bar._buttons)
         for bar in columns
     )
 
@@ -955,11 +957,12 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     results = columns[2]
     assert results._compact
     assert all(bar._compact for bar in columns)
-    assert [b.width() for b in results._buttons] == [98, 76, 76]
-    assert [b.width() for b in columns[1]._buttons] == [98, 76, 76]
-    assert window._recent_structures_button.width() == 98
+    assert [b.width() for b in results._buttons] == [80, 58, 58]
+    assert [b.width() for b in columns[1]._buttons] == [80, 58, 58]
+    assert window._recent_structures_button.width() == 80
+    assert all(b.width() == b.height() for b in results._buttons[1:])
     assert all(b.height() == 58 for b in results._buttons)
-    assert "width: 20px" in window._recent_results_button.styleSheet()
+    assert "width: 22px" in window._recent_results_button.styleSheet()
     assert window._recent_results_button.toolButtonStyle() == (
         Qt.ToolButtonStyle.ToolButtonIconOnly
     )
@@ -982,12 +985,12 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         results.COMPACT_SIZE + results.MENU_EXTRA_WIDTH
     )
 
-    # Widening restores labels and the same 176-pixel widths.
+    # Widening restores labels and the same 200-pixel widths.
     window._layout_splitter.setSizes([1200, 900])
     application.processEvents()
     assert not results._compact
     assert window._result_actions_widget.load_result_button.text() == "Load Result"
-    assert [b.width() for b in results._buttons] == [176, 176, 176]
+    assert [b.width() for b in results._buttons] == [200, 200, 200]
     for button in results._buttons:
         assert not button.grab().isNull()
     assert all(not bar._compact for bar in columns)
