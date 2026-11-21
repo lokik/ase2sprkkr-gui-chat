@@ -414,26 +414,22 @@ class WorkflowWindow(QMainWindow):
             group.register(button)
             return button
 
-        # Fixed equal thirds, without a draggable splitter. The first pair
-        # takes two shares; Results takes the third. Keep normal column gaps
-        # while allowing each navigation header to use the full column width.
+        # Exactly three equal, non-draggable columns. Keep the normal gaps
+        # between their content areas, but let each header use its full width.
         columns_row = QHBoxLayout()
         columns_row.setContentsMargins(0, 0, 0, 0)
         columns_row.setSpacing(SPACE_SM)
         root.addLayout(columns_row, 1)
         self._columns_layout = columns_row
 
-        action_columns = QWidget(central)
-        action_columns.setObjectName("workflowActionColumns")
-        action_columns_layout = QHBoxLayout(action_columns)
-        action_columns_layout.setContentsMargins(0, 0, 0, 0)
-        action_columns_layout.setSpacing(SPACE_SM)
-
         # The first column owns both current-structure information and all
         # structural workflows. Its content scrolls as a single unit.
-        structure_column = QWidget(action_columns)
+        structure_column = QWidget(central)
         structure_column.setObjectName("workflowStructureColumn")
         structure_column.setMinimumWidth(300)
+        structure_column.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         structure_layout = QVBoxLayout(structure_column)
         structure_layout.setContentsMargins(0, 0, 0, 0)
         structure_column_navigation = navigation_group(
@@ -482,13 +478,16 @@ class WorkflowWindow(QMainWindow):
         structure_scroll.setWidget(structure_body)
         structure_detail_layout.addWidget(structure_scroll, 1)
         structure_layout.addWidget(structure_detail, 1)
-        action_columns_layout.addWidget(structure_column, 1)
+        columns_row.addWidget(structure_column, 1)
 
         # Calculation commands have their own column, independently scrollable
         # from structure actions and from the persistent results sidebar.
-        content = QWidget(action_columns)
+        content = QWidget(central)
         content.setObjectName("workflowCalculateColumn")
         content.setMinimumWidth(300)
+        content.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_navigation = navigation_group(
@@ -529,7 +528,7 @@ class WorkflowWindow(QMainWindow):
         content_detail_layout.addWidget(action_scroll, 1)
         content_layout.addWidget(content_detail, 1)
 
-        action_columns_layout.addWidget(content, 1)
+        columns_row.addWidget(content, 1)
 
         # Results share the same borderless column treatment as the actions.
         side = QWidget(central)
@@ -567,7 +566,6 @@ class WorkflowWindow(QMainWindow):
         result_actions_layout.addWidget(self._result_actions_widget, 1)
         side_layout.addWidget(self._result_actions, 1)
 
-        columns_row.addWidget(action_columns, 2)
         columns_row.addWidget(side, 1)
 
         # Stable commands belong to the headers of their workflow columns.
