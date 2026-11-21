@@ -8,7 +8,7 @@ from ase2sprkkr.outputs.readers.dos import DosProgressParser
 
 
 class DosProgressPage(QWidget):
-    """Display only explicitly reported DOS energy-point completion."""
+    """Show exact serial or explicitly labelled approximate MPI DOS progress."""
 
     def __init__(
         self, parent: QWidget | None = None, *, total_points: int | None = None
@@ -28,7 +28,7 @@ class DosProgressPage(QWidget):
         layout.addWidget(self.last_info)
 
         self.progress = QProgressBar(self)
-        self.progress.setTextVisible(False)
+        self.progress.setTextVisible(True)
         self.progress.hide()
         layout.addWidget(self.progress)
 
@@ -45,6 +45,7 @@ class DosProgressPage(QWidget):
         self.events.appendPlainText(line)
         if kind == "dos_progress" and data.total is not None:
             self.progress.setRange(0, data.total)
+            self.progress.setFormat("≈%p%" if data.estimated else "%p%")
             self.progress.setValue(data.completed)
             self.progress.show()
 
