@@ -36,3 +36,10 @@ palette as the structure editor. The `badge_icon` helper overlays one
 common badge position on the unchanged object artwork: a clock for recent
 structures/inputs/results, a circular arrow for SCF reconvergence, or a
 plus for starting a new SCF calculation from the existing potential.
+
+The adjacent load/import buttons now use the same visual language.
+`input-parameters.svg` identifies an SPR-KKR input file,
+`result-graph.svg` identifies a result file, and `results-folder.svg`
+identifies a directory containing result files. They share a downward
+load-arrow badge instead of the history clock, while the recent-result
+button reuses the unbadged graph document as its subject.
