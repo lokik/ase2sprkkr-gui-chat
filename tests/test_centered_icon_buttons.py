@@ -1,7 +1,7 @@
 """Painter geometry regression tests for the compact workflow toolbar."""
 
 from PyQt6.QtCore import QRect, QSize, Qt
-from PyQt6.QtGui import QFont, QIcon, QPixmap
+from PyQt6.QtGui import QFont, QFontMetrics, QIcon, QPixmap
 from PyQt6.QtWidgets import QApplication
 
 from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import (
@@ -204,3 +204,36 @@ def test_header_uses_semibold_command_and_quieter_filename():
     assert title_font.weight() == QFont.Weight.DemiBold
     assert filename_font.weight() < title_font.weight()
     assert filename_font.pointSizeF() < title_font.pointSizeF()
+
+
+def test_header_reclaims_vertical_space_before_shrinking_command_font():
+    button = _button(
+        "Import Directory", Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
+    )
+    button.setIconSize(QSize(26, 26))
+    # Pick a font that requires more than the old 18px/row allowance,
+    # but fits in the newly available 21px/row.
+    matching_sizes = []
+    for point_size in range(8, 18):
+        font = QFont(button.font())
+        font.setPointSize(point_size)
+        title_font = QFont(font)
+        title_font.setWeight(QFont.Weight.DemiBold)
+        if 19 <= QFontMetrics(title_font).height() <= 21:
+            matching_sizes.append(point_size)
+    assert matching_sizes, "Font metrics did not provide a 19–21px line"
+    point_size = matching_sizes[-1]
+    font = QFont(button.font())
+    font.setPointSize(point_size)
+    button.setFont(font)
+
+    painter = _PainterRecorder()
+    area = QRect(0, 0, 155, 68)
+    _draw_content(painter, button, area, under=True, two_line=True)
+    assert len(painter.labels) == 2
+    assert all(
+        abs(text_font.pointSizeF() - point_size) < .01
+        for _, _, text_font in painter.labels
+    )
+    assert painter.icons[0][1] >= area.top()
+    assert painter.labels[-1][0].bottom() <= area.bottom()
