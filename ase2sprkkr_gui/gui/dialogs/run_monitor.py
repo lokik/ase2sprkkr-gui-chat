@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
 from ase2sprkkr_gui.gui.dialogs.scf_progress import ScfProgressPage
 from ase2sprkkr_gui.gui.dialogs.jxc_progress import JxcProgressPage
+from ase2sprkkr_gui.gui.dialogs.dos_progress import DosProgressPage
 
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ class RunMonitorWindow(QDialog):
         self._output.setMaximumBlockCount(MAX_OUTPUT_BLOCKS)
         self._scf_progress: ScfProgressPage | None = None
         self._jxc_progress: JxcProgressPage | None = None
+        self._dos_progress: DosProgressPage | None = None
         task = (task_name or "").strip().lower()
         if task == "scf":
             self._scf_progress = ScfProgressPage(self, target_error=scf_tolerance)
@@ -122,6 +124,9 @@ class RunMonitorWindow(QDialog):
         elif task == "jxc":
             self._jxc_progress = JxcProgressPage(self)
             info_page = self._jxc_progress
+        elif task == "dos":
+            self._dos_progress = DosProgressPage(self)
+            info_page = self._dos_progress
         else:
             info_page = None
         if info_page is not None:
@@ -242,6 +247,8 @@ class RunMonitorWindow(QDialog):
             self._scf_progress.consume(text, kind)
         if self._jxc_progress is not None:
             self._jxc_progress.consume(text, kind)
+        if self._dos_progress is not None:
+            self._dos_progress.consume(text, kind)
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()
