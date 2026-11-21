@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QStackedWidget,
     QTabWidget,
@@ -116,17 +117,25 @@ class InputParametersDialog(QDialog):
         footer.addStretch(1)
         root.addLayout(footer)
 
-        def add_button(text: str, slot: Any, *, finish: bool = False) -> QPushButton:
+        def add_button(text: str, slot: Any | None, *, finish: bool = False) -> QPushButton:
             button = QPushButton(text, self)
-            button.clicked.connect(slot)
+            if slot is not None:
+                button.clicked.connect(slot)
             (footer if finish else file_actions).addWidget(button)
             return button
 
         self.load_btn = add_button('Load input…', self._load_input)
         self.save_btn = add_button('Save Input…', self._save_input)
-        self.load_preset_btn = add_button('Replace by preset…', self._replace_preset)
-        self.merge_preset_btn = add_button('Load preset…', self._merge_preset)
+        self.load_preset_btn = add_button('Replace by preset', None)
+        self.merge_preset_btn = add_button('Load preset', None)
+        self.replace_preset_menu = QMenu(self.load_preset_btn)
+        self.merge_preset_menu = QMenu(self.merge_preset_btn)
+        self.load_preset_btn.setMenu(self.replace_preset_menu)
+        self.merge_preset_btn.setMenu(self.merge_preset_menu)
+        self.replace_preset_menu.aboutToShow.connect(self._refresh_preset_menus)
+        self.merge_preset_menu.aboutToShow.connect(self._refresh_preset_menus)
         self.save_preset_btn = add_button('Save as preset…', self._save_preset)
+        self._refresh_preset_menus()
         self.edit_input_btn = add_button('Edit input file…', self._edit_input_file)
         file_actions.addStretch(1)
         self.cancel_btn = add_button('Cancel', self.reject, finish=True)
@@ -185,17 +194,26 @@ class InputParametersDialog(QDialog):
                 return False
         return self.tree_editor.commit_pending()
 
-    def _replace_preset(self) -> None:
-        if self._commit_pending():
-            preset_flows.load_preset(self.session, self, clear_first=True)
+    def _refresh_preset_menus(self) -> None:
+        preset_flows.populate_preset_menus(
+            self.replace_preset_menu,
+            self.merge_preset_menu,
+            self.session,
+            self,
+            on_select=self._apply_preset,
+        )
+        self.load_preset_btn.setEnabled(self.replace_preset_menu.isEnabled())
+        self.merge_preset_btn.setEnabled(self.merge_preset_menu.isEnabled())
 
-    def _merge_preset(self) -> None:
-        if self._commit_pending():
-            preset_flows.load_preset(self.session, self, clear_first=False)
+    def _apply_preset(self, name: str, clear_first: bool) -> None:
+        if self._commit_pending() and preset_flows.load_preset(
+            self.session, self, name=name, clear_first=clear_first,
+        ):
+            self._refresh_preset_menus()
 
     def _save_preset(self) -> None:
-        if self._commit_pending():
-            preset_flows.save_preset(self.session, self)
+        if self._commit_pending() and preset_flows.save_preset(self.session, self):
+            self._refresh_preset_menus()
 
     def _on_ok(self) -> None:
         self._validation_error.hide()
