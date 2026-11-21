@@ -64,5 +64,5 @@ def test_spleed_info_without_nout1_header_accepts_native_six_column_stdout():
     page = window._spleed_progress
     assert "spectral output" in page.events.toPlainText()
     assert "E = 11 eV" in page.events.toPlainText()
-    assert "spectral output: 1 points read" in page.events.toPlainText()
+    assert "spectral output: 1 point read" in page.events.toPlainText()
     window.close()
