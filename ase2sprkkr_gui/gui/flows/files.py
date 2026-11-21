@@ -468,12 +468,23 @@ def choose_and_load_output_directory(
     parent: QWidget,
 ) -> tuple[Path, ...]:
     """Choose and import an existing directory of calculation outputs."""
-    folder = QFileDialog.getExistingDirectory(
-        parent, "Open Output Directory", controller.directory or ""
-    )
+    # The native directory picker hides files. Use the Qt dialog so users can
+    # inspect output files before choosing which directory to import.
+    dialog = QFileDialog(parent, "Open Output Directory", controller.directory or "")
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+    dialog.setFileMode(QFileDialog.FileMode.Directory)
+    dialog.setOption(QFileDialog.Option.ShowDirsOnly, False)
+    dialog.setNameFilters([
+        "SPR-KKR Output Files (*.out *.log *.txt)",
+        "All Files (*)",
+    ])
+    dialog.setViewMode(QFileDialog.ViewMode.Detail)
+    if not dialog.exec():
+        return ()
+    folders = dialog.selectedFiles()
     return (
-        load_output_directory(controller, recent_files, folder, parent)
-        if folder else ()
+        load_output_directory(controller, recent_files, folders[0], parent)
+        if folders else ()
     )
 
 
