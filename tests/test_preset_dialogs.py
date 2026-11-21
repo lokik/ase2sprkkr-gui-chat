@@ -256,7 +256,7 @@ def test_guided_menu_dispatches_replace_and_merge(tmp_path, monkeypatch):
         ) or True,
     )
     assert [action.text() for action in dialog.replace_preset_menu.actions()] == [
-        "mesh (DOS input parameters)"
+        "mesh"
     ]
     dialog.replace_preset_menu.actions()[0].trigger()
     dialog.merge_preset_menu.actions()[0].trigger()
@@ -308,3 +308,46 @@ def test_preset_save_refreshes_choices(tmp_path, monkeypatch):
     assert dialog.replace_preset_menu.actions()[0].data() == (
         "input_parameters:dos.saved"
     )
+
+
+def test_preset_labels_omit_redundant_arpes_scope():
+    from ase2sprkkr_gui.gui.flows.presets import preset_labels
+
+    names = (
+        "input_parameters:arpes.default",
+        "input_parameters:arpes.high_resolution",
+    )
+    assert preset_labels(names) == {
+        "input_parameters:arpes.default": "default",
+        "input_parameters:arpes.high_resolution": "high_resolution",
+    }
+
+
+def test_preset_labels_distinguish_multiple_tasks_and_scopes():
+    from ase2sprkkr_gui.gui.flows.presets import preset_labels
+
+    names = (
+        "input_parameters:bsf.mesh",
+        "task:bsfek.mesh",
+        "task:bsfkk.mesh",
+    )
+    assert preset_labels(names) == {
+        "input_parameters:bsf.mesh": "mesh (BSF input parameters)",
+        "task:bsfek.mesh": "mesh (BSFEK task)",
+        "task:bsfkk.mesh": "mesh (BSFKK task)",
+    }
+    same_task = ("input_parameters:arpes.mesh", "task:arpes.mesh")
+    assert preset_labels(same_task) == {
+        "input_parameters:arpes.mesh": "mesh (input parameters)",
+        "task:arpes.mesh": "mesh (task)",
+    }
+
+
+def test_preset_labels_single_task_scope_stays_short():
+    from ase2sprkkr_gui.gui.flows.presets import preset_labels
+
+    names = ("task:arpes.default", "task:arpes.high_resolution")
+    assert preset_labels(names) == {
+        "task:arpes.default": "default",
+        "task:arpes.high_resolution": "high_resolution",
+    }
