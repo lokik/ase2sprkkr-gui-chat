@@ -669,10 +669,21 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     ]
     assert window._result_actions_widget._import_controls_layout.count() == 0
     assert all(
-        bar.height() == 58
+        bar.height() == 66
         for bar in navs
     )
     assert all(button.height() == 42 for bar in navs for button in bar._buttons)
+    # Fixed actions and Results utilities share the neutral card treatment.
+    assert all(
+        "border-left: 3px solid" in btn.styleSheet()
+        and "background-color:" in btn.styleSheet()
+        for bar in navs for btn in bar._buttons
+    )
+    assert all(
+        "border-left: 3px solid" in btn.styleSheet()
+        and "background-color:" in btn.styleSheet()
+        for btn in footer.findChildren(QToolButton)
+    )
     assert all(
         btn.icon().isNull() is False
         for btn in (
@@ -799,7 +810,15 @@ def test_header_and_results_footer_have_mirrored_inset_separators(tmp_path):
     for header in headers:
         assert header.minimumSizeHint().width() == 0
         assert header.minimumWidth() == 0
-        assert header.height() == 58
+        assert header.height() == 66
+        # Keep a balanced gap between the centered buttons and the rule.
+        for button in header._buttons:
+            if not button.isHidden():
+                line_y = header.height() - 1
+                button_bottom = button.mapTo(
+                    header, QPoint(0, button.height())
+                ).y()
+                assert 10 <= line_y - button_bottom <= 14
 
     footer = window._results_footer
     assert footer.frameShape() == QFrame.Shape.NoFrame
@@ -840,8 +859,9 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     application.processEvents()
     results = columns[2]
     assert results._compact
-    assert all(b.width() == 42 for b in results._buttons)
+    assert [b.width() for b in results._buttons] == [64, 42, 42]
     assert all(b.height() == 42 for b in results._buttons)
+    assert "width: 20px" in window._recent_results_button.styleSheet()
     assert window._recent_results_button.toolButtonStyle() == (
         Qt.ToolButtonStyle.ToolButtonIconOnly
     )
@@ -851,6 +871,9 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         "Load Result\\n"
     )
     assert window._recent_results_button.menu() is not None
+    assert window._recent_results_button.width() == (
+        results.COMPACT_SIZE + results.MENU_EXTRA_WIDTH
+    )
 
     # Widening restores labels and the same 160-pixel widths.
     window._layout_splitter.setSizes([1200, 900])

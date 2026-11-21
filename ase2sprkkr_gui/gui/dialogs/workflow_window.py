@@ -52,7 +52,7 @@ from ase2sprkkr_gui.gui.style import (
     SPACE_XL,
     SPACE_XS,
     SPACE_XXL,
-    button_stylesheet,
+    action_card_stylesheet,
     heading_font,
     secondary_text_stylesheet,
 )
@@ -98,6 +98,22 @@ class _RecentValidationSignals(QObject):
 
 def _check_recent_files(snapshot: RecentFilesSnapshot, signals: _RecentValidationSignals) -> None:
     signals.finished.emit(snapshot, find_missing_recent_paths(snapshot))
+
+
+def _navigation_button_stylesheet(palette: QPalette, selector: str) -> str:
+    """A muted, compact counterpart to the larger workflow action cards."""
+    accent = blend(
+        palette.color(QPalette.ColorRole.Button),
+        palette.color(QPalette.ColorRole.Mid), .78,
+    )
+    return (
+        action_card_stylesheet(
+            palette, accent, selector, accent_width=3,
+        )
+        + f"{selector} {{ padding: 3px 7px; }}"
+        + f"{selector}:disabled {{ color: "
+        f"{palette.color(QPalette.ColorRole.PlaceholderText).name()}; }}"
+    )
 
 
 class _RecentFooterButton(QToolButton):
@@ -214,12 +230,16 @@ class _HeaderActionBar(QWidget):
 
     FULL_WIDTH = 160
     COMPACT_SIZE = 42
+    MENU_EXTRA_WIDTH = 22
 
     def __init__(self, parent: QWidget, name: str, *, inset: int = 0):
         super().__init__(parent)
         self.setObjectName(name)
-        self.setFixedHeight(58)
-        self.setMinimumSize(0, 58)
+        # With 42px buttons, this leaves roughly 12px from their lower
+        # edge to the rule, matching the visual gap from the rule to the
+        # following heading (including the parent's layout spacing).
+        self.setFixedHeight(66)
+        self.setMinimumSize(0, 66)
         self.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
@@ -299,7 +319,11 @@ class _HeaderActionBar(QWidget):
             self._compact = compact
             for button in self._buttons:
                 if compact:
-                    button.setFixedWidth(self.COMPACT_SIZE)
+                    width = self.COMPACT_SIZE + (
+                        self.MENU_EXTRA_WIDTH
+                        if isinstance(button, _RecentFooterButton) else 0
+                    )
+                    button.setFixedWidth(width)
                 else:
                     button.setMinimumWidth(0)
                     button.setMaximumWidth(self.FULL_WIDTH)
@@ -317,7 +341,7 @@ class _HeaderActionBar(QWidget):
                     style = self._styles[button]
                     if compact:
                         style += (
-                            "QToolButton::menu-button { width: 14px; }"
+                            "QToolButton::menu-button { width: 20px; }"
                         )
                     button.setStyleSheet(style)
                 elif isinstance(button, QToolButton):
@@ -430,8 +454,9 @@ class WorkflowWindow(QMainWindow):
             )
             mid = button.palette().color(QPalette.ColorRole.Mid).name()
             button.setStyleSheet(
-                button_stylesheet(button.palette(), selector="QToolButton")
-                + "QToolButton { padding: 2px 6px; } "
+                _navigation_button_stylesheet(
+                    button.palette(), "QToolButton"
+                )
                 + f"QToolButton::menu-button {{ width: 28px; border-left: 1px solid {mid}; }}"
             )
             if recent_menu:
@@ -652,7 +677,7 @@ class WorkflowWindow(QMainWindow):
             self._result_actions_widget.import_directory_button,
         ):
             button.setStyleSheet(
-                button_stylesheet(button.palette(), selector="QPushButton")
+                _navigation_button_stylesheet(button.palette(), "QPushButton")
             )
             side_navigation.register(button)
 
@@ -698,7 +723,7 @@ class WorkflowWindow(QMainWindow):
                 QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
             )
             button.setStyleSheet(
-                button_stylesheet(button.palette(), selector="QToolButton")
+                _navigation_button_stylesheet(button.palette(), "QToolButton")
             )
             button.setToolTip(tooltip)
             button.setAccessibleName(label)
