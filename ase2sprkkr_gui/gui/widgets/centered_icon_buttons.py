@@ -26,9 +26,12 @@ def _wrap_title(text: str, metrics: QFontMetrics, width: int) -> list[str]:
     return lines
 
 
-def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
+def _draw_content(
+    painter, button, rect: QRect, *, under: bool = False,
+    two_line: bool = False,
+) -> None:
     """Paint inside the clickable rect, never into the split-menu arrow."""
-    bounds = rect.adjusted(7, 4, -7, -4)
+    bounds = rect.adjusted(7, 2 if two_line else 4, -7, -2 if two_line else -4)
     if bounds.width() <= 0 or bounds.height() <= 0:
         return
     icon = button.icon().pixmap(
@@ -60,6 +63,60 @@ def _draw_content(painter, button, rect: QRect, *, under: bool = False) -> None:
             return
 
         base_font = button.font()
+        if under and two_line:
+            # At most two text rows: wrap a plain title, or use the second
+            # row for the most recent filename (the entire path is a tooltip).
+            title_font = QFont(base_font)
+            title_font.setBold(True)
+            file_font = QFont(base_font)
+            file_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .85))
+            title_metrics = QFontMetrics(title_font)
+            file_metrics = QFontMetrics(file_font)
+            title_lines = (
+                [title_metrics.elidedText(
+                    title, Qt.TextElideMode.ElideRight, bounds.width(),
+                )] if filename else
+                _wrap_title(title, title_metrics, bounds.width())
+            )
+            # Reduce the text slightly only if the system font needs it.
+            height = (ih + 2 + len(title_lines) * title_metrics.height()
+                      + (file_metrics.height() if filename else 0))
+            if height > bounds.height():
+                title_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .9))
+                file_font.setPointSizeF(max(7.0, base_font.pointSizeF() * .8))
+                title_metrics = QFontMetrics(title_font)
+                file_metrics = QFontMetrics(file_font)
+                title_lines = (
+                    [title_metrics.elidedText(
+                        title, Qt.TextElideMode.ElideRight, bounds.width(),
+                    )] if filename else
+                    _wrap_title(title, title_metrics, bounds.width())
+                )
+                height = (ih + 2 + len(title_lines) * title_metrics.height()
+                          + (file_metrics.height() if filename else 0))
+            top = bounds.center().y() - height // 2
+            painter.drawPixmap(bounds.center().x() - iw // 2, top, icon)
+            text_y = top + ih + 2
+            painter.setFont(title_font)
+            for line in title_lines:
+                painter.drawText(
+                    QRect(bounds.left(), text_y, bounds.width(),
+                          title_metrics.height()),
+                    Qt.AlignmentFlag.AlignCenter, line,
+                )
+                text_y += title_metrics.height()
+            if filename:
+                painter.setFont(file_font)
+                painter.drawText(
+                    QRect(bounds.left(), text_y, bounds.width(),
+                          file_metrics.height()),
+                    Qt.AlignmentFlag.AlignCenter,
+                    file_metrics.elidedText(
+                        filename, Qt.TextElideMode.ElideLeft, bounds.width(),
+                    ),
+                )
+            return
+
         if under:
             metrics = QFontMetrics(base_font)
             label = metrics.elidedText(
@@ -145,6 +202,7 @@ class CenteredIconToolButton(QToolButton):
         _draw_content(
             painter, self, main_rect,
             under=self.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
+            two_line=bool(self.property("twoLineUnderIcon")),
         )
 
 
@@ -161,4 +219,7 @@ class CenteredIconPushButton(QPushButton):
         content_rect = self.style().subElementRect(
             QStyle.SubElement.SE_PushButtonContents, option, self,
         )
-        _draw_content(painter, self, content_rect)
+        two_line = bool(self.property("twoLineUnderIcon"))
+        _draw_content(
+            painter, self, content_rect, under=two_line, two_line=two_line,
+        )
