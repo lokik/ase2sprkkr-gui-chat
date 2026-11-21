@@ -15,11 +15,13 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
+from ase2sprkkr_gui.gui.dialogs.scf_progress import ScfProgressPage
 
 
 logger = logging.getLogger(__name__)
@@ -72,6 +74,8 @@ class RunMonitorWindow(QDialog):
         background_thread_factory: Callable[..., Any] = Thread,
         autostart: bool = True,
         observation_only: bool = False,
+        scf: bool = False,
+        scf_tolerance: float | None = None,
     ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -108,7 +112,15 @@ class RunMonitorWindow(QDialog):
         self._output = QPlainTextEdit(self)
         self._output.setReadOnly(True)
         self._output.setMaximumBlockCount(MAX_OUTPUT_BLOCKS)
-        layout.addWidget(self._output, 1)
+        self._scf_progress: ScfProgressPage | None = None
+        if scf:
+            self._scf_progress = ScfProgressPage(self, target_error=scf_tolerance)
+            self._tabs = QTabWidget(self)
+            self._tabs.addTab(self._scf_progress, "INFO")
+            self._tabs.addTab(self._output, "Output")
+            layout.addWidget(self._tabs, 1)
+        else:
+            layout.addWidget(self._output, 1)
 
         buttons = QHBoxLayout()
         self._stop_btn = QPushButton("Stop monitoring" if observation_only else "Stop", self)
@@ -216,6 +228,8 @@ class RunMonitorWindow(QDialog):
 
     @pyqtSlot(str, str)
     def _append_output(self, text: str, kind: str) -> None:
+        if self._scf_progress is not None:
+            self._scf_progress.consume(text, kind)
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()

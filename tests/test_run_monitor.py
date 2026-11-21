@@ -192,3 +192,15 @@ def test_new_run_displays_job_id_when_persistent_id_arrives():
     assert not window._job_id_label.isHidden()
     assert ids == ["run-17"]
     window.close()
+
+
+def test_attached_scf_monitor_shows_info_and_accepts_replayed_iterations():
+    app = QApplication.instance() or QApplication([])
+    window = create_attached_run_monitor_window(_job(), _Source(None), autostart=False)
+    assert window._scf_progress is not None
+
+    line = " 5 ERR 0.211E-02 0.208E-01 EF 0.76199 0.00307 D 14.537 M 2.1740 0.0536\n"
+    window._append_output(line, "out")
+    assert window._scf_progress.tracker.iterations[0].number == 5
+    assert window._output.toPlainText().strip() == line.strip()
+    window.close()
