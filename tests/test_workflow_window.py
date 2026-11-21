@@ -6,7 +6,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 from ase import Atoms
 from types import SimpleNamespace
 from PyQt6.QtCore import Qt, QPoint, QSize
-from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMessageBox, QSizePolicy, QSplitter, QToolButton, QWidget
+from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMessageBox, QSizePolicy, QToolButton, QWidget
 
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -216,7 +216,9 @@ def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
     assert [row.itemAt(i).widget() for i in range(3)] == list(columns)
     assert [row.stretch(i) for i in range(3)] == [1, 1, 1]
     assert row.spacing() == 8  # Preserve gaps between the content columns.
-    assert not window.findChildren(QSplitter)
+    root_layout = window.centralWidget().layout()
+    assert root_layout.itemAt(0).layout() is row
+    assert root_layout.itemAt(0).widget() is None
     for column in columns[:2]:
         header = column.layout().itemAt(0).widget()
         body = column.layout().itemAt(1).widget()
