@@ -18,9 +18,11 @@ from ase2sprkkr_gui.gui.dialogs.scf_progress import (
 )
 
 
-def _native_line(number=6, fermi="0.76199", field="0.208E-01"):
+def _native_line(
+    number=6, fermi="0.76199", field="0.208E-01", potential="0.211E-02"
+):
     return (
-        f" {number} ERR 0.211E-02 {field} EF {fermi} "
+        f" {number} ERR {potential} {field} EF {fermi} "
         "0.00307 D 14.537 M 2.1740 0.0536\n"
     )
 
@@ -133,10 +135,10 @@ def test_target_is_visible_before_first_iteration_and_remains_in_view():
     low, high = page.error_axis.get_ylim()
     assert low < 1e-6 < high and high > 2.08e-2
 
-    page.consume(_native_line(2, field="0.3E-09"), "out")
+    page.consume(_native_line(2, field="0.3E-09", potential="0.3E-09"), "out")
     page._redraw()
     low, high = page.error_axis.get_ylim()
-    assert low < 1e-6 < high
+    assert low < 3e-10 < 1e-6 < high
     page.close()
 
 
