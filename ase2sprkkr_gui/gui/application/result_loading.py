@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ase2sprkkr import Potential, TaskResult
+from ase2sprkkr.outputs import looks_like_scf_output
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
@@ -240,16 +241,43 @@ def load_result(
     )
 
 
+def _scf_candidate_sort_key(
+    path: Path, selected_stem: str, selected_task: str,
+) -> tuple[int, str]:
+    """Prioritize the same dataset's SCF output, without assuming a naming rule."""
+    base = selected_stem.casefold()
+    task = selected_task.casefold()
+    # E.g. Fe_DOS.out -> Fe_SCF.out (also handle Fe_DOS_DOS.out).
+    for separator in ("_", "-", "."):
+        suffix = separator + task
+        while base.endswith(suffix):
+            base = base[:-len(suffix)]
+
+    stem = path.stem.casefold()
+    if any(stem == base + separator + "scf" for separator in ("_", "-", ".")):
+        rank = 0
+    elif stem == base or any(
+        stem.startswith(base + separator) for separator in ("_", "-", ".")
+    ):
+        rank = 1
+    elif "scf" in stem:
+        rank = 2
+    else:
+        rank = 3
+    return rank, stem
+
+
 def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
     """Try to find the SCF output that produced a non-SCF result's potential.
 
-    Same-directory proximity alone is not enough: the SCF output must reference
-    exactly the potential used by the selected result. An absent, unreadable or
-    unrelated output is never an error for the selected result.
+    First try similarly named .out files, then other .out files whose opening
+    banner says KKRSCF. A match also must reference exactly the same potential.
+    Missing, unreadable, or unrelated outputs are never errors for the result.
     """
     if loaded.output_path is None or loaded.potential_path is None:
         return None
-    if str(getattr(loaded.result, "task_name", "")).casefold() == "scf":
+    task_name = str(getattr(loaded.result, "task_name", "")).casefold()
+    if task_name == "scf":
         return None
 
     directory = loaded.output_path.parent
@@ -258,13 +286,17 @@ def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
         candidates = sorted(
             (path for path in directory.iterdir()
              if path != loaded.output_path and path.is_file()
-             and path.suffix.lower() in {".out", ".log", ".txt"}),
-            key=lambda path: ("scf" not in path.stem.casefold(), path.name.casefold()),
+             and path.suffix.casefold() == ".out"),
+            key=lambda path: _scf_candidate_sort_key(
+                path, loaded.output_path.stem, task_name,
+            ),
         )
     except OSError:
         return None
 
     for path in candidates:
+        if not looks_like_scf_output(path):
+            continue
         try:
             result = TaskResult.from_file(path)
             if str(getattr(result, "task_name", "")).casefold() != "scf":
