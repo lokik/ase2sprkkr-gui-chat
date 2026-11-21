@@ -86,7 +86,7 @@ class ScfProgressTracker:
     def __init__(self, target_error: float | None = None) -> None:
         self.iterations: list[ScfIteration] = []
         self.target_error = _positive_tolerance(target_error)
-        self.last_info_line = "Preparing first iteration…"
+        self.last_info_line = "Preparing first iteration..."
         self._partial = ""
 
     def feed(self, text: str, kind: str = "out") -> bool:
