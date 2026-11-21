@@ -154,3 +154,36 @@ def test_recent_header_shows_title_and_filename_in_two_rows():
     assert "Recent" in painter.labels[0][1]
     assert "Fe2_SCF.out" in painter.labels[1][1]
     assert all(rect.right() <= area.right() for rect, _, _ in painter.labels)
+
+
+def test_header_icons_and_command_rows_align_for_all_text_lengths():
+    area = QRect(0, 0, 112, 68)
+    placements = []
+    for title in ("Load Result", "Start from Scratch", "Recent\\nFe2_SCF.out"):
+        button = _button(title, Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        button.setProperty("twoLineUnderIcon", True)
+        painter = _PainterRecorder()
+        _draw_content(painter, button, area, under=True, two_line=True)
+        placements.append((
+            painter.icons[0][1],
+            painter.labels[0][0].top(),
+        ))
+    assert placements[0] == placements[1] == placements[2]
+
+
+def test_header_uses_semibold_command_and_quieter_filename():
+    button = _button(
+        "Recent Results\\nFe2_SCF.out",
+        Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
+    )
+    painter = _PainterRecorder()
+    _draw_content(
+        painter, button, QRect(0, 0, 140, 68),
+        under=True, two_line=True,
+    )
+    assert len(painter.labels) == 2
+    title_font = painter.labels[0][2]
+    filename_font = painter.labels[1][2]
+    assert title_font.weight() == QFont.Weight.DemiBold
+    assert filename_font.weight() < title_font.weight()
+    assert filename_font.pointSizeF() < title_font.pointSizeF()
