@@ -33,8 +33,8 @@ def test_spleed_info_tab_tracks_native_diagram_without_percentages():
     page = window._spleed_progress
 
     assert page.last_info.text() == "SPLEED calculation finished"
-    assert "SPLEED I(E): 1 points read" in page.events.toPlainText()
-    assert "SPLEED I(E) diagram: 2 points read" in page.events.toPlainText()
+    assert "SPLEED i(e)-diagram: 1 point read" in page.events.toPlainText()
+    assert "SPLEED i(e)-diagram: 2 points read" in page.events.toPlainText()
     assert "%" not in page.events.toPlainText()
     assert "i(e)-diagram" in window._output.toPlainText()
     window.close()
