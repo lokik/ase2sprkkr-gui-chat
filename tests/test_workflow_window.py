@@ -57,6 +57,26 @@ def _commands(window):
     )
 
 
+
+def test_header_load_and_import_icons_are_the_matching_asset_family(tmp_path):
+    _application = QApplication.instance() or QApplication([])
+    from PyQt6.QtGui import QIcon
+    from ase2sprkkr_gui.gui.misc.icons import badge_icon
+    from ase2sprkkr_gui.gui.misc.resources import icon_path
+
+    gui, guided = _workflow(tmp_path)
+    expected_icons = (
+        (guided._load_input_button, "input-parameters.svg"),
+        (guided.result_actions_widget.load_result_button, "result-graph.svg"),
+        (guided.result_actions_widget.import_directory_button, "results-folder.svg"),
+    )
+    for button, asset in expected_icons:
+        expected = badge_icon(QIcon(str(icon_path(asset))), "load")
+        assert not expected.isNull()
+        assert button.icon().pixmap(26, 26).toImage() == expected.pixmap(26, 26).toImage()
+    guided.close()
+
+
 def test_results_load_button_imports_output_in_guided(tmp_path, monkeypatch):
     _application = QApplication.instance() or QApplication([])
     gui, guided = _workflow(tmp_path)
