@@ -256,8 +256,10 @@ class ResultActionsWidget(QWidget):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
         record_actions_layout.addWidget(values_slot, 2)
-        # Show all values is independent of whether Recompute is applicable.
+        # Show all values is independent of whether Recompute is applicable,
+        # but neither control is useful until a result is selected.
         self._recompute_button.hide()
+        self._record_actions.hide()
 
         self._result_file_warning = QLabel("", self)
         self._result_file_warning.setWordWrap(True)
@@ -487,7 +489,7 @@ class ResultActionsWidget(QWidget):
         self._recompute_button.setVisible(recompute is not None)
         self._recompute_button.setText("Recompute")
         self._recompute_button.setToolTip(recompute.label if recompute else "")
-        self._record_actions.setVisible(True)
+        self._record_actions.setVisible(self._current_presentation is not None)
 
     def _use_selected_state(self) -> None:
         result_id = self.selected_result_id

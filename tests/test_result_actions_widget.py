@@ -119,7 +119,7 @@ def test_results_toolbar_has_equal_width_buttons_and_load_action():
     assert widget.show_all_values_checkbox.parentWidget().parentWidget() is (
         widget._record_actions
     )
-    assert not widget._record_actions.isHidden()
+    assert widget._record_actions.isHidden()  # No result selected yet.
     assert widget._recompute_button.isHidden()
     assert not widget._use_state_button.isEnabled()
     assert widget._bottom_controls.isHidden()  # No results to select yet.
