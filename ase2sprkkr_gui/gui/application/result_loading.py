@@ -54,6 +54,8 @@ class LoadedResult:
     persistent_ref: str | None = None
     file_backed_input: FileBackedInput | None = None
     output_potential_version: PotentialFileVersion | None = None
+    # Captured before parsing and verified afterwards, for one-shot reuse.
+    parsed_potential_version: PotentialFileVersion | None = None
     source_versions: tuple[PotentialFileVersion, ...] = ()
 
 
@@ -132,6 +134,16 @@ def load_result(
     if output is None and output_fallback is not None:
         output = Path(output_fallback).resolve()
 
+    # Reusing parsed Atoms is safe only if these are still the exact bytes
+    # represented by the state recorded after parsing. Capture *before* read.
+    pre_read_potential_version = None
+    if potential is not None:
+        try:
+            if potential.is_file():
+                pre_read_potential_version = PotentialFileVersion.capture(potential)
+        except OSError:
+            pass  # A missing/unreadable POTFIL is reported by the normal loader.
+
     # Native embedded output identifies its host through CONTROL.POTFIL.
     # Capture that file before parsing the CLUPOT, then verify the very same
     # version afterwards. Do not guess a host from neighboring filenames.
@@ -175,6 +187,8 @@ def load_result(
             and reusable_potential.potential_path == potential
             and reusable_potential.atoms is not None
             and reusable_potential.potential_error is None
+            and reusable_potential.parsed_potential_version is not None
+            and reusable_potential.parsed_potential_version == pre_read_potential_version
         ):
             # The selected output has already parsed exactly this POTFIL.
             # Preserve the per-result manifest checks above and below.
@@ -197,6 +211,14 @@ def load_result(
     source_versions = (
         (host_version,) if atoms is not None and host_version is not None else ()
     )
+    parsed_potential_version = None
+    if atoms is not None and pre_read_potential_version is not None:
+        try:
+            if (pre_read_potential_version.available
+                    and pre_read_potential_version.is_current()):
+                parsed_potential_version = pre_read_potential_version
+        except OSError:
+            pass  # Re-parse when restoring instead of reusing unverified data.
     input_parameters, input_parameters_error = _load_input_parameters(result)
     directory = str(output.parent.resolve()) if output is not None else None
     return LoadedResult(
@@ -214,6 +236,7 @@ def load_result(
             if potential is not None and manifest is not None else None
         ),
         source_versions=source_versions,
+        parsed_potential_version=parsed_potential_version,
     )
 
 

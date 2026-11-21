@@ -7,6 +7,7 @@ from typing import Any, Union
 
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 from ase2sprkkr_gui.gui.application.result_loading import (
+    LoadedResult,
     load_potential_version,
     require_potential_version_current,
 )
@@ -69,9 +70,26 @@ def _load_state_version(
     return load_potential_version(version)
 
 
-def _restore_state_atoms(state: CalculationStateRecord) -> Any:
+def _restore_state_atoms(
+    state: CalculationStateRecord, *,
+    reusable_loaded: LoadedResult | None = None,
+) -> Any:
     _require_source_versions(state)
     version = state.potential_version
+    if (
+        version is not None
+        and version.available
+        and reusable_loaded is not None
+        and reusable_loaded.atoms is not None
+        and reusable_loaded.potential_error is None
+        and reusable_loaded.parsed_potential_version == version
+        and reusable_loaded.potential_path == version.path
+        and reusable_loaded.source_versions == state.source_dependencies
+    ):
+        # The loader verified these atoms against the very same file version.
+        # Still reject a modification made after parsing / during publication.
+        require_potential_version_current(version)
+        return reusable_loaded.atoms
     if version is not None and version.available:
         return _load_state_version(version, state)
     if state.structure_snapshot is not None:
@@ -85,6 +103,7 @@ def resolve_historical_state(
     *,
     active_state_id: int | None = None,
     expected_potential: PotentialFileVersion | None = None,
+    reusable_loaded: LoadedResult | None = None,
 ) -> HistoricalStateResolution:
     """Resolve the physical input for a historical result without mutating ``store``.
 
@@ -97,7 +116,7 @@ def resolve_historical_state(
     state = _state_for_result(store, result_id)
     if expected_potential is None:
         return ExistingHistoricalState(
-            atoms=_restore_state_atoms(state),
+            atoms=_restore_state_atoms(state, reusable_loaded=reusable_loaded),
             state=state,
         )
 

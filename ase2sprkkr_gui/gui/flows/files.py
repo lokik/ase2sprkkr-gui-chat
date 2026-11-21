@@ -664,6 +664,7 @@ def continue_output(
                 change = controller.use_result_state(
                     record.id,
                     expected_structure_generation=structure_generation,
+                    reusable_loaded=loaded,
                 )
             except (ValueError, PotentialVersionChanged) as exc:
                 _remember_output_load(adoption, recent_files, file_path)

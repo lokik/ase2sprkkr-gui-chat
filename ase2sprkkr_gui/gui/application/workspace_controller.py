@@ -928,6 +928,7 @@ class WorkspaceController(QObject):
         expected_potential: PotentialFileVersion | None = None,
         *,
         expected_structure_generation: Generation | None = None,
+        reusable_loaded: LoadedResult | None = None,
     ) -> DocumentChange:
         rejected, _ = self._prepare_change(
             ((
@@ -945,6 +946,7 @@ class WorkspaceController(QObject):
             result_id,
             active_state_id=self.state_id,
             expected_potential=expected_potential,
+            reusable_loaded=reusable_loaded,
         )
         if isinstance(resolution, HistoricalStateAlreadyActive):
             return DocumentChange.APPLIED
