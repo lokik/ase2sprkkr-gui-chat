@@ -222,7 +222,7 @@ def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
     for column in columns[:2]:
         header = column.layout().itemAt(0).widget()
         body = column.layout().itemAt(1).widget()
-        assert header.layout().itemAt(0).layout().spacing() == 2
+        assert header._button_row.spacing() == 2
         assert column.layout().contentsMargins().right() == 0
         assert body.layout().contentsMargins().right() == 24
 
@@ -233,12 +233,13 @@ def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
 
     full_widths = equal_thirds()
     assert min(full_widths) >= 3 * 200 + 2 * 2
-    assert not any(bar._compact for bar in window._header_bars)
+    assert all(bar._mode == "short" for bar in window._header_bars)
+    assert window._calculate_navigation.layout().contentsMargins().right() == 24
     window.resize(1360, 800)
     application.processEvents()
     narrow_widths = equal_thirds()
     assert all(narrow < full for narrow, full in zip(narrow_widths, full_widths))
-    assert all(bar._compact for bar in window._header_bars)
+    assert all(bar._mode == "icon" for bar in window._header_bars)
     window.close()
 
 
@@ -676,9 +677,14 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     )
     assert window._result_actions_widget.load_result_button.parentWidget() is navs[2]
     assert all(
-        nav.layout().itemAt(0).layout() is nav._button_row
-        and nav.layout().itemAt(1).spacerItem() is not None
+        nav.layout().itemAt(1 if nav is navs[1] else 0).layout() is nav._button_row
         for nav in navs
+    )
+    assert navs[1].layout().itemAt(0).spacerItem() is not None
+    assert navs[1].layout().itemAt(2).spacerItem() is not None
+    assert all(
+        nav.layout().itemAt(1).spacerItem() is not None
+        for nav in (navs[0], navs[2])
     )
     assert all(
         nav._button_row.itemAt(i).widget() is button
@@ -918,7 +924,7 @@ def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
     window.resize(1360, 850)
     application.processEvents()
     check_positions()
-    assert all(bar._compact for bar in window._header_bars)
+    assert all(bar._mode == "icon" for bar in window._header_bars)
     # In particular, Results buttons must not jump to the far right.
     results = window._header_bars[2]
     assert window._result_actions_widget.load_result_button.x() >= 0
@@ -939,7 +945,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         window.findChild(QWidget, "workflowResultsNavigation"),
     )
     for bar in columns:
-        assert not bar._compact
+        assert bar._mode == "full"
         for button in bar._buttons:
             if not button.isHidden():
                 assert button.width() == bar.FULL_WIDTH
@@ -949,7 +955,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
                     - (bar.height() - button.height()) // 2
                 ) <= 2
     assert not window._result_actions_widget.load_result_button.text() == ""
-    assert all(not bar._compact for bar in columns)
+    assert all(bar._mode == "full" for bar in columns)
     assert all(
         [button.width() for button in bar._buttons if not button.isHidden()]
         == [200] * sum(not b.isHidden() for b in bar._buttons)
@@ -960,8 +966,8 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     window.resize(1360, 850)
     application.processEvents()
     results = columns[2]
-    assert results._compact
-    assert all(bar._compact for bar in columns)
+    assert results._mode == "icon"
+    assert all(bar._mode == "icon" for bar in columns)
     assert [b.width() for b in results._buttons] == [80, 58, 58]
     assert [b.width() for b in columns[1]._buttons] == [80, 58, 58]
     assert window._recent_structures_button.width() == 80
@@ -993,12 +999,12 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     # Widening the window restores all 200-pixel buttons.
     window.resize(2140, 900)
     application.processEvents()
-    assert not results._compact
+    assert results._mode == "full"
     assert window._result_actions_widget.load_result_button.text() == "Load Result"
     assert [b.width() for b in results._buttons] == [200, 200, 200]
     for button in results._buttons:
         assert not button.grab().isNull()
-    assert all(not bar._compact for bar in columns)
+    assert all(bar._mode == "full" for bar in columns)
     window.close()
 
 
@@ -1039,7 +1045,8 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
             "output": "Recent Results",
         }[kind]
         assert "\n" in button.text()
-        assert "…/" + paths[kind][1].name in button.text()
+        assert paths[kind][1].name in button.text()
+        assert "…/" not in button.text()
         assert str(tmp_path) not in button.text()
         assert str(paths[kind][1]) in button.toolTip()
         assert "width: 28px" in button.styleSheet()
