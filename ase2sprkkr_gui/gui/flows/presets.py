@@ -27,12 +27,30 @@ def available_presets(
     )
 
 
-def _preset_label(identifier: str) -> str:
-    """Show the friendly name, retaining scope to disambiguate collisions."""
-    scope, qualified = identifier.split(":", 1)
-    owner, name = qualified.split(".", 1)
-    kind = "task" if scope == "task" else "input parameters"
-    return f"{name} ({owner.upper()} {kind})"
+def preset_labels(identifiers: Iterable[str]) -> dict[str, str]:
+    """Use short names when all presets share a scope; qualify differences."""
+    parts = {}
+    for identifier in identifiers:
+        scope, qualified = identifier.split(":", 1)
+        owner, name = qualified.split(".", 1)
+        parts[identifier] = (scope, owner, name)
+
+    scopes = {scope for scope, _, _ in parts.values()}
+    owners = {owner for _, owner, _ in parts.values()}
+    distinguish_scopes = len(scopes) > 1
+    distinguish_owners = len(owners) > 1
+
+    labels = {}
+    for identifier, (scope, owner, name) in parts.items():
+        qualifiers = []
+        if distinguish_owners:
+            qualifiers.append(owner.upper())
+        if distinguish_scopes:
+            qualifiers.append("task" if scope == "task" else "input parameters")
+        labels[identifier] = (
+            f"{name} ({' '.join(qualifiers)})" if qualifiers else name
+        )
+    return labels
 
 
 def populate_preset_menus(
@@ -51,12 +69,13 @@ def populate_preset_menus(
         QMessageBox.critical(parent, "Load presets failed", str(exc))
         names = ()
 
+    labels = preset_labels(names)
     current_task = session.working_parameters.task_name
     for clear_first, menu in ((True, replace_menu), (False, merge_menu)):
         menu.clear()
         menu.setToolTipsVisible(True)
         for name in names:
-            action = menu.addAction(_preset_label(name))
+            action = menu.addAction(labels[name])
             action.setData(name)
             if not clear_first and name.startswith("task:"):
                 owner = name.split(":", 1)[1].split(".", 1)[0]
