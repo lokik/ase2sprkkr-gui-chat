@@ -239,7 +239,7 @@ def test_dos_monitor_uses_structured_progress_and_preserves_raw_output():
     )
     assert window._dos_progress is not None
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
-    assert not window._dos_progress.progress.isVisible()
+    assert window._dos_progress.progress.isHidden()
 
     window._append_output("13/300 do", "out")
     assert window._dos_progress.last_info.text() == "Preparing DOS calculation..."
@@ -329,12 +329,13 @@ def test_dos_info_native_energy_blocks_count_points_not_atomic_components():
     window._append_output("13 E= 0.4061 0.0100 IT= 1 Ti\n", "out")
     window._append_output("13 E= 0.4061 0.0100 IT= 2 Co\n", "out")
     assert window._dos_progress.last_info.text() == "Calculating density of states..."
-    assert not window._dos_progress.progress.isVisible()
+    assert window._dos_progress.progress.isHidden()
 
     window._append_output("14 E= 0.4081 0.0100 IT= 1 Ti\n", "out")
     assert window._dos_progress.last_info.text() == "13/300 done."
     assert window._dos_progress.progress.maximum() == 300
     assert window._dos_progress.progress.value() == 13
+    assert not window._dos_progress.progress.isHidden()
     window._append_output("14 E= 0.4081 0.0100 IT= 2 Co\n", "out")
     assert window._dos_progress.progress.value() == 13
     window.close()
@@ -348,5 +349,5 @@ def test_dos_info_unknown_total_does_not_show_percentage():
     window._append_output("13 E= 0.4061 0.0100 IT= 1 Ti\n", "out")
     window._append_output("14 E= 0.4081 0.0100 IT= 1 Ti\n", "out")
     assert window._dos_progress.last_info.text() == "13 energy points done."
-    assert not window._dos_progress.progress.isVisible()
+    assert window._dos_progress.progress.isHidden()
     window.close()
