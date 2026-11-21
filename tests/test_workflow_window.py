@@ -840,14 +840,12 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     window.resize(1920, 820)
     application.processEvents()
     visible_and_within_columns()
-    assert not any(bar._compact for bar in window._header_bars)
+    assert all(bar._mode == "short" for bar in window._header_bars)
     window.resize(1100, 750)
     application.processEvents()
     assert window.width() < 1350  # Must not be pinned by header labels.
     visible_and_within_columns()
-    assert all(
-        bar._compact for bar in window._header_bars
-    )
+    assert all(bar._mode == "icon" for bar in window._header_bars)
     window.close()
 
 
@@ -906,11 +904,20 @@ def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
         for header in window._header_bars:
             buttons = [button for button in header._buttons if button.isVisible()]
             assert header._button_row.count() == len(header._buttons)
-            assert header.layout().itemAt(0).layout() is header._button_row
-            assert header.layout().itemAt(1).spacerItem() is not None
+            middle = header is window._calculate_navigation
+            assert header.layout().itemAt(1 if middle else 0).layout() is header._button_row
+            assert header.layout().itemAt(2 if middle else 1).spacerItem() is not None
             assert buttons
-            # The first action starts at the column's left edge.
-            assert abs(buttons[0].mapTo(header, QPoint(0, 0)).x()) <= 1
+            if middle:
+                assert header.layout().itemAt(0).spacerItem() is not None
+                # Keep the toolbar centered on the padded Calculate body.
+                left = buttons[0].mapTo(header, QPoint(0, 0)).x()
+                right = buttons[-1].mapTo(header, QPoint(buttons[-1].width(), 0)).x()
+                expected_center = (header.width() - 24) / 2
+                assert abs((left + right) / 2 - expected_center) <= 2
+                assert left >= 0 and right <= header.width() - 24
+            else:
+                assert abs(buttons[0].mapTo(header, QPoint(0, 0)).x()) <= 1
             for left, right in zip(buttons, buttons[1:]):
                 assert right.mapTo(header, QPoint(0, 0)).x() >= (
                     left.mapTo(header, QPoint(0, 0)).x()
@@ -962,7 +969,22 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         for bar in columns
     )
 
-    # Shrink the whole window: all equal columns collapse together.
+    # Between the full and icon-only modes, shorter labels are used.
+    window.resize(1600, 850)
+    application.processEvents()
+    assert all(bar._mode == "short" for bar in columns)
+    assert all(
+        button.width() == bar.SHORT_WIDTH
+        for bar in columns for button in bar._buttons
+        if not button.isHidden()
+    )
+    assert window._recent_results_button.text().startswith("Recent")
+    assert window._result_actions_widget.load_result_button.text() == "Load"
+    assert window._result_actions_widget.import_directory_button.text() == "Import"
+    assert window._load_input_button.text() == "Load"
+    assert window._custom_button.text() == "Custom"
+
+    # Shrink again: all equal columns collapse to centered icons together.
     window.resize(1360, 850)
     application.processEvents()
     results = columns[2]
