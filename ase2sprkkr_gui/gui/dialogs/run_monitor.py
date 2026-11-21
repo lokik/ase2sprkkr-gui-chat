@@ -30,6 +30,7 @@ from ase2sprkkr_gui.gui.dialogs.jxc_progress import JxcProgressPage
 from ase2sprkkr_gui.gui.dialogs.dos_progress import DosProgressPage
 from ase2sprkkr_gui.gui.dialogs.bsf_progress import BsfProgressPage
 from ase2sprkkr_gui.gui.dialogs.spleed_progress import SpleedProgressPage
+from ase2sprkkr_gui.gui.dialogs.arpes_progress import ArpesProgressPage
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 
 
@@ -132,6 +133,7 @@ class RunMonitorWindow(QDialog):
         self._dos_progress: DosProgressPage | None = None
         self._bsf_progress: BsfProgressPage | None = None
         self._spleed_progress: SpleedProgressPage | None = None
+        self._arpes_progress: ArpesProgressPage | None = None
         task = (task_name or "").strip().lower()
         if task == "scf":
             self._scf_progress = ScfProgressPage(self, target_error=scf_tolerance)
@@ -148,6 +150,9 @@ class RunMonitorWindow(QDialog):
         elif task == "spleed":
             self._spleed_progress = SpleedProgressPage(self)
             info_page = self._spleed_progress
+        elif task == "arpes":
+            self._arpes_progress = ArpesProgressPage(self)
+            info_page = self._arpes_progress
         else:
             info_page = None
         # Every monitor can gain Results and Plot tabs after completion.
@@ -298,6 +303,8 @@ class RunMonitorWindow(QDialog):
             self._bsf_progress.consume(text, kind)
         if self._spleed_progress is not None:
             self._spleed_progress.consume(text, kind)
+        if self._arpes_progress is not None:
+            self._arpes_progress.consume(text, kind)
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()
