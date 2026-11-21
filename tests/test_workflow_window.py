@@ -988,10 +988,10 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         if not button.isHidden()
     )
     assert window._recent_results_button.text().startswith("Recent")
-    assert window._result_actions_widget.load_result_button.text() == "Load"
-    assert window._result_actions_widget.import_directory_button.text() == "Import"
-    assert window._load_input_button.text() == "Load"
-    assert window._custom_button.text() == "Custom"
+    assert window._result_actions_widget.load_result_button.text() == "Load Result"
+    assert window._result_actions_widget.import_directory_button.text() == "Import Directory"
+    assert window._load_input_button.text() == "Load Input"
+    assert window._custom_button.text() == "Custom Input"
 
     # Intermediate widths keep readable text instead of switching to icons.
     window.resize(1360, 850)
@@ -1014,7 +1014,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert window._result_actions_widget.load_result_button.text() == ""
     assert window._result_actions_widget.import_directory_button.text() == ""
     assert window._result_actions_widget.load_result_button.toolTip().startswith(
-        "Load Result\\n"
+        "Load Result File\\n"
     )
     assert window._recent_results_button.menu() is not None
     # Exercise custom painters both with labels and with menu arrows.
@@ -1034,7 +1034,10 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     window.resize(2140, 900)
     application.processEvents()
     assert results._mode == "full"
-    assert window._result_actions_widget.load_result_button.text() == "Load Result"
+    assert window._result_actions_widget.load_result_button.text() == "Load Result File"
+    assert window._result_actions_widget.import_directory_button.text() == (
+        "Import All From Directory"
+    )
     assert [b.width() for b in results._buttons] == [168, 168, 168]
     for button in results._buttons:
         assert not button.grab().isNull()
@@ -1121,7 +1124,7 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
     assert window._start_over_button.isEnabled()
     assert not window._start_over_button.isHidden()
     assert window._custom_button.accessibleName() == "Custom Calculation"
-    assert window._custom_button.text() == "Custom"
+    assert window._custom_button.text() == "Custom Calculation"
     gui.controller.reset()
     window.close()
 
