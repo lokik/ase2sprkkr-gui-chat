@@ -44,6 +44,8 @@ def test_native_scf_error_is_worst_of_two_convergence_components():
     assert item.iteration == 6
     assert item.fermi_energy == 0.76199
     assert item.convergence_error == 0.0208
+    assert item.error == 0.00211
+    assert item.b_error == 0.0208
     parser.feed("normal stdout\n6 ERR ******* 0.02 EF 0.7\n")
     assert len(events) == 1
 
@@ -96,9 +98,15 @@ def test_scf_run_has_info_page_and_raw_output_is_preserved():
     progress = window._scf_progress
     assert progress.tracker.iterations[0].fermi_energy == 0.76199
     assert "Iteration" in progress.last_info.text()
+    assert "RMS(V)" in progress.last_info.text()
+    assert "RMS(B)" in progress.last_info.text()
     progress._redraw()
     assert list(progress.fermi_line.get_xdata()) == [6]
-    assert list(progress.error_line.get_ydata()) == [0.0208]
+    assert list(progress.error_line.get_ydata()) == [0.00211]
+    assert list(progress.b_error_line.get_ydata()) == [0.0208]
+    legend = [text.get_text() for text in progress.error_axis.get_legend().get_texts()]
+    assert "Potential RMS (V)" in legend
+    assert "Field RMS (B)" in legend
     window.close()
 
 def test_non_scf_run_keeps_original_output_only_layout():
@@ -150,6 +158,8 @@ def test_target_is_visible_before_first_iteration_and_remains_in_view():
 
     page.consume(_completed_line(2, field="0.3E-09", potential="0.3E-09"), "out")
     page._redraw()
+    assert list(page.error_line.get_ydata()) == [0.00211, 3e-10]
+    assert list(page.b_error_line.get_ydata()) == [0.0208, 3e-10]
     low, high = page.error_axis.get_ylim()
     assert low < 3e-10 < 1e-6 < high
     page.close()
