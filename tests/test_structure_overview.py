@@ -9,6 +9,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 import pytest
 from ase import Atoms
 from ase.build import bulk
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QFrame, QApplication, QBoxLayout
 
 from ase2sprkkr import SPRKKRAtoms
