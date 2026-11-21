@@ -29,3 +29,10 @@ icon from the Guided workflow (currently `bulk_crystal.png`).
 The run monitor's copy and save-as actions use original packaged fallback icons
 (`copy-output.svg` and `save-output-as.svg`) when the desktop theme does not
 supply `edit-copy` or `document-save-as`.
+
+The Guided workflow's `calculation-gear.svg` and `result-graph.svg` are
+original Ase2sprkkr icons, with the same navy, teal, and lightly shaded
+palette as the structure editor. The `badge_icon` helper overlays one
+common badge position on the unchanged object artwork: a clock for recent
+structures/inputs/results, a circular arrow for SCF reconvergence, or a
+plus for starting a new SCF calculation from the existing potential.
