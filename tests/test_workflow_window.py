@@ -623,9 +623,14 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
     root = window.centralWidget().layout()
-    assert root.count() == 1
-    assert isinstance(root.itemAt(0).widget(), QSplitter)
-    assert window.findChild(QFrame, "workflowNavigation") is None
+    assert root.count() == 2
+    navigation = window.findChild(QFrame, "workflowNavigation")
+    assert navigation is window._navigation_panel
+    assert root.itemAt(0).widget() is navigation
+    assert root.itemAt(1).widget().layout().itemAt(0).widget() is window._layout_splitter
+    assert navigation.height() == 42
+    assert navigation.minimumSizeHint().width() == 0
+    assert "background-color:" in navigation.styleSheet()
     structure = window.findChild(QWidget, "workflowStructureColumn")
     calculate = window.findChild(QWidget, "workflowCalculateColumn")
     results = window.findChild(QWidget, "workflowResultsColumn")
@@ -635,17 +640,19 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
         window.findChild(QWidget, "workflowResultsNavigation"),
     )
     assert [nav.parentWidget() for nav in navs] == [
-        structure, calculate, results,
+        navigation, navigation, navigation,
     ]
+    assert tuple(navigation.groups) == navs
+    assert [navigation.layout().itemAt(i).widget() for i in (0, 2, 4)] == list(navs)
     footer = window.findChild(QFrame, "workflowResultsFooter")
     assert footer is window._results_footer
     assert footer.parentWidget() is results
     assert results.layout().itemAt(results.layout().count() - 1).widget() is footer
-    assert structure.layout().indexOf(navs[0]) < structure.layout().indexOf(window._structure_title)
+    assert structure.layout().itemAt(0).widget() is window._structure_title
     title = window.findChild(QLabel, "workflowCalculateTitle")
-    assert calculate.layout().indexOf(navs[1]) < calculate.layout().indexOf(title)
+    assert calculate.layout().itemAt(0).widget() is title
     results_title = window.findChild(QLabel, "workflowResultsTitle")
-    assert results.layout().indexOf(navs[2]) < results.layout().indexOf(results_title)
+    assert results.layout().itemAt(0).widget() is results_title
     for heading in (window._structure_title, title, results_title):
         assert heading.alignment() & Qt.AlignmentFlag.AlignHCenter
     assert not structure.isAncestorOf(footer)
@@ -701,14 +708,16 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     ]
     assert window._result_actions_widget._import_controls_layout.count() == 0
     assert all(
-        bar.height() == 93
+        bar.height() == 42
         for bar in navs
     )
-    assert all(button.height() == 68 for bar in navs for button in bar._buttons)
-    # Fixed actions and Results utilities share the neutral card treatment.
+    assert all(button.height() == 34 for bar in navs for button in bar._buttons)
+    # The full-width strip owns the gray fill, while buttons highlight
+    # only when hovered. Keep the framed card appearance for Results footer.
     assert all(
-        "border-left: 3px solid" in btn.styleSheet()
-        and "background-color:" in btn.styleSheet()
+        "background: transparent" in btn.styleSheet()
+        and ":hover" in btn.styleSheet()
+        and "border-left-color:" in btn.styleSheet()
         for bar in navs for btn in bar._buttons
     )
     assert all(
@@ -813,6 +822,10 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
         assert footer.y() + footer.height() <= results.height()
 
     visible_and_within_columns()
+    navigation = window._navigation_panel
+    assert navigation.x() == 0
+    assert navigation.width() == window.centralWidget().width()
+    assert navigation.y() == 0
     utility_buttons = window._results_footer.findChildren(QToolButton)
     assert max(b.width() for b in utility_buttons) - min(
         b.width() for b in utility_buttons
@@ -844,13 +857,13 @@ def test_header_and_results_footer_keep_spacing_without_rulers(tmp_path):
     for header in headers:
         assert header.minimumSizeHint().width() == 0
         assert header.minimumWidth() == 0
-        assert header.height() == 93
+        assert header.height() == 42
         for button in header._buttons:
             if not button.isHidden():
                 button_top = button.mapTo(header, QPoint(0, 0)).y()
                 button_bottom = button_top + button.height()
-                assert abs(button_top - 12) <= 1
-                assert abs(header.height() - 1 - button_bottom - 12) <= 1
+                assert abs(button_top - 4) <= 1
+                assert abs(header.height() - button_bottom - 4) <= 1
 
     footer = window._results_footer
     assert footer.frameShape() == QFrame.Shape.NoFrame
@@ -880,6 +893,17 @@ def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
     window.showNormal()
 
     def check_positions():
+        # The three navigation groups must follow the actual splitter
+        # columns (with only rounding differences from Qt stretch factors).
+        for header, column in zip(
+            window._header_bars, window._navigation_panel._columns
+        ):
+            assert abs(header.mapTo(
+                window._navigation_panel, QPoint(0, 0)
+            ).x() - column.mapTo(
+                window._navigation_panel, QPoint(0, 0)
+            ).x()) <= 3
+            assert abs(header.width() - column.width()) <= 3
         for header in window._header_bars:
             buttons = [button for button in header._buttons if button.isVisible()]
             assert header._button_row.count() == len(header._buttons)
@@ -938,7 +962,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert all(not bar._compact for bar in columns)
     assert all(
         [button.width() for button in bar._buttons if not button.isHidden()]
-        == [160] * sum(not b.isHidden() for b in bar._buttons)
+        == [188] * sum(not b.isHidden() for b in bar._buttons)
         for bar in columns
     )
 
@@ -948,10 +972,10 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     results = columns[2]
     assert results._compact
     assert all(bar._compact for bar in columns)
-    assert [b.width() for b in results._buttons] == [90, 68, 68]
-    assert [b.width() for b in columns[1]._buttons] == [90, 68, 68]
-    assert window._recent_structures_button.width() == 90
-    assert all(b.height() == 68 for b in results._buttons)
+    assert [b.width() for b in results._buttons] == [54, 34, 34]
+    assert [b.width() for b in columns[1]._buttons] == [54, 34, 34]
+    assert window._recent_structures_button.width() == 54
+    assert all(b.height() == 34 for b in results._buttons)
     assert "width: 20px" in window._recent_results_button.styleSheet()
     assert window._recent_results_button.toolButtonStyle() == (
         Qt.ToolButtonStyle.ToolButtonIconOnly
@@ -975,12 +999,12 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         results.COMPACT_SIZE + results.MENU_EXTRA_WIDTH
     )
 
-    # Widening restores labels and the same 160-pixel widths.
+    # Widening restores labels and the same 188-pixel widths.
     window._layout_splitter.setSizes([1200, 900])
     application.processEvents()
     assert not results._compact
     assert window._result_actions_widget.load_result_button.text() == "Load Result"
-    assert [b.width() for b in results._buttons] == [160, 160, 160]
+    assert [b.width() for b in results._buttons] == [188, 188, 188]
     for button in results._buttons:
         assert not button.grab().isNull()
     assert all(not bar._compact for bar in columns)

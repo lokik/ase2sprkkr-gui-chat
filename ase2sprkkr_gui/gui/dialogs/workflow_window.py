@@ -4,7 +4,7 @@ from threading import Thread
 from pathlib import Path
 from typing import Any, Callable
 
-from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -115,6 +115,30 @@ def _navigation_button_stylesheet(palette: QPalette, selector: str) -> str:
     )
 
 
+def _top_toolbar_button_stylesheet(palette: QPalette, selector: str) -> str:
+    """Borderless at rest; muted card accent and tint only on hover/focus."""
+    bg = blend(
+        palette.color(QPalette.ColorRole.Window),
+        palette.color(QPalette.ColorRole.Mid), .10,
+    )
+    hover = blend(bg, palette.color(QPalette.ColorRole.Highlight), .12)
+    pressed = blend(bg, palette.color(QPalette.ColorRole.Highlight), .20)
+    accent = blend(
+        palette.color(QPalette.ColorRole.Mid),
+        palette.color(QPalette.ColorRole.Highlight), .25,
+    )
+    muted = palette.color(QPalette.ColorRole.PlaceholderText).name()
+    return (
+        f"{selector} {{ background: transparent; border: 1px solid transparent; "
+        "border-left: 3px solid transparent; border-radius: 5px; "
+        "padding: 2px 5px; }"
+        f"{selector}:hover {{ background-color: {hover.name()}; "
+        f"border-left-color: {accent.name()}; }}"
+        f"{selector}:pressed {{ background-color: {pressed.name()}; }}"
+        f"{selector}:disabled {{ color: {muted}; }}"
+    )
+
+
 class _RecentFooterButton(CenteredIconToolButton):
     """Recent action with a compact filename suffix and the complete path tooltip."""
 
@@ -178,13 +202,12 @@ class _RecentFooterButton(CenteredIconToolButton):
 class _HeaderActionBar(QWidget):
     """Column header which uses the same compact mode as its peers."""
 
-    FULL_WIDTH = 160
-    BUTTON_HEIGHT = 68
-    COMPACT_SIZE = 68
-    MENU_EXTRA_WIDTH = 22
-    VERTICAL_GAP = 12
-    # Preserve the original 93 px header height, without a divider line.
-    BAR_HEIGHT = BUTTON_HEIGHT + VERTICAL_GAP * 2 + 1
+    FULL_WIDTH = 188
+    BUTTON_HEIGHT = 34
+    COMPACT_SIZE = 34
+    MENU_EXTRA_WIDTH = 20
+    VERTICAL_GAP = 4
+    BAR_HEIGHT = BUTTON_HEIGHT + VERTICAL_GAP * 2
 
     layoutChanged = pyqtSignal()
 
@@ -221,7 +244,7 @@ class _HeaderActionBar(QWidget):
         self._button_row.addWidget(
             button, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        button.setIconSize(QSize(24, 24))
+        button.setIconSize(QSize(16, 16))
         button.setFixedHeight(self.BUTTON_HEIGHT)
         button.setMinimumWidth(0)
         button.setSizePolicy(
@@ -306,6 +329,67 @@ class _HeaderActionBar(QWidget):
                 )
 
 
+class _TopNavigationStrip(QFrame):
+    """A full-width bar whose three groups follow the workflow columns.
+
+    Stretch weights track the real column widths. Qt owns all widget
+    positions; in particular, the toolbar cannot create an unwanted minimum
+    width or shift groups outside the window when the splitter is resized.
+    """
+
+    geometryChanged = pyqtSignal()
+
+    def __init__(
+        self,
+        columns: tuple[QWidget, QWidget, QWidget],
+        groups: tuple[_HeaderActionBar, _HeaderActionBar, _HeaderActionBar],
+        gaps: tuple[int, int],
+        parent: QWidget,
+    ):
+        super().__init__(parent)
+        self.setObjectName("workflowNavigation")
+        self.setFixedHeight(_HeaderActionBar.BAR_HEIGHT)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        self._columns = columns
+        self.groups = groups
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(SPACE_XXL, 0, SPACE_XL, 0)
+        layout.setSpacing(0)
+        for i, group in enumerate(groups):
+            layout.addWidget(group)
+            if i < len(gaps):
+                layout.addSpacing(gaps[i])
+        for column in columns:
+            column.installEventFilter(self)
+        self._sync_stretches()
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, _HeaderActionBar.BAR_HEIGHT)
+
+    def sizeHint(self) -> QSize:
+        return QSize(0, _HeaderActionBar.BAR_HEIGHT)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched in self._columns and event.type() == QEvent.Type.Resize:
+            self._sync_stretches()
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._sync_stretches()
+
+    def _sync_stretches(self) -> None:
+        layout = self.layout()
+        for i, column in enumerate(self._columns):
+            stretch = max(1, column.width())
+            if layout.stretch(i * 2) != stretch:
+                layout.setStretch(i * 2, stretch)
+        self.geometryChanged.emit()
+
+
 class WorkflowWindow(QMainWindow):
     """Primary task-oriented Ase2sprkkr application window."""
 
@@ -363,9 +447,13 @@ class WorkflowWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(SPACE_XXL, 0, SPACE_XL, 0)
-        root.setSpacing(SPACE_SM)
-
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        main_body = QWidget(central)
+        body_layout = QVBoxLayout(main_body)
+        body_layout.setContentsMargins(SPACE_XXL, SPACE_SM, SPACE_XL, 0)
+        body_layout.setSpacing(SPACE_SM)
+        root.addWidget(main_body, 1)
 
         # Fixed navigation is separate from the scrollable guided cards.
         # Keep these controls small and neutral, like the Results controls.
@@ -388,7 +476,7 @@ class WorkflowWindow(QMainWindow):
             if not recent_menu:
                 button.setText(label)
             button.setIcon(icon)
-            button.setIconSize(QSize(24, 24))
+            button.setIconSize(QSize(16, 16))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setFixedHeight(_HeaderActionBar.BUTTON_HEIGHT)
             button.setSizePolicy(
@@ -396,7 +484,7 @@ class WorkflowWindow(QMainWindow):
             )
             mid = button.palette().color(QPalette.ColorRole.Mid).name()
             button.setStyleSheet(
-                _navigation_button_stylesheet(
+                _top_toolbar_button_stylesheet(
                     button.palette(), "QToolButton"
                 )
                 + f"QToolButton::menu-button {{ width: 28px; border-left: 1px solid {mid}; }}"
@@ -414,10 +502,10 @@ class WorkflowWindow(QMainWindow):
             group.register(button)
             return button
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, central)
+        splitter = QSplitter(Qt.Orientation.Horizontal, main_body)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(8)
-        root.addWidget(splitter, 1)
+        body_layout.addWidget(splitter, 1)
         self._layout_splitter = splitter
 
         # Treat the first two columns as one resize unit. Their equal
@@ -438,7 +526,6 @@ class WorkflowWindow(QMainWindow):
         structure_column_navigation = navigation_group(
             structure_column, "workflowStructureNavigation"
         )
-        structure_layout.addWidget(structure_column_navigation)
 
         self._structure_title = QLabel("Structure", structure_column)
         self._structure_title.setObjectName("workflowStructureTitle")
@@ -487,7 +574,6 @@ class WorkflowWindow(QMainWindow):
         content_navigation = navigation_group(
             content, "workflowCalculationNavigation"
         )
-        content_layout.addWidget(content_navigation)
 
         title = QLabel("Calculate", content)
         title.setObjectName("workflowCalculateTitle")
@@ -531,7 +617,6 @@ class WorkflowWindow(QMainWindow):
         side_navigation = navigation_group(
             side, "workflowResultsNavigation"
         )
-        side_layout.addWidget(side_navigation)
 
         result_actions_title = QLabel("Results", side)
         result_actions_title.setObjectName("workflowResultsTitle")
@@ -622,7 +707,7 @@ class WorkflowWindow(QMainWindow):
             self._result_actions_widget.import_directory_button,
         ):
             button.setStyleSheet(
-                _navigation_button_stylesheet(button.palette(), "QPushButton")
+                _top_toolbar_button_stylesheet(button.palette(), "QPushButton")
             )
             side_navigation.register(button)
 
@@ -697,8 +782,27 @@ class WorkflowWindow(QMainWindow):
         )
         self._results_footer = results_footer
 
-        # All three headers switch modes together, even when only one column
-        # becomes too narrow for its full labels.
+        # Move the existing header groups into one full-width gray strip.
+        # They retain their commands and split menus, but share one surface.
+        navigation = _TopNavigationStrip(
+            (structure_column, content, side),
+            (structure_column_navigation, content_navigation, side_navigation),
+            (action_columns_layout.spacing(), splitter.handleWidth()),
+            central,
+        )
+        toolbar_color = blend(
+            self.palette().color(QPalette.ColorRole.Window),
+            self.palette().color(QPalette.ColorRole.Mid), .10,
+        )
+        navigation.setStyleSheet(
+            f"QFrame#workflowNavigation {{ background-color: "
+            f"{toolbar_color.name()}; border: none; }}"
+        )
+        root.insertWidget(0, navigation)
+        self._navigation_panel = navigation
+
+        # One shared responsive mode: if any column cannot display all
+        # 188px labels, every header uses compact icon controls.
         self._header_bars = (
             structure_column_navigation, content_navigation, side_navigation,
         )
@@ -707,6 +811,7 @@ class WorkflowWindow(QMainWindow):
         self._syncing_headers = False
         for bar in self._header_bars:
             bar.layoutChanged.connect(self._sync_header_modes)
+        navigation.geometryChanged.connect(self._sync_header_modes)
         self._sync_header_modes()
 
     def _sync_header_modes(self) -> None:
