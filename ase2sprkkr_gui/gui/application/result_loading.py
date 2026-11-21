@@ -295,7 +295,7 @@ def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
         return None
 
     for path in candidates:
-        if not looks_like_scf_output(path):
+        if not looks_like_scf_output(path, potential_filename=target_potential):
             continue
         try:
             result = TaskResult.from_file(path)
