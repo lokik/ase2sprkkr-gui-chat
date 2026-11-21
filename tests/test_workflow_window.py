@@ -157,6 +157,9 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     assert "Create a 3D Structure" in names(window._structure_actions)
     assert "Load a Structure" in names(window._structure_actions)
     assert not window._actions.has_actions
+    assert window._calculate_notice.text() == (
+        "First, create a structure or load an existing structure or potential."
+    )
     assert window._custom_button.text() == "Custom Input File"
     assert not window._repeat_button.isEnabled()
 
