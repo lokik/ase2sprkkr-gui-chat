@@ -13,6 +13,8 @@ from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow
 from ase2sprkkr_gui.gui.dialogs.scf_progress import (
     ScfProgressTracker,
     parse_scf_iteration,
+    scf_tolerance_from_parameters,
+    ScfProgressPage,
 )
 
 
@@ -96,8 +98,59 @@ def test_non_scf_run_keeps_original_output_only_layout():
 def test_new_scf_calculation_enables_info_page_before_start():
     app = QApplication.instance() or QApplication([])
     request = SimpleNamespace(
-        directory="/tmp/scf", input_parameters=SimpleNamespace(task_name="SCF")
+        directory="/tmp/scf", input_parameters=SimpleNamespace(
+            task_name="SCF", SCF=SimpleNamespace(TOL=lambda: 1e-7)
+        )
     )
     window = SprkkrRunWindow(request)
     assert window._scf_progress is not None
+    assert window._scf_progress.tracker.target_error == 1e-7
+    assert window._scf_progress.last_info.text() == "Preparing first iteration…"
+    lower, upper = window._scf_progress.error_axis.get_ylim()
+    assert lower < 1e-7 < upper
     window.close()
+
+
+def test_scf_tolerance_helper_uses_effective_value_and_ignores_missing():
+    parameters = SimpleNamespace(SCF=SimpleNamespace(TOL=lambda: 3e-7))
+    assert scf_tolerance_from_parameters(parameters) == 3e-7
+    assert scf_tolerance_from_parameters(None) is None
+    assert scf_tolerance_from_parameters(
+        SimpleNamespace(SCF=SimpleNamespace(TOL=lambda: 0))
+    ) is None
+
+
+def test_target_is_visible_before_first_iteration_and_remains_in_view():
+    app = QApplication.instance() or QApplication([])
+    page = ScfProgressPage(target_error=1e-6)
+    assert page.last_info.text() == "Preparing first iteration…"
+    assert list(page.target_line.get_ydata()) == [1e-6, 1e-6]
+    low, high = page.error_axis.get_ylim()
+    assert low < 1e-6 < high
+
+    page.consume(_native_line(1, field="0.208E-01"), "out")
+    page._redraw()
+    low, high = page.error_axis.get_ylim()
+    assert low < 1e-6 < high and high > 2.08e-2
+
+    page.consume(_native_line(2, field="0.3E-09"), "out")
+    page._redraw()
+    low, high = page.error_axis.get_ylim()
+    assert low < 1e-6 < high
+    page.close()
+
+
+def test_stdout_header_supplies_target_for_reattached_run():
+    app = QApplication.instance() or QApplication([])
+    page = ScfProgressPage()
+    assert page.target_line is None
+    page.consume("          SCF-tol   : ", "out")
+    page.consume("0.0000100000\n", "out")
+    page._redraw()
+
+    assert page.tracker.target_error == 1e-5
+    assert page.last_info.text() == "Preparing first iteration…"
+    assert list(page.target_line.get_ydata()) == [1e-5, 1e-5]
+    low, high = page.error_axis.get_ylim()
+    assert low < 1e-5 < high
+    page.close()
