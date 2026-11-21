@@ -545,13 +545,6 @@ class WorkflowWindow(QMainWindow):
         structure_navigation = navigation_group(
             navigation.groups[0], "workflowStructureNavigation"
         )
-        self._settings_button = add_navigation_button(
-            structure_navigation,
-            "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
-            self._open_settings,
-        )
-        self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
-        add_separator(structure_navigation)
         self._start_over_button = add_navigation_button(
             structure_navigation,
             "Start from Scratch",
@@ -567,6 +560,13 @@ class WorkflowWindow(QMainWindow):
             lambda: self._open_recent("structure"),
             recent_menu=True,
         )
+        add_separator(structure_navigation)
+        self._settings_button = add_navigation_button(
+            structure_navigation,
+            "Settings", settings_icon(), "Configure Ase2sprkkr (Ctrl+,)",
+            self._open_settings,
+        )
+        self._settings_button.setShortcut(QKeySequence("Ctrl+,"))
 
         calculation_navigation = navigation_group(
             navigation.groups[1], "workflowCalculationNavigation"
