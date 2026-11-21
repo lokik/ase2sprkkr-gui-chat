@@ -93,7 +93,7 @@ class ScfProgressTracker:
                         del self.iterations[: len(self.iterations) - _MAX_ITERATIONS]
                 self.last_info_line = clean
                 changed = True
-            elif clean and (kind.lower() == "info" or _INFO_LINE.match(clean)):
+            elif clean and (kind.lower() == "info" or _INFO_LINE.match(clean) or clean.startswith("INFO:")):
                 # Also support backends that forward the formatted INFO summary.
                 self.last_info_line = clean
                 changed = True
@@ -121,7 +121,7 @@ class ScfProgressPage(QWidget):
         )
         layout.addWidget(self.last_info)
 
-        self.figure = Figure(figsize=(8, 5), layout="constrained")
+        self.figure = Figure(figsize=(8, 5), constrained_layout=True)
         self.canvas = FigureCanvasQTAgg(self.figure)
         layout.addWidget(self.canvas, 1)
 
@@ -129,7 +129,7 @@ class ScfProgressPage(QWidget):
         self.fermi_line, = self.fermi_axis.plot([], [], marker="o", markersize=3)
         self.error_line, = self.error_axis.plot([], [], marker="o", markersize=3)
         self.fermi_axis.set_ylabel("Fermi energy (Ry)")
-        self.error_axis.set_ylabel("Convergence error")
+        self.error_axis.set_ylabel("Convergence error\nmax RMS(V, B)")
         self.error_axis.set_xlabel("SCF iteration")
         self.error_axis.set_yscale("log")
         for axis in (self.fermi_axis, self.error_axis):
