@@ -17,7 +17,9 @@ from ase2sprkkr_gui.gui.application.execution_cancellation import (
     register_runner,
     wait_for_runner,
 )
-from ase2sprkkr_gui.gui.application.result_loading import FileBackedInput, LoadedResult, load_result
+from ase2sprkkr_gui.gui.application.result_loading import (
+    FileBackedInput, LoadedResult, PotentialVersionChanged, load_result,
+)
 from ase2sprkkr_gui.gui.application.workspace_controller import CalculationRequest
 from ase2sprkkr_gui.gui.input_parameters.dataset import dataset_value
 
@@ -144,6 +146,15 @@ class SprkkrExecution:
             return {"potential": False, "atoms": self.request.atoms}
         if self.request.potential is not None:
             return {"potential": self.request.potential, "potential_file": potential_file}
+        source = self.request.reusable_potential_version
+        if source is not None and not self.request.restart_scf:
+            # A string without potential_file selects ASE2SPRKKR's existing
+            # POTFIL path: it references the original bytes without rewriting.
+            if not source.available or not source.is_current():
+                raise PotentialVersionChanged(
+                    f"Source potential changed before calculation: {source.path}"
+                )
+            return {"potential": str(source.path)}
         return {"atoms": self.request.atoms, "potential_file": potential_file}
 
     def _notify_persistent_job_changed(self, runner: Any) -> None:
@@ -160,7 +171,12 @@ class SprkkrExecution:
         register_runner(self.cancellation, runner)
 
         try:
-            if self.request.potential is False:
+            if (
+                self.request.potential is False
+                or (self.request.potential is None
+                    and self.request.reusable_potential_version is not None
+                    and not self.request.restart_scf)
+            ):
                 self._with_mpi_warnings(lambda: runner.submit(validate_inputs=self._validate_file_input))
             else:
                 self._with_mpi_warnings(runner.submit)
@@ -185,17 +201,27 @@ class SprkkrExecution:
         return runner
 
     def _validate_file_input(self, manifest):
-        """Verify every loaded potential against the actual staged input bytes."""
-        source = self.request.file_source
-        if source is None:
-            raise SubmissionNotStarted("File-backed calculation has no validated input source.")
-        for expected in source.versions:
+        """Verify all reused source bytes against their staged manifest entries."""
+        if self.request.potential is False:
+            source = self.request.file_source
+            if source is None:
+                raise SubmissionNotStarted("File-backed calculation has no validated input source.")
+            expected_versions = source.versions
+        else:
+            source = None
+            version = self.request.reusable_potential_version
+            if version is None or self.request.restart_scf or self.request.potential is not None:
+                raise SubmissionNotStarted("Calculation has no reusable source potential.")
+            expected_versions = (version,)
+
+        for expected in expected_versions:
             staged = manifest.input_version(expected.path)
             if staged is None or staged != expected or not expected.is_current():
                 raise SubmissionNotStarted(
                     f"Source potential does not match the launch input: {expected.path}"
                 )
-        self._file_backed_input = FileBackedInput(source.potential.atoms, source.versions)
+        if source is not None:
+            self._file_backed_input = FileBackedInput(source.potential.atoms, source.versions)
 
     def run(self) -> LoadedResult:
         """Execute the request and return its loaded result."""
