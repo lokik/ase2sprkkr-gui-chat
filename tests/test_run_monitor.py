@@ -426,3 +426,45 @@ def test_finished_monitor_has_no_plots_when_output_is_not_plottable(_qt_applicat
         "Output", "Results"
     ]
     window.close()
+
+def test_run_results_pages_are_added_only_after_finish_and_reuse_one_plot_widget(_qt_application):
+    from types import SimpleNamespace
+
+    from ase2sprkkr_gui.gui.dialogs.run_results import ResultPlotPage
+
+    class File:
+        def __init__(self, filename):
+            self.filename = filename
+            self.name = filename
+            self.display_name = filename
+            self.info = ""
+
+        def value_label(self):
+            return self.filename
+
+        def actions(self):
+            return ("plot",)
+
+        def path(self):
+            return "/tmp/" + self.filename
+
+    window = RunMonitorWindow(
+        lambda cancellation: object(), task_name="JXC", autostart=False
+    )
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "INFO", "Output"
+    ]
+    result = SimpleNamespace(output_values={
+        "first": File("first.agr"),
+        "second": File("second.dat"),
+    })
+    window._on_finished(result)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "INFO", "Output", "Results", "first.agr", "second.dat"
+    ]
+    assert window._tabs.tabText(window._tabs.currentIndex()) == "Results"
+    assert isinstance(window._tabs.widget(3), ResultPlotPage)
+    assert isinstance(window._tabs.widget(4), ResultPlotPage)
+    assert not window._tabs.widget(3)._rendered
+    assert not window._tabs.widget(4)._rendered
+    window.close()

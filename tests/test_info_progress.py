@@ -38,3 +38,38 @@ def test_info_page_filters_stderr_and_only_displays_formatted_parser_events():
     assert page.events.toPlainText() == "Info: start"
     assert page.events.maximumBlockCount() == 1024
     page.close()
+
+def test_common_progress_widget_handles_exact_approximate_rank_and_unknown():
+    from ase2sprkkr.outputs.progress import ProgressInfo
+
+    app = QApplication.instance() or QApplication([])
+    class Parser:
+        def __init__(self, on_info):
+            self.on_info = on_info
+        def feed(self, text):
+            pass
+        def format_info(self, kind, data):
+            return None
+
+    page = InfoProgressPage(parser_factory=Parser, initial_info="Preparing...")
+    assert page.progress.isHidden()
+    page._on_info(kind="progress", data=ProgressInfo(3, None))
+    assert page.progress.isHidden()
+    page._on_info(kind="progress", data=ProgressInfo(2, 10, estimated=True))
+    assert not page.progress.isHidden()
+    assert page.progress.value() == 2
+    assert page.progress.maximum() == 10
+    assert page.progress.format() == "≈%p%"
+    page._on_info(
+        kind="progress",
+        data=ProgressInfo(3, 10, label="Reporting MPI rank: energy loops"),
+    )
+    assert page.progress_label.text() == "Reporting MPI rank: energy loops"
+    assert not page.progress_label.isHidden()
+    assert page.progress.format() == "%p%"
+    page._on_info(kind="progress", data=ProgressInfo(10, 10, unit="energies"))
+    assert page.progress.value() == 10
+    assert page.progress.format() == "%v / %m energies (%p%)"
+    assert page.progress_label.isHidden()
+    assert page.last_info.text() == "Preparing..."  # progress is not a duplicate log line
+    page.close()

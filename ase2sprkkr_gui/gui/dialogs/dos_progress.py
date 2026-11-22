@@ -1,54 +1,18 @@
-"""Task-specific DOS INFO page driven by ase2sprkkr parser events."""
+"""DOS INFO page using the common text and numerical-progress widgets."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QPlainTextEdit, QProgressBar, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QWidget
 
 from ase2sprkkr.outputs.readers.dos import DosProgressParser
+from ase2sprkkr_gui.gui.dialogs.info_progress import InfoProgressPage
 
 
-class DosProgressPage(QWidget):
-    """Show exact serial or explicitly labelled approximate MPI DOS progress."""
+class DosProgressPage(InfoProgressPage):
+    """Use the native DOS parser for structured progress and INFO."""
 
-    def __init__(
-        self, parent: QWidget | None = None, *, total_points: int | None = None
-    ) -> None:
-        super().__init__(parent)
-        self.parser = DosProgressParser(
-            on_info=self._on_info, total_points=total_points
+    def __init__(self, parent: QWidget | None = None, *, total_points: int | None = None) -> None:
+        super().__init__(
+            parent,
+            parser_factory=lambda **kwargs: DosProgressParser(**kwargs, total_points=total_points),
+            initial_info="Preparing DOS calculation...",
         )
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Latest INFO", self))
-
-        self.last_info = QLabel("Preparing DOS calculation...", self)
-        self.last_info.setWordWrap(True)
-        self.last_info.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        layout.addWidget(self.last_info)
-
-        self.progress = QProgressBar(self)
-        self.progress.setTextVisible(True)
-        self.progress.hide()
-        layout.addWidget(self.progress)
-
-        self.events = QPlainTextEdit(self)
-        self.events.setReadOnly(True)
-        self.events.setMaximumBlockCount(1024)
-        layout.addWidget(self.events, 1)
-
-    def _on_info(self, *, kind: str, data: object) -> None:
-        line = self.parser.format_info(kind, data)
-        if line is None:
-            return
-        self.last_info.setText(line)
-        self.events.appendPlainText(line)
-        if kind == "dos_progress" and data.total is not None:
-            self.progress.setRange(0, data.total)
-            self.progress.setFormat("≈%p%" if data.estimated else "%p%")
-            self.progress.setValue(data.completed)
-            self.progress.show()
-
-    def consume(self, text: str, kind: str) -> None:
-        if kind.lower() not in {"err", "stderr"} and text:
-            self.parser.feed(text)
