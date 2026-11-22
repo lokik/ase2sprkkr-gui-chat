@@ -1,4 +1,4 @@
-"""Related SCF imports are opportunistic and never replace the chosen result."""
+"""GUI-only companion integration; SCF matching is tested in ASE2SPRKKR."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -7,11 +7,9 @@ from PyQt6.QtCore import QThread
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from ase2sprkkr_gui.gui.misc.modal_task import _ModalTaskDialog
-
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.result_loading import (
-    LoadedResult,
-    load_companion_scf_result,
+    LoadedResult, load_companion_scf_result,
 )
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.application import result_loading
@@ -23,69 +21,9 @@ def _loaded(path, *, task="dos", potential=None):
         result=SimpleNamespace(
             task_name=task, produces_potential=task == "scf", output_values={}
         ),
-        output_path=path,
-        potential_path=potential,
-        atoms=None,
-        potential_error=None,
-        directory=str(path.parent),
+        output_path=path, potential_path=potential, atoms=None,
+        potential_error=None, directory=str(path.parent),
     )
-
-
-def test_companion_scf_requires_same_produced_potential(tmp_path, monkeypatch):
-    dos = tmp_path / "Fe_DOS.out"
-    scf = tmp_path / "Fe_SCF.out"
-    unrelated = tmp_path / "other.out"
-    corrupt = tmp_path / "broken.out"
-    for path in (dos, scf, unrelated, corrupt):
-        path.write_text(path.name)
-    scf.write_text(
-        " *       KKRSCF  VERSION  9.7          *\n"
-        "TASK = SCF\npot-file: Fe.pot_new\n"
-    )
-    potential = (tmp_path / "Fe.pot_new").resolve()
-
-    def parse(path):
-        if path == corrupt:
-            raise ValueError("malformed output")
-        name = "Fe.pot_new" if path == scf else "other.pot_new"
-        result = SimpleNamespace(
-            task_name="scf",
-            directory=str(tmp_path),
-            files={"converged": name},
-            input_parameters=None,
-        )
-        result.path_to = lambda key: result.files[key]
-        return result
-
-    monkeypatch.setattr(
-        result_loading.TaskResult, "from_file", staticmethod(parse)
-    )
-
-    companion = load_companion_scf_result(_loaded(dos, potential=potential))
-    assert companion is not None
-    assert companion.output_path == scf.resolve()
-    assert companion.potential_path == potential
-
-
-def test_companion_scf_skips_unrelated_or_unreadable_outputs(tmp_path, monkeypatch):
-    dos = tmp_path / "Fe_DOS.out"
-    scf = tmp_path / "other.out"
-    dos.touch()
-    scf.touch()
-
-    def parse(_path):
-        raise ValueError("not an SCF output")
-
-    monkeypatch.setattr(
-        result_loading.TaskResult, "from_file", staticmethod(parse)
-    )
-    assert load_companion_scf_result(
-        _loaded(dos, potential=tmp_path / "Fe.pot_new")
-    ) is None
-    assert load_companion_scf_result(_loaded(dos)) is None
-    assert load_companion_scf_result(
-        _loaded(dos, task="scf", potential=tmp_path / "Fe.pot_new")
-    ) is None
 
 
 def test_loading_dos_also_imports_scf_but_selects_dos(tmp_path, monkeypatch):
@@ -182,203 +120,42 @@ def test_result_working_dialog_covers_companion_search_and_publication(
     parent.close()
 
 
-def test_companion_matches_potential_before_loading_and_reuses_atoms(
+def test_companion_loading_delegates_to_backend_without_rereading_potential(
     tmp_path, monkeypatch,
 ):
     from dataclasses import replace
+    from ase2sprkkr.outputs.task_result import TaskResult
 
-    dos, wrong, right = (
-        tmp_path / "Fe_DOS.out",
-        tmp_path / "Fe_old_SCF.out",
-        tmp_path / "Fe_SCF.out",
-    )
-    dos.write_text("DOS")
-    wrong.write_text(
-        " *       KKRSCF  VERSION  9.7          *\n"
-        "TASK = SCF\npot-file: old.pot_new\n"
-    )
-    right.write_text(
-        " *       KKRSCF  VERSION  9.7          *\n"
-        "TASK = SCF\npot-file: Fe.pot_new\n"
-    )
-    potential = (tmp_path / "Fe.pot_new").resolve()
-    parsed = []
+    dos_path = tmp_path / "Fe_DOS.out"
+    scf_path = tmp_path / "Fe_SCF.out"
+    potential = tmp_path / "Fe.pot_new"
+    dos_path.touch()
+    scf_path.touch()
+    potential.write_text("reusable")
     atoms = object()
+    selected = replace(
+        _loaded(dos_path, potential=potential), atoms=atoms,
+        parsed_potential_version=result_loading.PotentialFileVersion.capture(potential),
+    )
 
-    def parse(path):
-        parsed.append(path)
-        filename = "old.pot_new" if path == wrong else potential.name
-        result = SimpleNamespace(
-            task_name="scf", directory=str(tmp_path),
-            files={"converged": filename}, input_parameters=None,
-            output_values={}, is_embedded=False,
-        )
-        result.path_to = lambda key: result.files[key]
-        return result
+    scf = TaskResult(None, None, tmp_path, output_file=scf_path, task_name="SCF")
+    scf.produces_potential = True
+    scf.files.add_file("converged", potential)
 
-    reads = []
-    monkeypatch.setattr(result_loading.TaskResult, "from_file", staticmethod(parse))
+    seen = []
+    def companion(self, result):
+        seen.append(result)
+        return scf
+
+    monkeypatch.setattr(result_loading.ResultLoader, "companion_scf", companion)
     monkeypatch.setattr(
         result_loading, "_load_potential",
-        lambda *_args, **_kwargs: reads.append("potential") or (None, None),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Already loaded potential must be reused")
+        ),
     )
-    selected = replace(_loaded(dos, potential=potential), atoms=atoms)
-    companion = load_companion_scf_result(selected)
-
-    assert companion is not None
-    assert companion.output_path == right.resolve()
-    assert companion.atoms is atoms
-    assert parsed == [right]  # Matching filename is checked before other SCFs.
-    assert reads == []  # Neither unrelated nor already-parsed POTFIL is reread.
-
-
-def test_companion_scf_prefilters_header_and_only_uses_out(tmp_path, monkeypatch):
-    dos = tmp_path / "Fe_DOS.out"
-    misleading = tmp_path / "Fe_SCF.out"
-    valid = tmp_path / "other.out"
-    log = tmp_path / "Fe_SCF.log"
-    txt = tmp_path / "Fe_SCF.txt"
-    long_intro = tmp_path / "Fe_old_SCF.out"
-    dos.write_text(" *       KKR DOS  VERSION  9.7       *\n")
-    misleading.write_text(" *       KKR DOS  VERSION  9.7       *\n")
-    valid.write_text(
-        "    *       KKRSCF  VERSION  10.1       *\n"
-        "TASK = SCF\npot-file: Fe.pot_new\n"
-    )
-    log.write_text(" *       KKRSCF  VERSION  9.7       *\n")
-    txt.write_text(" *       KKRSCF  VERSION  9.7       *\n")
-    long_intro.write_bytes(b" " * 8192 + b"KKRSCF VERSION 9.7")
-    parsed = []
-    potential = (tmp_path / "Fe.pot_new").resolve()
-
-    def parse(path):
-        parsed.append(path)
-        result = SimpleNamespace(
-            task_name="scf", directory=str(tmp_path),
-            files={"converged": potential.name}, input_parameters=None,
-        )
-        result.path_to = lambda key: result.files[key]
-        return result
-
-    monkeypatch.setattr(result_loading.TaskResult, "from_file", staticmethod(parse))
-    companion = load_companion_scf_result(_loaded(dos, potential=potential))
-
-    assert companion is not None
-    assert companion.output_path == valid.resolve()
-    assert parsed == [valid]
-
-
-def test_companion_scf_tries_next_candidate_if_potential_differs(
-    tmp_path, monkeypatch,
-):
-    dos = tmp_path / "Fe_DOS.out"
-    expected_name = tmp_path / "Fe_SCF.out"
-    fallback = tmp_path / "Fe_older_SCF.out"
-    dos.touch()
-    expected_name.write_text(
-        " *       KKRSCF  VERSION  9.7       *\n"
-        "TASK = SCF\npot-file: other.pot_new\n"
-    )
-    fallback.write_text(
-        " *       KKRSCF  VERSION  10.1       *\n"
-        "TASK = SCF\npot-file: Fe.pot_new\n"
-    )
-    potential = (tmp_path / "Fe.pot_new").resolve()
-    parsed = []
-
-    def parse(path):
-        parsed.append(path)
-        name = "other.pot_new" if path == expected_name else potential.name
-        result = SimpleNamespace(
-            task_name="scf", directory=str(tmp_path),
-            files={"converged": name}, input_parameters=None,
-        )
-        result.path_to = lambda key: result.files[key]
-        return result
-
-    monkeypatch.setattr(result_loading.TaskResult, "from_file", staticmethod(parse))
-    companion = load_companion_scf_result(_loaded(dos, potential=potential))
-
-    assert companion is not None
-    assert companion.output_path == fallback.resolve()
-    assert parsed == [fallback]
-
-
-def test_companion_scf_rejects_mismatched_native_potential_before_parsing(
-    tmp_path, monkeypatch,
-):
-    dos = tmp_path / "Fe_DOS.out"
-    wrong = tmp_path / "Fe_SCF.out"  # Preferred name, but different POTFIL.
-    right = tmp_path / "Fe_backup_SCF.out"
-    dos.write_text("DOS output")
-    wrong.write_text(
-        "  * KKRSCF VERSION 9.7 *\n"
-        " TASK = SCF\n FILES:\n potential : Fe.pot\n"
-        " parameters for SCF-cycle\n pot-file : other.pot_new\n"
-    )
-    right.write_text(
-        "  * KKRSCF VERSION 9.7 *\n"
-        " TASK = SCF\n FILES:\n potential : Fe.pot\n"
-        " parameters for SCF-cycle\n pot-file : Fe.pot_new\n"
-    )
-    potential = (tmp_path / "Fe.pot_new").resolve()
-    parsed = []
-
-    def parse(path):
-        parsed.append(path)
-        output = SimpleNamespace(
-            task_name="scf", directory=str(tmp_path), is_embedded=False,
-            files={"converged": potential.name}, input_parameters=None,
-            output_values={},
-        )
-        output.path_to = lambda key: output.files[key]
-        return output
-
-    monkeypatch.setattr(result_loading.TaskResult, "from_file", staticmethod(parse))
-    companion = load_companion_scf_result(_loaded(dos, potential=potential))
-
-    assert companion is not None
-    assert companion.output_path == right.resolve()
-    assert parsed == [right]
-
-
-def test_companion_scf_selects_latest_output_when_potential_was_overwritten(
-    tmp_path, monkeypatch,
-):
-    import os
-
-    potential = tmp_path / "Fe.pot_new"
-    potential.write_text("current potential")
-    selected = tmp_path / "Fe_DOS.out"
-    selected.write_text("DOS output")
-    older, newer = tmp_path / "Fe_SCF.out", tmp_path / "Fe_SCF_old.out"
-    for path in (older, newer):
-        path.write_text(
-            " *       KKRSCF  VERSION  9.7          *\n"
-            "TASK = SCF\n"
-            "pot-file: Fe.pot_new\n"
-        )
-    # The less similarly named output is newer; time takes priority.
-    os.utime(older, ns=(1_000_000_000, 1_000_000_000))
-    os.utime(newer, ns=(2_000_000_000, 2_000_000_000))
-    parsed = []
-
-    def parse(path):
-        parsed.append(path)
-        result = SimpleNamespace(
-            task_name="scf", directory=str(tmp_path), is_embedded=False,
-            files={"converged": potential.name}, input_parameters=None,
-        )
-        result.path_to = lambda key: result.files[key]
-        return result
-
-    monkeypatch.setattr(result_loading.TaskResult, "from_file", staticmethod(parse))
-    companion = load_companion_scf_result(_loaded(selected, potential=potential))
-    assert companion is not None
-    assert companion.output_path == newer.resolve()
-    assert parsed == [newer]
-
-    # When both outputs are equally new, there is no safe choice.
-    os.utime(newer, ns=(1_000_000_000, 1_000_000_000))
-    assert load_companion_scf_result(_loaded(selected, potential=potential)) is None
-    assert parsed == [newer]
+    companion_loaded = load_companion_scf_result(selected)
+    assert companion_loaded is not None
+    assert companion_loaded.output_path == scf_path.resolve()
+    assert companion_loaded.atoms is atoms
+    assert seen == [selected.result]
