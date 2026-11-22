@@ -847,6 +847,7 @@ class ResultStore:
         persistent_ref: str | None = None,
         source_versions: tuple[FileVersion, ...] = (),
         parsed_potential_version: PotentialFileVersion | None = None,
+        cached_record_id: int | None = None,
     ) -> ResultRecord:
         existing = self.result_for_external_source(
             output_path,
@@ -858,7 +859,18 @@ class ResultStore:
                 return existing
             state = self.state_for_result(existing)
             same_potential = existing.potential_path == potential_path
-            same_structure_availability = (state is None) == (atoms is None)
+            # A lightweight cache hit intentionally omits atoms because the
+            # original structure belongs to this exact recorded result.
+            # Identity alone is insufficient: a *new* parse without atoms must
+            # not inherit a previously reconstructed structure.
+            cached_structure = (
+                cached_record_id == existing.id
+                and result is existing.result
+                and atoms is None
+            )
+            same_structure_availability = (
+                (state is None) == (atoms is None) or cached_structure
+            )
             still_current = (
                 state is None or (
                     (state.potential_version is None
