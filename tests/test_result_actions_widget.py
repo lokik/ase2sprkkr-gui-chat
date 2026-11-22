@@ -12,7 +12,11 @@ from ase2sprkkr.outputs.task_result import TaskResult
 from PyQt6.QtWidgets import QApplication, QToolButton
 
 from ase2sprkkr_gui.gui.application.operation_results import EmptySpheresResult
-from ase2sprkkr_gui.gui.application.result_presentation import present_result_tree
+from ase2sprkkr_gui.gui.application.result_presentation import (
+    ResultPresentation,
+    ResultValuePresentation,
+    present_result_tree,
+)
 from ase2sprkkr_gui.gui.application.result_store import ResultStore
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
 
@@ -194,6 +198,50 @@ def test_show_all_values_toggle_preserves_result_and_restores_summary_filter():
     widget.show_all_values_checkbox.setChecked(True)
     assert widget._empty_label.text() == "Parsing a different output…"
     assert widget._row_count == 0
+    widget.close()
+
+
+def test_show_all_values_is_disabled_when_no_extra_values_can_be_shown():
+    _application = QApplication.instance() or QApplication([])
+    widget = _widget(show_values_without_actions=False)
+    checkbox = widget.show_all_values_checkbox
+    assert not checkbox.isEnabled()
+
+    def value(name, **kwargs):
+        return ResultValuePresentation(
+            value=kwargs.pop("value", object()),
+            name=name,
+            info="",
+            summary=name,
+            **kwargs,
+        )
+
+    already_visible = (
+        value("action", actions=("open",)),
+        value("summary", show_in_summary=True),
+        value("notice", always_visible=True),
+        value("file", value=SimpleNamespace(path=lambda: "/tmp/Fe.pot")),
+    )
+    widget.set_result(ResultPresentation(result_id=1, values=already_visible))
+    assert widget._row_count == len(already_visible)
+    assert not checkbox.isEnabled()
+
+    with_extra = already_visible + (value("ordinary"),)
+    widget.set_result(ResultPresentation(result_id=2, values=with_extra))
+    assert checkbox.isEnabled()
+    assert widget._row_count == len(already_visible)
+
+    checkbox.setChecked(True)
+    assert widget._row_count == len(with_extra)
+    widget.set_result(ResultPresentation(result_id=1, values=already_visible))
+    assert not checkbox.isEnabled()
+    assert checkbox.isChecked()  # Preserve the preference between results.
+
+    widget.set_result(ResultPresentation(result_id=2, values=with_extra))
+    assert checkbox.isEnabled()
+    assert widget._row_count == len(with_extra)
+    widget.set_result(None)
+    assert not checkbox.isEnabled()
     widget.close()
 
 
