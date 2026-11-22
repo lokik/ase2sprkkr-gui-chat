@@ -30,7 +30,12 @@ def atoms():
 
 @pytest.fixture
 def dialog(atoms):
-    return BuildEmbeddingDialog(atoms)
+    dialog = BuildEmbeddingDialog(atoms)
+    # Undo/redo tests use arbitrary displacements that can violate the default
+    # site-symmetry constraint. Symmetry-specific tests enable it explicitly.
+    # Otherwise a debounced commit opens a modal warning during QTest.qWait().
+    dialog.symmetric.setChecked(False)
+    return dialog
 
 
 def focus(dialog, widget):
