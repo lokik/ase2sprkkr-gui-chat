@@ -147,3 +147,30 @@ def test_profile_summary_fields_preserve_the_legacy_description(monkeypatch):
         "Local execution · direct · MPI automatic\n"
         "Executables: /home/user/SPRKKR"
     )
+
+
+def test_profile_summary_mpi_modes(monkeypatch):
+    from types import SimpleNamespace
+
+    profile = SimpleNamespace(
+        executor="local",
+        backend_config=SimpleNamespace(name="direct"),
+        mpi=None,
+        executable_dir=None,
+        executable_suffix=None,
+    )
+    monkeypatch.setattr(
+        execution_profiles, "resolve_sprkkr_profile",
+        lambda _name, *, configuration=None: profile,
+    )
+    cases = (
+        (False, "disabled", "MPI disabled"),
+        (True, "enabled", "MPI enabled"),
+        (None, "automatic", "MPI automatic"),
+        (4, "4 processes", "MPI: 4 processes"),
+        (("mpirun", "-np", "4"), "mpirun -np 4", "MPI: mpirun -np 4"),
+    )
+    for selected, value, description in cases:
+        profile.mpi = selected
+        assert execution_profiles.profile_summary_fields(None)[2] == ("MPI", value)
+        assert f"· {description}\\n" in execution_profiles.profile_description(None)
