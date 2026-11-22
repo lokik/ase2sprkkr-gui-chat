@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
 
+from ase2sprkkr_gui.gui.application import execution_profiles
 from ase2sprkkr_gui.gui.application.execution_profiles import ProfileDraft
 from ase2sprkkr_gui.gui.dialogs import profiles as profiles_dialogs
 from ase2sprkkr_gui.gui.widgets.execution_profiles import ProfileForm
@@ -120,3 +121,29 @@ def test_profiles_dialog_handles_yaml_error_on_save(monkeypatch):
     assert dialog.result() == QDialog.DialogCode.Rejected
     assert messages == [("Cannot Save Profiles", "invalid YAML document")]
     dialog.close()
+
+
+def test_profile_summary_fields_preserve_the_legacy_description(monkeypatch):
+    from types import SimpleNamespace
+
+    profile = SimpleNamespace(
+        executor="local",
+        backend_config=SimpleNamespace(name="direct"),
+        mpi="auto",
+        executable_dir="/home/user/SPRKKR",
+        executable_suffix="",
+    )
+    monkeypatch.setattr(
+        execution_profiles, "resolve_sprkkr_profile",
+        lambda _name, *, configuration=None: profile,
+    )
+
+    assert execution_profiles.profile_summary_fields(None) == (
+        ("Execution", "Local execution · direct"),
+        ("Executables", "/home/user/SPRKKR"),
+        ("MPI", "automatic"),
+    )
+    assert execution_profiles.profile_description(None) == (
+        "Local execution · direct · MPI automatic\\n"
+        "Executables: /home/user/SPRKKR"
+    )
