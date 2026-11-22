@@ -246,6 +246,20 @@ def load_potential_version(
     return atoms
 
 
+def _other_scf_claims_potential(output_path: Path, potential_path: Path) -> bool:
+    """Fast provenance collision check for standalone (non-batch) SCF imports."""
+    try:
+        return any(
+            candidate != output_path
+            and candidate.is_file()
+            and candidate.suffix.casefold() == ".out"
+            and looks_like_scf_output(candidate, potential_filename=potential_path)
+            for candidate in output_path.parent.iterdir()
+        )
+    except OSError:
+        return False
+
+
 def load_result_file(
     file_path: str | Path, *, cache: ResultImportCache | None = None,
 ) -> LoadedResult:
@@ -264,6 +278,21 @@ def load_result_file(
     )
     if cache is not None:
         cache.remember(loaded)
+    elif (
+        loaded.potential_path is not None
+        and str(getattr(result, "task_name", "")).casefold() == "scf"
+        and _other_scf_claims_potential(path, loaded.potential_path)
+    ):
+        # A standalone import has no batch to reconcile. Both stdout files
+        # survive, but neither uniquely identifies today's overwritten POTFIL.
+        loaded = replace(
+            loaded,
+            atoms=None,
+            potential_error=PotentialProvenanceAmbiguous(
+                f"Another SCF output refers to {loaded.potential_path.name}; "
+                "the current potential cannot safely be attributed to this run."
+            ),
+        )
     return loaded
 
 
@@ -461,9 +490,15 @@ def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
     except OSError:
         return None
 
-    for path in candidates:
-        if not looks_like_scf_output(path, potential_filename=target_potential):
-            continue
+    matching = [
+        path for path in candidates
+        if looks_like_scf_output(path, potential_filename=target_potential)
+    ]
+    if len(matching) > 1:
+        # Two SCF OUT files may remain after a later run overwrote pot_new.
+        # Their output-to-potential relationship is not recoverable by name.
+        return None
+    for path in matching:
         try:
             result = TaskResult.from_file(path)
             if str(getattr(result, "task_name", "")).casefold() != "scf":
