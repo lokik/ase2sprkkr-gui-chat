@@ -96,6 +96,9 @@ class CalculationRequest:
     potential: Any | None = None
     # Parsed and versioned source from an input file, not part of the workspace.
     file_source: Any | None = None
+    # Exact native POTFIL backing the unchanged workspace state. A runner can
+    # reference its bytes directly instead of serializing the live Atoms again.
+    reusable_potential_version: PotentialFileVersion | None = None
 
 
 @dataclass(frozen=True)
@@ -420,6 +423,33 @@ class WorkspaceController(QObject):
             return True
         return self.scf_status() not in (None, "START")
 
+    def reusable_potential_version(self) -> PotentialFileVersion | None:
+        """Return an exact POTFIL source only for an unedited, file-backed state.
+
+        GUI edits create a new state without a source path. A restart must
+        serialize SCFSTATUS=START, so cannot reuse the original file unchanged.
+        The caller must revalidate the captured version at submission time.
+        """
+        structure = self.structure_state
+        if (
+            structure.restarted
+            or structure.state_id is None
+            or structure.potential_path is None
+            # Embedded runs have a distinct POTFIL (host) and POTFIL_CLU.
+            # Reusing one path as a periodic POTFIL would be incorrect.
+            or getattr(structure.atoms, "embedding_host", None) is not None
+            or self.has_unsaved_structure
+        ):
+            return None
+        version = self._results.state(structure.state_id).potential_version
+        if (
+            version is None
+            or not version.available
+            or version.path != Path(structure.potential_path).expanduser().absolute()
+        ):
+            return None
+        return version
+
     def create_calculation_request(self) -> CalculationRequest:
         atoms = self.atoms
         parameters = self.input_parameters
@@ -447,6 +477,7 @@ class WorkspaceController(QObject):
             structure_id=structure_id,
             state_id=state_id,
             restart_scf=self.restarted,
+            reusable_potential_version=self.reusable_potential_version(),
         )
 
     @staticmethod
