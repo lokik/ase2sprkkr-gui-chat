@@ -69,6 +69,8 @@ class LoadedResult:
     # Captured before parsing and verified afterwards, for one-shot reuse.
     parsed_potential_version: PotentialFileVersion | None = None
     source_versions: tuple[PotentialFileVersion, ...] = ()
+    # Cheap, pre-parser stdout fingerprint used to reject concurrent rewrites.
+    parsed_output_version: PotentialFileVersion | None = None
 
 
 class ResultImportCache:
@@ -83,11 +85,51 @@ class ResultImportCache:
     def __init__(self):
         self.inputs = InputFileCache() if InputFileCache is not None else None
         self.potentials: dict[Path, LoadedResult] = {}
+        self._versions: dict[Path, PotentialFileVersion] = {}
+        self._scf_candidates: dict[Path, tuple[Path, ...]] = {}
+        self._scf_claims: dict[tuple[Path, Path], tuple[Path, ...]] = {}
         self._hosts: dict[Path, tuple[PotentialFileVersion, Any]] = {}
         self._clusters: dict[
             tuple[Path, Path],
             tuple[PotentialFileVersion, PotentialFileVersion, Any],
         ] = {}
+
+    def version(
+        self, path: Path, *, require_digest: bool = False,
+    ) -> PotentialFileVersion:
+        """Avoid rehashing identical files for every result in the same batch."""
+        path = path.resolve()
+        previous = self._versions.get(path)
+        if (
+            previous is not None
+            and (not require_digest or previous.available)
+            and previous.is_current()
+        ):
+            return previous
+        version = PotentialFileVersion.capture(path, require_digest=require_digest)
+        self._versions[path] = version
+        return version
+
+    def scf_claims(self, directory: Path, potential_path: Path) -> tuple[Path, ...]:
+        """One cheap SCF banner index per directory; refine by produced POTFIL."""
+        directory = directory.resolve()
+        potential_path = potential_path.resolve()
+        if directory not in self._scf_candidates:
+            try:
+                self._scf_candidates[directory] = tuple(
+                    path for path in directory.iterdir()
+                    if path.is_file() and path.suffix.casefold() == ".out"
+                    and looks_like_scf_output(path)
+                )
+            except OSError:
+                self._scf_candidates[directory] = ()
+        key = (directory, potential_path)
+        if key not in self._scf_claims:
+            self._scf_claims[key] = tuple(
+                path for path in self._scf_candidates[directory]
+                if looks_like_scf_output(path, potential_filename=potential_path)
+            )
+        return self._scf_claims[key]
 
     def remember(self, loaded: LoadedResult) -> None:
         if (
@@ -175,6 +217,8 @@ def _newest_unique_output(paths: list[Path]) -> Path | None:
 
 def disambiguate_scf_potentials(
     loaded: list[tuple[Path, LoadedResult]],
+    *,
+    cache: ResultImportCache | None = None,
 ) -> tuple[list[tuple[Path, LoadedResult]], tuple[str, ...]]:
     """Attribute a reused SCF output POTFIL only to the newest SCF stdout.
 
@@ -195,8 +239,13 @@ def disambiguate_scf_potentials(
             by_potential.setdefault(path, []).append(index)
 
     ambiguous = set()
-    for indices in by_potential.values():
+    for potential, indices in by_potential.items():
         paths = {loaded[i][0].resolve() for i in indices}
+        if cache is not None:
+            # Recent-results import may not include the newest SCF stdout.
+            # Its presence must still invalidate an older candidate's claim.
+            for path in tuple(paths):
+                paths.update(cache.scf_claims(path.parent, potential))
         if len(paths) <= 1:
             continue
         latest = _newest_unique_output(list(paths))
@@ -287,6 +336,9 @@ def load_result_file(
 ) -> LoadedResult:
     """Parse an external result, optionally reusing one batch's inputs and POTFILs."""
     path = Path(file_path).resolve()
+    output_version = (
+        PotentialFileVersion.capture(path, digest=False) if path.is_file() else None
+    )
     result = (
         TaskResult.from_file(path, input_cache=cache.inputs)
         if cache is not None and cache.inputs is not None else TaskResult.from_file(path)
@@ -298,6 +350,11 @@ def load_result_file(
         potential_cache=cache.potentials if cache is not None else None,
         import_cache=cache,
     )
+    if output_version is not None and not output_version.is_current():
+        raise PotentialVersionChanged(
+            f"Output file changed while it was read: {path}"
+        )
+    loaded = replace(loaded, parsed_output_version=output_version)
     if cache is not None:
         cache.remember(loaded)
     elif (
@@ -345,7 +402,10 @@ def load_result(
     if potential is not None:
         try:
             if potential.is_file():
-                pre_read_potential_version = PotentialFileVersion.capture(potential)
+                pre_read_potential_version = (
+                    import_cache.version(potential) if import_cache is not None
+                    else PotentialFileVersion.capture(potential)
+                )
         except OSError:
             pass  # A missing/unreadable POTFIL is reported by the normal loader.
 
@@ -367,8 +427,12 @@ def load_result(
                 host_version = manifest.input_version(host_path)
             else:
                 try:
-                    host_version = PotentialFileVersion.capture(
-                        host_path, require_digest=True,
+                    host_version = (
+                        import_cache.version(host_path, require_digest=True)
+                        if import_cache is not None
+                        else PotentialFileVersion.capture(
+                            host_path, require_digest=True,
+                        )
                     )
                 except OSError as exc:
                     host_version_error = exc

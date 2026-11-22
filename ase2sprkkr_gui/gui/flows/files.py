@@ -354,7 +354,7 @@ def load_all_recent_outputs(
                 loaded.append((path, load_result_file(path, cache=cache)))
             except Exception as exc:  # noqa: BLE001 - unrelated/stale files must not interrupt the batch
                 failures.append((path.name, str(exc)))
-        loaded, ambiguous = disambiguate_scf_potentials(loaded)
+        loaded, ambiguous = disambiguate_scf_potentials(loaded, cache=cache)
         return loaded, failures, ambiguous
 
     def publish(read_results):
@@ -437,7 +437,7 @@ def load_output_directory(
                 loaded.append((path, load_result_file(path, cache=cache)))
             except Exception as exc:  # noqa: BLE001 - unrelated logs may exist
                 failures.append((path.name, str(exc)))
-        loaded, ambiguous = disambiguate_scf_potentials(loaded)
+        loaded, ambiguous = disambiguate_scf_potentials(loaded, cache=cache)
         return loaded, failures, ambiguous
 
     def publish(read_results):
@@ -446,9 +446,13 @@ def load_output_directory(
         entries: list[tuple[RecentKind, Path]] = []
         with controller.batch_external_results():
             for index, (path, result) in enumerate(loaded):
-                adoption = controller.adopt_external_result(
-                    result, select_result=index == len(loaded) - 1
-                )
+                try:
+                    adoption = controller.adopt_external_result(
+                        result, select_result=index == len(loaded) - 1
+                    )
+                except Exception as exc:  # noqa: BLE001 - independent outputs
+                    failures.append((path.name, str(exc)))
+                    continue
                 if adoption.potential_path is not None and adoption.potential_error is None:
                     entries.append(("structure", adoption.potential_path))
                 entries.append(("output", path))

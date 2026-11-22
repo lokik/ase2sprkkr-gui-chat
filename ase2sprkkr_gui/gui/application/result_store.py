@@ -808,6 +808,7 @@ class ResultStore:
         potential_path: Path | None,
         persistent_ref: str | None = None,
         source_versions: tuple[FileVersion, ...] = (),
+        parsed_potential_version: PotentialFileVersion | None = None,
     ) -> ResultRecord:
         existing = self.result_for_external_source(
             output_path,
@@ -841,6 +842,7 @@ class ResultStore:
                 potential_path=potential_path,
                 output_atoms=atoms,
                 output_potential_path=(str(potential_path) if potential_path else None),
+                output_potential_version=parsed_potential_version,
                 source_versions=source_versions,
                 imported=True,
             )
@@ -848,6 +850,7 @@ class ResultStore:
         prepared_state = self._prepare_structure_state(
             atoms,
             potential_path=(str(potential_path) if potential_path else None),
+            potential_version=parsed_potential_version,
             source_versions=source_versions,
         )
         assert prepared_state.structure is not None
