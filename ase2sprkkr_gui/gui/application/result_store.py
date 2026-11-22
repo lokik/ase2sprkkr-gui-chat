@@ -859,11 +859,15 @@ class ResultStore:
                 return existing
             state = self.state_for_result(existing)
             same_potential = existing.potential_path == potential_path
-            # A cache hit reuses the exact scientific result object but leaves
-            # atoms out: its structure already belongs to the recorded state.
-            # Do not confuse that with a *new* parse that failed to recover
-            # atoms, which must not inherit an old successful structure.
-            cached_structure = atoms is None and result is existing.result
+            # A lightweight cache hit intentionally omits atoms because the
+            # original structure belongs to this exact recorded result.
+            # Identity alone is insufficient: a *new* parse without atoms must
+            # not inherit a previously reconstructed structure.
+            cached_structure = (
+                cached_record_id == existing.id
+                and result is existing.result
+                and atoms is None
+            )
             same_structure_availability = (
                 (state is None) == (atoms is None) or cached_structure
             )
