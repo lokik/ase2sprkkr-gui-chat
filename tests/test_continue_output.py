@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from ase import Atoms
 from PyQt6.QtCore import QThread, QTimer
 from PyQt6.QtWidgets import QApplication, QWidget
 from kkrunner.projects import ProjectRepository
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
-from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+from ase2sprkkr_gui.gui.application.result_loading import LoadedResult, OutputVersionChanged
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.flows import files as file_flows
 from ase2sprkkr_gui.gui.misc.modal_task import _ModalTaskDialog
@@ -72,6 +73,7 @@ def test_continue_output_activates_state_and_reuses_same_result(tmp_path, monkey
     assert cached.result is record.result
     assert cached.atoms is None
     assert cached.cached_record_id == record.id
+    assert cached.parsed_output_version == record.output_version
 
     structure_generation = controller.structure_generation
     directory_generation = controller.directory_generation
@@ -171,6 +173,25 @@ def test_new_unusable_parse_does_not_inherit_cached_structure(tmp_path):
     assert second.id != first.id
     assert controller.result_store.state_for_result(second) is None
     assert controller.result_store.state_for_result(first) is not None
+
+
+
+def test_cached_output_rejects_rewrite_between_lookup_and_publication(tmp_path):
+    output = tmp_path / "SCF.out"
+    output.write_text("historical output", encoding="utf-8")
+    controller = WorkspaceController()
+    record = controller.adopt_external_result(_loaded_scf(output)).record
+    assert record is not None
+
+    cached = file_flows._cached_output(controller, output)
+    assert cached is not None
+    assert cached.cached_record_id == record.id
+    assert cached.parsed_output_version is record.output_version
+
+    output.write_text("another calculation in the same file", encoding="utf-8")
+    with pytest.raises(OutputVersionChanged, match="changed after it was read"):
+        controller.adopt_external_result(cached)
+    assert controller.result_store.results == (record,)
 
 
 def test_overwritten_output_path_creates_new_result(tmp_path):
