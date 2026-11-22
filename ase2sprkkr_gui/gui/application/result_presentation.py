@@ -121,7 +121,11 @@ def _present_value(
         return _error_value(f"{key}: unavailable", exc)
 
     try:
-        actions = () if disable_actions else tuple(str(action) for action in value.actions())
+        actions = tuple(str(action) for action in value.actions())
+        if disable_actions:
+            # Missing historical data cannot be read or copied, but navigating
+            # to the containing directory remains safe and useful.
+            actions = tuple(a for a in actions if a == "open_directory")
     except Exception as exc:
         logger.exception("Failed to load actions for output value %r", key)
         action_warning = f"Actions could not be loaded: {exc}"
