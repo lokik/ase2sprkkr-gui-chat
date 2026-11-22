@@ -298,6 +298,44 @@ class ResultStore:
         source_id = self.state(state_id).potential_source_result_id
         return self._results.get(source_id) if source_id is not None else None
 
+    def imported_scf_source(self, record: ResultRecord) -> ResultRecord | None:
+        """Find a uniquely identifiable SCF source for an imported result.
+
+        Imported files have independent structure states: do not rewrite their
+        scientific provenance merely to group them in a history tree. A source
+        may be inferred for presentation only when both results still have
+        usable, current potential snapshots with identical content. Paths may
+        differ (e.g. a copied POTFIL), but ambiguous SCFs never become parents.
+        """
+        if not record.imported or record.task_name in {"scf", "empty_spheres"}:
+            return None
+        state = self.state_for_result(record)
+        version = state.potential_version if state is not None else None
+        if version is None or not version.available or not version.is_current():
+            return None
+
+        sources = []
+        for candidate in self.imported_results(record.directory):
+            if candidate.id == record.id or candidate.task_name != "scf":
+                continue
+            if candidate.output_state_id is None:
+                continue
+            scf_state = self.state(candidate.output_state_id)
+            scf_version = scf_state.potential_version
+            if (
+                scf_version is None
+                or not scf_version.available
+                or scf_version.kind != version.kind
+                or scf_version.digest != version.digest
+                or scf_state.source_dependencies != state.source_dependencies
+                or not scf_version.is_current()
+            ):
+                continue
+            sources.append(candidate)
+            if len(sources) > 1:
+                return None
+        return sources[0] if sources else None
+
     def branch_id_for_result(self, record: ResultRecord) -> int | None:
         state = self.state_for_result(record)
         return state.branch_id if state is not None else None

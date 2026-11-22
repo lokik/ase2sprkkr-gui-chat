@@ -182,6 +182,103 @@ def test_native_result_using_imported_scf_stays_under_import_directory(tmp_path)
     widget.close()
 
 
+def _import_scf_and_dos(
+    tmp_path, *, dos_contents="converged POT", reverse=False,
+    second_scf=False,
+):
+    directory = tmp_path / "New"
+    directory.mkdir(parents=True)
+    # SCF's POT_new can be copied under a different name for a DOS run.
+    scf_potential = directory / "Fe2.pot_new"
+    dos_potential = directory / "Fe2.pot"
+    scf_potential.write_text("converged POT", encoding="utf-8")
+    dos_potential.write_text(dos_contents, encoding="utf-8")
+    store = ResultStore()
+    imported = {}
+
+    def add(task, name, potential):
+        return store.add_external_result(
+            _result(task, name),
+            atoms=Atoms("Fe"),
+            input_parameters=None,
+            directory=str(directory),
+            output_path=directory / f"{name}.out",
+            potential_path=potential,
+        )
+
+    entries = [
+        ("scf", "Fe2_SCF", scf_potential),
+        ("dos", "Fe2_DOS", dos_potential),
+    ]
+    if reverse:
+        entries.reverse()
+    for task, name, potential in entries:
+        imported[task] = add(task, name, potential)
+    if second_scf:
+        imported["second_scf"] = add("scf", "another_SCF", scf_potential)
+    return store, imported
+
+
+def test_imported_dos_is_nested_under_scf_with_identical_potential_bytes(
+    tmp_path,
+):
+    # Directory imports discover files alphabetically: DOS may arrive first.
+    for reverse in (False, True):
+        store, imported = _import_scf_and_dos(
+            tmp_path / str(reverse), reverse=reverse,
+        )
+        assert store.imported_scf_source(imported["dos"]) is imported["scf"]
+
+        _application = QApplication.instance() or QApplication([])
+        widget = _widget()
+        _set_store(widget, store)
+        assert widget._selector.topLevelItemCount() == 1
+        directory = widget._selector.topLevelItem(0)
+        assert directory.childCount() == 1
+        scf_item = widget._find_result_item(imported["scf"].id)
+        dos_item = widget._find_result_item(imported["dos"].id)
+        assert scf_item.parent() is directory
+        assert dos_item.parent() is scf_item
+        widget.close()
+
+
+def test_imported_dos_with_unrelated_potential_remains_scf_sibling(tmp_path):
+    store, imported = _import_scf_and_dos(
+        tmp_path, dos_contents="the SCF input, not its output",
+    )
+    assert store.imported_scf_source(imported["dos"]) is None
+
+    _application = QApplication.instance() or QApplication([])
+    widget = _widget()
+    _set_store(widget, store)
+    directory = widget._selector.topLevelItem(0)
+    assert directory.childCount() == 2
+    assert widget._find_result_item(imported["dos"].id).parent() is directory
+    widget.close()
+
+
+def test_ambiguous_imported_scf_sources_do_not_guess_dos_parent(tmp_path):
+    store, imported = _import_scf_and_dos(tmp_path, second_scf=True)
+    assert store.imported_scf_source(imported["dos"]) is None
+
+    _application = QApplication.instance() or QApplication([])
+    widget = _widget()
+    _set_store(widget, store)
+    directory = widget._selector.topLevelItem(0)
+    assert directory.childCount() == 3
+    assert widget._find_result_item(imported["dos"].id).parent() is directory
+    widget.close()
+
+
+def test_overwritten_imported_scf_potential_is_not_dos_parent(tmp_path):
+    store, imported = _import_scf_and_dos(tmp_path)
+    assert store.imported_scf_source(imported["dos"]) is imported["scf"]
+    (tmp_path / "New" / "Fe2.pot_new").write_text(
+        "different calculation", encoding="utf-8",
+    )
+    assert store.imported_scf_source(imported["dos"]) is None
+
+
 def test_hidden_import_only_structure_does_not_consume_formula_number(tmp_path):
     _application = QApplication.instance() or QApplication([])
     store = ResultStore()
