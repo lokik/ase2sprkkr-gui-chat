@@ -7,7 +7,11 @@ from typing import Any
 
 from ase2sprkkr import Potential, TaskResult
 from ase2sprkkr.outputs import looks_like_scf_output
-from ase2sprkkr.outputs.task_result import InputFileCache
+try:
+    from ase2sprkkr.outputs.task_result import InputFileCache
+except ImportError:
+    # Older installed backend releases still support ordinary output loading.
+    InputFileCache = None
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
@@ -65,7 +69,7 @@ class ResultImportCache:
     """Worker-local cache shared only by one batch of imported outputs."""
 
     def __init__(self):
-        self.inputs = InputFileCache()
+        self.inputs = InputFileCache() if InputFileCache is not None else None
         self.potentials: dict[Path, LoadedResult] = {}
 
     def remember(self, loaded: LoadedResult) -> None:
@@ -136,7 +140,7 @@ def load_result_file(
     path = Path(file_path).resolve()
     result = (
         TaskResult.from_file(path, input_cache=cache.inputs)
-        if cache is not None else TaskResult.from_file(path)
+        if cache is not None and cache.inputs is not None else TaskResult.from_file(path)
     )
     loaded = load_result(
         result,
