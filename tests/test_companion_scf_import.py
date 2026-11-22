@@ -148,14 +148,23 @@ def test_companion_loading_delegates_to_backend_without_rereading_potential(
         return scf
 
     monkeypatch.setattr(result_loading.ResultLoader, "companion_scf", companion)
+    cache = result_loading.ResultImportCache()
+    parses = []
+
+    def raw_potential(_cls, path, *, atoms, check_file_unchanged, host=None):
+        parses.append(path)
+        assert atoms is False and check_file_unchanged
+        return SimpleNamespace(atoms=selected.atoms)
+
     monkeypatch.setattr(
-        result_loading, "_load_potential",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("Already loaded potential must be reused")
-        ),
+        result_loading.Potential, "from_file", classmethod(raw_potential)
     )
-    companion_loaded = load_companion_scf_result(selected)
+    # An earlier result loaded this same POTFIL into the batch cache.
+    assert cache.loader.potential(potential).atoms is atoms
+
+    companion_loaded = load_companion_scf_result(selected, cache=cache)
     assert companion_loaded is not None
     assert companion_loaded.output_path == scf_path.resolve()
     assert companion_loaded.atoms is atoms
+    assert len(parses) == 1
     assert seen == [selected.result]
