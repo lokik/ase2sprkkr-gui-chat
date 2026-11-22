@@ -52,7 +52,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lokik/kkrunner-chat
-          ref: 1526476b847d37eb5787e5cf5e240cf9e66232e7
+          ref: 1955dc8518c3128a2f7571f70edd878cec1c37f3
           path: .ci/kkrunner
 
       # The embedding and editor branches use the native cluster backend,
@@ -61,14 +61,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lokik/ase2sprkkr-chat
-          ref: >-
-            ${{ (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
-                || github.head_ref == 'cluster' || github.head_ref == 'embedding-host-scf'
-                || github.head_ref == 'guided-structure-type' || github.head_ref == 'editor'
-                || github.head_ref == 'editor-native-identifiers'
-                || github.ref_name == 'cluster' || github.ref_name == 'embedding-host-scf'
-                || github.ref_name == 'guided-structure-type' || github.ref_name == 'editor'
-                || github.ref_name == 'editor-native-identifiers') && 'cluster' || 'develop' }}
+          ref: 158289f3ce65b0fd1bd471a50b0ac2f22cd2f932
           path: .ci/ase2sprkkr
 
       - name: Install package and test dependencies
