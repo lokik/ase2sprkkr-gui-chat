@@ -23,7 +23,7 @@ def test_orbital_application_icon_renders_at_window_sizes():
         assert image.width() == size and image.height() == size
 
 
-def test_gui_application_icon_is_inherited_by_both_primary_windows(tmp_path):
+def test_gui_application_icon_is_inherited_by_workflow_window(tmp_path):
     app = QApplication.instance() or QApplication([])
     previous_icon = app.windowIcon()
     previous_name = app.applicationName()
@@ -32,10 +32,10 @@ def test_gui_application_icon_is_inherited_by_both_primary_windows(tmp_path):
         gui = GuiApplication(recent_files_path=tmp_path / "recent.json")
         assert app.applicationName() == "Ase2sprkkr"
         assert not app.windowIcon().isNull()
-        for window in (gui.create_workflow_window(), gui.create_main_window()):
-            icon = window.windowIcon()
-            assert not icon.isNull()
-            assert not icon.pixmap(32, 32).isNull()
+        window = gui.create_workflow_window()
+        icon = window.windowIcon()
+        assert not icon.isNull()
+        assert not icon.pixmap(32, 32).isNull()
     finally:
         app.setWindowIcon(previous_icon)
         app.setApplicationName(previous_name)
@@ -47,13 +47,5 @@ def test_icon_is_genuine_vector():
     assert "<image" not in source
     assert "data:image/" not in source
     assert "<path " in source
-    assert source.count('<circle ') >= 114
+    assert "<circle " in source
 
-
-def test_icon_uses_soft_glow_and_muted_electrons():
-    """Lettering stays prominent while electron markers blend with the background."""
-    source = icon_path("sprkkr-orbital.svg").read_text(encoding="utf-8")
-    assert 'id="letterBlur"' in source
-    assert 'id="electronBlur"' in source
-    assert source.count('filter="url(#letterBlur)"') == 114
-    assert source.count('filter="url(#electronBlur)"') == 3

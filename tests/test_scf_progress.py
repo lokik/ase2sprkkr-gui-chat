@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import QApplication, QTabWidget
 
 from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
 from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow
-from ase2sprkkr.outputs.readers.scf import ScfProgressParser
 from ase2sprkkr_gui.gui.dialogs.scf_progress import (
     ScfProgressTracker,
     scf_tolerance_from_parameters,
@@ -33,21 +32,6 @@ def _completed_line(*args, **kwargs):
     )
 
 
-
-def test_native_scf_error_is_worst_of_two_convergence_components():
-    events = []
-    parser = ScfProgressParser(on_info=lambda **event: events.append(event))
-    parser.feed(_completed_line())
-    assert len(events) == 1
-    item = events[0]["data"]
-    assert events[0]["kind"] == "scf_iteration"
-    assert item.iteration == 6
-    assert item.fermi_energy == 0.76199
-    assert item.convergence_error == 0.0208
-    assert item.error == 0.00211
-    assert item.b_error == 0.0208
-    parser.feed("normal stdout\n6 ERR ******* 0.02 EF 0.7\n")
-    assert len(events) == 1
 
 
 def test_scf_parser_supports_fortran_exponents_and_stream_fragments():

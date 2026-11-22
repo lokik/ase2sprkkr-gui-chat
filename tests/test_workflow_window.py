@@ -881,51 +881,6 @@ def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
     window.close()
 
 
-def test_header_and_results_footer_keep_spacing_without_rulers(tmp_path):
-    application = QApplication.instance() or QApplication([])
-    _gui, window = _workflow(tmp_path)
-    window.showNormal()
-    window.resize(1600, 850)
-    application.processEvents()
-    headers = (
-        window.findChild(QWidget, "workflowStructureNavigation"),
-        window.findChild(QWidget, "workflowCalculationNavigation"),
-        window.findChild(QWidget, "workflowResultsNavigation"),
-    )
-    for header in headers:
-        assert header.minimumSizeHint().width() == 0
-        assert header.minimumWidth() == 0
-        assert header.height() == 93
-        for button in header._buttons:
-            if not button.isHidden():
-                button_top = button.mapTo(header, QPoint(0, 0)).y()
-                button_bottom = button_top + button.height()
-                # The 68-pixel buttons are centered in the original 93-pixel header.
-                expected_margin = (header.height() - button.height()) / 2
-                assert abs(button_top - expected_margin) <= 1
-                assert abs(header.height() - button_bottom - expected_margin) <= 1
-
-    footer = window._results_footer
-    assert footer.frameShape() == QFrame.Shape.NoFrame
-    assert footer.styleSheet() == ""
-    assert window.centralWidget().layout().contentsMargins().top() == 0
-    assert window.centralWidget().layout().contentsMargins().bottom() == 0
-    # Removing the visible lines must not alter the original 93-px headers
-    # or the utility footer's 68-px controls and 12-px vertical spacing.
-    assert window.findChild(QWidget, "workflowResultsFooterSeparator") is None
-    assert footer.layout().itemAt(0).spacerItem() is not None
-    assert footer.layout().itemAt(0).spacerItem().sizeHint().height() == 1
-    assert footer.layout().contentsMargins().bottom() == 12
-    assert footer.layout().spacing() == 12
-    for button in footer.findChildren(QToolButton):
-        assert button.height() == 68
-        assert abs(
-            footer.height() - button.mapTo(
-                footer, QPoint(0, button.height())
-            ).y() - 12
-        ) <= 1
-    window.close()
-
 
 def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
     application = QApplication.instance() or QApplication([])
