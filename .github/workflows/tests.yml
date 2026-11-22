@@ -61,13 +61,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lokik/ase2sprkkr-chat
-          # Until the companion ASE2SPRKKR progress-events PR lands in cluster,
-          # test this GUI feature against its corresponding parser branch.
           ref: >-
-            ${{ ((github.head_ref == 'refactor/info-progress-pages-20261122'
-                 || github.ref_name == 'refactor/info-progress-pages-20261122')
-                && 'refactor/unified-progress-events-20261122')
-                || (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
+            ${{ (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
                 || github.head_ref == 'cluster' || github.head_ref == 'embedding-host-scf'
                 || github.head_ref == 'guided-structure-type' || github.head_ref == 'editor'
                 || github.head_ref == 'editor-native-identifiers'
