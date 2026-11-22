@@ -7,6 +7,7 @@ from typing import Any
 
 from ase2sprkkr import Potential, TaskResult
 from ase2sprkkr.outputs import looks_like_scf_output
+from ase2sprkkr.outputs.task_result import InputFileCache
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
@@ -60,6 +61,25 @@ class LoadedResult:
     source_versions: tuple[PotentialFileVersion, ...] = ()
 
 
+class ResultImportCache:
+    """Worker-local cache shared only by one batch of imported outputs."""
+
+    def __init__(self):
+        self.inputs = InputFileCache()
+        self.potentials: dict[Path, LoadedResult] = {}
+
+    def remember(self, loaded: LoadedResult) -> None:
+        # Native embedded SCF can adjust cluster convergence status per result;
+        # do not silently reuse that result-specific object for another task.
+        if (
+            loaded.potential_path is not None
+            and loaded.atoms is not None
+            and loaded.parsed_potential_version is not None
+            and not getattr(loaded.result, "is_embedded", False)
+        ):
+            self.potentials[loaded.potential_path] = loaded
+
+
 def load_potential_atoms(file_path: str | Path, *, embedding_host=None) -> Any:
     """Read a periodic POTFIL or CLUPOT, preserving native radial information."""
     path = Path(file_path).resolve()
@@ -109,15 +129,24 @@ def load_potential_version(
     return atoms
 
 
-def load_result_file(file_path: str | Path) -> LoadedResult:
-    """Parse an external result and all usable referenced result files."""
+def load_result_file(
+    file_path: str | Path, *, cache: ResultImportCache | None = None,
+) -> LoadedResult:
+    """Parse an external result, optionally reusing one batch's inputs and POTFILs."""
     path = Path(file_path).resolve()
-    result = TaskResult.from_file(path)
-    return load_result(
+    result = (
+        TaskResult.from_file(path, input_cache=cache.inputs)
+        if cache is not None else TaskResult.from_file(path)
+    )
+    loaded = load_result(
         result,
         fallback_directory=path.parent,
         output_fallback=path,
+        potential_cache=cache.potentials if cache is not None else None,
     )
+    if cache is not None:
+        cache.remember(loaded)
+    return loaded
 
 
 def load_result(
@@ -128,9 +157,12 @@ def load_result(
     persistent_ref: str | None = None,
     embedding_host=None,
     reusable_potential: LoadedResult | None = None,
+    potential_cache: dict[Path, LoadedResult] | None = None,
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
     output, potential = _result_files(result, fallback_directory)
+    if reusable_potential is None and potential_cache is not None:
+        reusable_potential = potential_cache.get(potential)
     manifest = result_file_manifest(result)
     if output is None and output_fallback is not None:
         output = Path(output_fallback).resolve()

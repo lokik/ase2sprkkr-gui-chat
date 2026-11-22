@@ -18,6 +18,7 @@ from ase2sprkkr_gui.ase.copy import copy_for_edit
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles, RecentKind
 from ase2sprkkr_gui.gui.application.result_loading import (
     LoadedResult,
+    ResultImportCache,
     PotentialVersionChanged,
     load_potential_atoms,
     load_result_file,
@@ -346,9 +347,10 @@ def load_all_recent_outputs(
 
     def read_all():
         loaded, failures = [], []
+        cache = ResultImportCache()
         for path in paths:
             try:
-                loaded.append((path, load_result_file(path)))
+                loaded.append((path, load_result_file(path, cache=cache)))
             except Exception as exc:  # noqa: BLE001 - unrelated/stale files must not interrupt the batch
                 failures.append((path.name, str(exc)))
         return loaded, failures
@@ -409,7 +411,7 @@ def load_output_directory(
         raise NotADirectoryError(folder)
     candidates = sorted(
         (p for p in folder.iterdir()
-         if p.is_file() and p.suffix.lower() in {".out", ".log", ".txt"}),
+         if p.is_file() and p.suffix.lower() == ".out"),
         key=lambda p: p.name.casefold(),
     )
     if not candidates:
@@ -420,9 +422,10 @@ def load_output_directory(
 
     def read_all():
         loaded, failures = [], []
+        cache = ResultImportCache()
         for path in candidates:
             try:
-                loaded.append((path, load_result_file(path)))
+                loaded.append((path, load_result_file(path, cache=cache)))
             except Exception as exc:  # noqa: BLE001 - unrelated logs may exist
                 failures.append((path.name, str(exc)))
         return loaded, failures
