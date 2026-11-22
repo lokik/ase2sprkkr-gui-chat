@@ -568,9 +568,11 @@ def test_directory_import_keeps_colliding_scf_outputs_without_false_pot_provenan
 
     assert file_flows.load_output_directory(controller, history, tmp_path, None) == outputs
     assert len(controller.result_store.results) == 2
-    records = controller.result_store.results
-    assert controller.result_store.state_for_result(records[0]) is None
-    assert controller.result_store.state_for_result(records[1]) is not None
+    records = controller.result_store.results  # newest result first
+    assert records[0].output_path == outputs[1].resolve()
+    assert controller.result_store.state_for_result(records[0]) is not None
+    assert records[1].output_path == outputs[0].resolve()
+    assert controller.result_store.state_for_result(records[1]) is None
     assert history.paths("structure") == (str(common.resolve()),)
     assert len(warnings) == 1
     assert "one.out" in warnings[0]
