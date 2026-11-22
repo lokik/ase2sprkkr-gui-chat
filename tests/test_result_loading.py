@@ -908,3 +908,39 @@ def test_import_rejects_stdout_modified_after_worker_read(tmp_path):
     with pytest.raises(Exception, match="changed after it was presented"):
         controller.adopt_external_result(loaded)
     assert not controller.result_store.results
+
+
+def test_reimport_same_stdout_with_overwritten_potential_keeps_new_state(tmp_path):
+    """Unchanged stdout does not authorize reusing a stale structural record."""
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+    from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
+
+    output = tmp_path / "Fe.out"
+    output.write_text("same old stdout")
+    pot = tmp_path / "Fe.pot_new"
+    pot.write_text("first result")
+    controller = WorkspaceController()
+    result = SimpleNamespace(
+        task_name="scf", produces_potential=True, output_values={},
+    )
+
+    def adopt():
+        version = PotentialFileVersion.capture(pot)
+        return controller.adopt_external_result(LoadedResult(
+            result=result, output_path=output, potential_path=pot,
+            atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True),
+            potential_error=None, directory=str(tmp_path),
+            parsed_potential_version=version,
+        )).record
+
+    earlier = adopt()
+    old_state = controller.result_store.state_for_result(earlier)
+    pot.write_text("second result, different charge density")
+    latest = adopt()
+    latest_state = controller.result_store.state_for_result(latest)
+    assert latest.id != earlier.id
+    assert len(controller.result_store.results) == 2
+    assert old_state.potential_version != latest_state.potential_version
+    assert not old_state.potential_version.is_current()
+    assert latest_state.potential_version.is_current()
+    assert adopt().id == latest.id
