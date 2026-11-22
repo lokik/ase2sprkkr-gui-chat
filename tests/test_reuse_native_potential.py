@@ -55,6 +55,23 @@ def test_regular_task_uses_original_scf_pot_new_without_rewriting(tmp_path):
     assert source.read_bytes() == original
 
 
+def test_native_input_references_original_bytes_without_generating_fe2_pot(tmp_path):
+    source, controller = _file_backed_workspace(tmp_path)
+    parameters = InputParameters.create("DOS")
+    parameters.CONTROL.DATASET = "Fe2"
+    request = replace(controller.create_calculation_request(), input_parameters=parameters)
+    execution = _execution(request)
+    content, mtime = source.read_bytes(), source.stat().st_mtime_ns
+
+    _written, input_name, potential_name, _output_name = execution.prepare_files()
+    assert Path(potential_name) == source
+    parsed_input = InputParameters.from_file(input_name)
+    assert parsed_input.CONTROL.POTFIL() == source.name
+    assert source.read_bytes() == content
+    assert source.stat().st_mtime_ns == mtime
+    assert not (tmp_path / "Fe2.pot").exists()
+
+
 def test_guided_spleed_inherits_the_exact_potential_version(tmp_path):
     source, controller = _file_backed_workspace(tmp_path)
     request = _one_off_task_request(
