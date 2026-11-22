@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
+from ase2sprkkr_gui.gui.application.persistence import save_gui_json
 from ase2sprkkr_gui.gui.application.config import config_home
 from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
     default_preferred_task_names, effective_preferred, task_ui_name,
@@ -155,7 +155,7 @@ class ApplicationSettings:
                 if task_ui_name(name) != "SCF"
             ))
         try:
-            atomic_write_json(self.path, data)
+            save_gui_json(self.path, data)
         except OSError:
             return False
         self._apply_atom_appearance()

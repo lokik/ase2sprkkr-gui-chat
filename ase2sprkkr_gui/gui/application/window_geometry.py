@@ -10,7 +10,7 @@ from PyQt6.QtCore import QEvent, QObject, QRect, QSize, Qt
 from PyQt6.QtGui import QGuiApplication, QScreen
 from PyQt6.QtWidgets import QWidget
 
-from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
+from ase2sprkkr_gui.gui.application.persistence import save_gui_json
 from ase2sprkkr_gui.gui.application.config import config_home
 
 _WINDOW_ID_PROPERTY = "_ase2sprkkr_gui_window_geometry_id"
@@ -138,7 +138,7 @@ class WindowGeometryStore(QObject):
             }
         }
         try:
-            atomic_write_json(self.path, data)
+            save_gui_json(self.path, data)
         except OSError:
             return False
         return True

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import platformdirs
 
-from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
+from ase2sprkkr_gui.gui.application.persistence import save_gui_json
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class ShellHistory:
 
     def save(self, commands: list[str]) -> None:
         """Replace the file atomically; callers report failures non-fatally."""
-        atomic_write_json(self.path, commands)
+        save_gui_json(self.path, commands)
 
 
 def python_repl_history_path() -> Path:

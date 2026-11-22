@@ -10,7 +10,7 @@ from typing import Literal
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
+from ase2sprkkr_gui.gui.application.persistence import save_gui_json
 from ase2sprkkr_gui.gui.application.config import config_home
 
 RecentKind = Literal["structure", "input", "output"]
@@ -120,7 +120,7 @@ class RecentFiles(QObject):
     def save(self) -> None:
         """Persist history and log a cache-write failure without breaking file I/O."""
         try:
-            atomic_write_json(
+            save_gui_json(
                 self.path,
                 {
                     "recent_files": self._files,
