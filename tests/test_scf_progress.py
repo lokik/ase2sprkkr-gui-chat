@@ -162,3 +162,20 @@ def test_stdout_header_supplies_target_for_reattached_run():
     low, high = page.error_axis.get_ylim()
     assert low < 1e-5 < high
     page.close()
+
+
+def test_saved_scf_info_reuses_input_tolerance(_qt_application):
+    from ase2sprkkr_gui.gui.application.saved_output import SavedOutput
+    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
+
+    parameters = SimpleNamespace(SCF=SimpleNamespace(TOL=lambda: 3e-7))
+    result = SimpleNamespace(
+        task_name="SCF", input_parameters=parameters,
+        output_values={}, result_values={},
+    )
+    window = CompletedResultWindow(
+        result, saved_output=SavedOutput(text=_completed_line(6)),
+    )
+    assert window._info_page.tracker.target_error == 3e-7
+    assert [item.iteration for item in window._info_page.tracker.iterations] == [6]
+    window.close()
