@@ -544,6 +544,29 @@ def test_imported_embedded_result_uses_recorded_host_version(tmp_path, native_em
     assert loaded.source_versions[0] is host_version
 
 
+
+def test_result_rejects_primary_potential_rewritten_during_loading(tmp_path, monkeypatch):
+    """A parsed structure must never outlive the file version it came from."""
+    from ase2sprkkr.outputs.task_result import TaskResult
+
+    potential = tmp_path / "input.pot"
+    potential.write_text("before", encoding="utf-8")
+    result = TaskResult(None, None, tmp_path, task_name="DOS")
+    result.files.add_file("potential", potential)
+
+    def changed_atoms(*, loader=None):
+        potential.write_text("after modification", encoding="utf-8")
+        return Atoms("Fe")
+
+    monkeypatch.setattr(result, "get_atoms", changed_atoms)
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert loaded.atoms is None
+    assert isinstance(
+        loaded.potential_error, result_loading_module.PotentialVersionChanged
+    )
+    assert loaded.parsed_potential_version is None
+
 def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     tmp_path, monkeypatch,
 ):
