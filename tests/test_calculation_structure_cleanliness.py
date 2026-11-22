@@ -43,7 +43,7 @@ def _calculation_result(atoms, potential):
     )
 
 
-def test_failed_submission_preserves_workspace_state_when_backend_only_reads_input(tmp_path, monkeypatch):
+def test_failed_submission_does_not_publish_a_new_workspace_revision(tmp_path, monkeypatch):
     controller = _controller(tmp_path)
     controller.mark_structure_saved(controller.structure_generation)
     controller.use_for_new_calculation()
@@ -57,8 +57,9 @@ def test_failed_submission_preserves_workspace_state_when_backend_only_reads_inp
 
     class Calculator:
         def create_run(self, **kwargs):
-            # Launch inputs are authoritative shared objects, not private
-            # snapshots. The backend must treat them as read-only.
+            # Execution forwards the authoritative structure without a copy.
+            # Native backend preparation may legitimately normalize it; this
+            # synthetic failing submission tests GUI revision bookkeeping only.
             assert kwargs["atoms"] is original
             assert kwargs["atoms"].get_chemical_symbols() == ["Fe"]
             return ConflictingRun()
