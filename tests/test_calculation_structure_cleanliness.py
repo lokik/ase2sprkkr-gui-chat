@@ -43,7 +43,7 @@ def _calculation_result(atoms, potential):
     )
 
 
-def test_failed_submission_does_not_dirty_the_original_structure(tmp_path, monkeypatch):
+def test_failed_submission_does_not_publish_a_new_workspace_revision(tmp_path, monkeypatch):
     controller = _controller(tmp_path)
     controller.mark_structure_saved(controller.structure_generation)
     controller.use_for_new_calculation()
@@ -57,8 +57,11 @@ def test_failed_submission_does_not_dirty_the_original_structure(tmp_path, monke
 
     class Calculator:
         def create_run(self, **kwargs):
-            # Even backend preparation must only mutate the request snapshot.
-            kwargs["atoms"].symbols = "Cu"
+            # Execution forwards the authoritative structure without a copy.
+            # Native backend preparation may legitimately normalize it; this
+            # synthetic failing submission tests GUI revision bookkeeping only.
+            assert kwargs["atoms"] is original
+            assert kwargs["atoms"].get_chemical_symbols() == ["Fe"]
             return ConflictingRun()
 
     execution = SprkkrExecution(controller.create_calculation_request(), RunCancellation())

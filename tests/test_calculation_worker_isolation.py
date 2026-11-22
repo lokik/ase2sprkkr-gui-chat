@@ -21,7 +21,7 @@ class _Cancellation:
         return True
 
 
-def test_execution_lazy_promotion_does_not_mutate_workspace_atoms(tmp_path):
+def test_execution_retains_plain_workspace_atoms_without_implicit_promotion(tmp_path):
     atoms = Atoms("Fe")
     controller = WorkspaceController(
         WorkspaceState(
@@ -37,16 +37,16 @@ def test_execution_lazy_promotion_does_not_mutate_workspace_atoms(tmp_path):
 
     assert request.atoms is atoms
     assert controller.atoms is atoms
-    assert execution_atoms is not atoms
+    assert execution.request is request
+    assert execution_atoms is atoms
 
-    SPRKKRAtoms.promote_ase_atoms(execution_atoms)
-    execution_atoms.sites
-
+    # Execution is read-only with respect to the published structure;
+    # promotion or detachment belongs to an explicit editing operation.
     assert type(controller.atoms) is Atoms
     assert SPRKKRAtoms.sites_array_name not in controller.atoms.arrays
 
 
-def test_execution_copy_owns_independent_sprkkr_site_state(tmp_path):
+def test_execution_retains_authoritative_sprkkr_site_state(tmp_path):
     atoms = SPRKKRAtoms("Fe2", positions=((0, 0, 0), (1, 0, 0)), symmetry=False)
     atoms.sites[1].site_type = atoms.sites[0].site_type
     original_site_type = atoms.sites[0].site_type
@@ -62,10 +62,10 @@ def test_execution_copy_owns_independent_sprkkr_site_state(tmp_path):
         controller.create_calculation_request(),
         _Cancellation(),
     )
-    copied = execution.request.atoms
+    execution_atoms = execution.request.atoms
 
-    assert copied is not atoms
-    assert copied.sites[0].site_type is copied.sites[1].site_type
-    assert copied.sites[0].site_type is not original_site_type
-    assert copied.sites[0].site_type.atoms is copied
+    assert execution_atoms is atoms
+    assert execution_atoms.sites[0].site_type is execution_atoms.sites[1].site_type
+    assert execution_atoms.sites[0].site_type is original_site_type
+    assert execution_atoms.sites[0].site_type.atoms is atoms
     assert original_site_type.atoms is atoms

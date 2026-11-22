@@ -101,6 +101,13 @@ def test_gui_plugin_rejects_multiple_startup_targets(arguments):
     command = importlib.import_module("ase2sprkkr_gui.cli.gui")
     command_parser = argparse.ArgumentParser()
     command.parser(command_parser)
-    args = command_parser.parse_args(arguments)
-    with pytest.raises(ValueError, match="not more than one"):
-        command.startup_selection(args)
+    if arguments == ["--job", "run-17", "--open-last"]:
+        # Explicit options are mutually exclusive at argparse level; a
+        # positional FILE conflict is checked by startup_selection instead.
+        with pytest.raises(SystemExit) as exc:
+            command_parser.parse_args(arguments)
+        assert exc.value.code == 2
+    else:
+        args = command_parser.parse_args(arguments)
+        with pytest.raises(ValueError, match="not more than one"):
+            command.startup_selection(args)

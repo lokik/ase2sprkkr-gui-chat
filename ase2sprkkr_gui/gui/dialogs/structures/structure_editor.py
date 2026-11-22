@@ -656,7 +656,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        from ase2sprkkr.potentials.potential_base import Potential
+        from ase2sprkkr import Potential
         try:
             if host_modified:
                 # Use the normal rebase path: it preserves the updated host

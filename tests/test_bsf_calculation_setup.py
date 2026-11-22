@@ -19,7 +19,7 @@ from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
 # Switching a requested BSF alias intentionally changes its mode, producing
 # a library warning; only the tests that assert the warning catch it explicitly.
 pytestmark = pytest.mark.filterwarnings(
-    r"ignore:ENERGY\.NE selects BSF-(EK|KK), but BSF-(EK|KK) was requested:"
+    r"ignore:ENERGY\.NE selects BSF-(EK|KK), (?:but|although) BSF-(EK|KK) was requested:"
     r"ase2sprkkr.common.warnings.DataValidityWarning"
 )
 
@@ -113,7 +113,7 @@ def test_alias_energy_default_is_preserved_when_canonicalising(application):
 def test_mode_switch_is_atomic_and_undo_restores_custom_segments(application):
     parameters = ek_parameters()
     dialog = GuidedInputParametersDialog("bsf", parameters)
-    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-KK, but BSF-EK was requested"):
+    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-KK, (?:but|although) BSF-EK was requested"):
         switch(dialog, "KK")
     assert dialog.session.undo_stack.count() == 1
     current = dialog.session.working_parameters

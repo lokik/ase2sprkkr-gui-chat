@@ -175,7 +175,7 @@ def load_embedded_cluster(
         # A hostless native CLUPOT can be parsed, displayed and retained,
         # but must never be converted into editable embedded Atoms.
         try:
-            from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+            from ase2sprkkr import ClusterPotential
 
             potential = run_modal_task(
                 parent, lambda: ClusterPotential.from_file(path),
@@ -211,7 +211,7 @@ def load_embedded_cluster(
             QMessageBox.critical(parent, "Host Potential Load Error", str(exc))
             return False
     try:
-        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+        from ase2sprkkr import ClusterPotential
         def read_cluster():
             potential = ClusterPotential.from_file(path, host=host)
             return potential.atoms, potential.host_geometry_warning()
@@ -848,7 +848,7 @@ def save_embedded_cluster(
         if response != QMessageBox.StandardButton.Yes:
             return False
     try:
-        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+        from ase2sprkkr import ClusterPotential
 
         host_potential = (
             source_host if isinstance(source_host, Potential)

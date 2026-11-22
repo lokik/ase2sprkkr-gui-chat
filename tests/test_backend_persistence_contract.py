@@ -55,8 +55,9 @@ def test_persistent_task_identity_round_trip_drives_recompute_editor(
     run = manager.complete(run, state=RunState.FINISHED, return_code=0, artifacts_available=True)
 
     class SyntheticParser:
-        def __init__(self, print_info=False):
-            pass
+        def __init__(self, print_info=False, on_info=None):
+            # The current parser contract accepts an optional live-info observer.
+            self.on_info = on_info
 
         def read_from_file(self, output_file, error_file, results, return_code):
             # Provenance must be attached before parsing, not only to the

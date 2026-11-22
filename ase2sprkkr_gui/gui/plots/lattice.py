@@ -348,10 +348,9 @@ def plot_sites_in_lattice(
             return
         points = points.reshape(1, 3)
 
-    config = {
-        's': 25,
-        'depthshade': False,
-    }
+    # Role-specific size wins over the generic fallback; callers may override
+    # either explicitly via kwargs.
+    config = {'depthshade': False}
 
     if role:
         style = _SITE_ROLE_STYLES.get(role)
@@ -360,6 +359,7 @@ def plot_sites_in_lattice(
                 config.setdefault(key, value)
 
     config.update(kwargs)
+    config.setdefault('s', 25)
     if not marker_sizes_scaled:
         config['s'] = np.asarray(config['s'], dtype=float) * marker_area_scale()
     if relative_area_factors is not None:
