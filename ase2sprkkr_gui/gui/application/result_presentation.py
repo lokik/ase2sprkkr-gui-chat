@@ -275,11 +275,19 @@ def present_result_tree(
             continue
         directory_node = _MutableTreeNode(directory or "(unknown directory)")
         directory_nodes.append(directory_node)
+        # Create every node first: output discovery can import DOS before
+        # SCF, and a later import can introduce the matching SCF source.
         for record in imported:
             records[record.id] = record
-            node = _MutableTreeNode(_result_label(record), result_id=record.id)
-            directory_node.children.append(node)
-            result_nodes[record.id] = node
+            result_nodes[record.id] = _MutableTreeNode(
+                _result_label(record), result_id=record.id,
+            )
+        for record in imported:
+            source = store.imported_scf_source(record)
+            parent = result_nodes.get(source.id) if source is not None else None
+            (parent.children if parent is not None else directory_node.children).append(
+                result_nodes[record.id]
+            )
 
     roots: list[_MutableTreeNode] = []
     formula_counts: dict[str, int] = {}
