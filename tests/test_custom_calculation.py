@@ -114,6 +114,8 @@ def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatc
     assert info_item.text() == schema.info
     assert info_item.toolTip() == schema.description
     chooser.search.setText("limitations")
+    assert _names(chooser.table) == []  # Full help is tooltip-only.
+    chooser.search.setText("purpose")
     assert _names(chooser.table) == ["TEST"]
     chooser.close()
 
@@ -174,7 +176,7 @@ def test_task_chooser_filters_sorts_and_keeps_unsupported_selectable(monkeypatch
     chooser = TaskChooserDialog(object())
     assert [chooser.table.horizontalHeaderItem(i).text()
             for i in range(chooser.table.columnCount())] == [
-        "Name", "Possible", "Preferred", "Supported", "Experimental", "Info"
+        "", "Name", "Possible", "Preferred", "Supported", "Experimental", "Info"
     ]
     assert _names(chooser.table) == ["A", "Z", "B", "C"]
 
@@ -210,7 +212,7 @@ def test_task_chooser_without_structure_has_no_applicability_column(monkeypatch)
     chooser = TaskChooserDialog(None)
     assert [chooser.table.horizontalHeaderItem(i).text()
             for i in range(chooser.table.columnCount())] == [
-        "Name", "Preferred", "Supported", "Experimental", "Info"
+        "", "Name", "Preferred", "Supported", "Experimental", "Info"
     ]
     assert chooser.applicability_filter is None
     assert _names(chooser.table) == ["A", "C", "B", "Z"]
