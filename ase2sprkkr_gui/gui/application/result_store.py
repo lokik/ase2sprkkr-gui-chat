@@ -858,7 +858,14 @@ class ResultStore:
                 return existing
             state = self.state_for_result(existing)
             same_potential = existing.potential_path == potential_path
-            same_structure_availability = (state is None) == (atoms is None)
+            # A cache hit reuses the exact scientific result object but leaves
+            # atoms out: its structure already belongs to the recorded state.
+            # Do not confuse that with a *new* parse that failed to recover
+            # atoms, which must not inherit an old successful structure.
+            cached_structure = atoms is None and result is existing.result
+            same_structure_availability = (
+                (state is None) == (atoms is None) or cached_structure
+            )
             still_current = (
                 state is None or (
                     (state.potential_version is None
