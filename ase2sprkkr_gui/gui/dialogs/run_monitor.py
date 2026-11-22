@@ -35,6 +35,21 @@ from ase2sprkkr_gui.gui.dialogs.xas_progress import XasProgressPage
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 
 
+# One dispatch table for native parser-driven INFO pages. Only pages with
+# task-specific settings need constructor arguments (below).
+_INFO_PAGE_FACTORIES: dict[str, Callable[..., QWidget]] = {
+    "scf": ScfProgressPage,
+    "jxc": JxcProgressPage,
+    "dos": DosProgressPage,
+    "bsf": BsfProgressPage,
+    "bsfek": BsfProgressPage,
+    "bsfkk": BsfProgressPage,
+    "spleed": SpleedProgressPage,
+    "arpes": ArpesProgressPage,
+    "xas": XasProgressPage,
+}
+
+
 logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_BLOCKS = 4096
@@ -130,42 +145,26 @@ class RunMonitorWindow(QDialog):
         self._output = QPlainTextEdit(self)
         self._output.setReadOnly(True)
         self._output.setMaximumBlockCount(MAX_OUTPUT_BLOCKS)
-        self._scf_progress: ScfProgressPage | None = None
-        self._jxc_progress: JxcProgressPage | None = None
-        self._dos_progress: DosProgressPage | None = None
-        self._bsf_progress: BsfProgressPage | None = None
-        self._spleed_progress: SpleedProgressPage | None = None
-        self._arpes_progress: ArpesProgressPage | None = None
-        self._xas_progress: XasProgressPage | None = None
         task = (task_name or "").strip().lower()
-        if task == "scf":
-            self._scf_progress = ScfProgressPage(self, target_error=scf_tolerance)
-            info_page = self._scf_progress
-        elif task == "jxc":
-            self._jxc_progress = JxcProgressPage(self)
-            info_page = self._jxc_progress
-        elif task == "dos":
-            self._dos_progress = DosProgressPage(self, total_points=dos_total_points)
-            info_page = self._dos_progress
-        elif task in {"bsf", "bsfek", "bsfkk"}:
-            self._bsf_progress = BsfProgressPage(self)
-            info_page = self._bsf_progress
-        elif task == "spleed":
-            self._spleed_progress = SpleedProgressPage(self)
-            info_page = self._spleed_progress
-        elif task == "arpes":
-            self._arpes_progress = ArpesProgressPage(self)
-            info_page = self._arpes_progress
-        elif task == "xas":
-            self._xas_progress = XasProgressPage(self, total_points=xas_total_points)
-            info_page = self._xas_progress
-        else:
-            info_page = None
+        # Only these specialized pages accept input-derived progress settings.
+        page_options = {
+            "scf": {"target_error": scf_tolerance},
+            "dos": {"total_points": dos_total_points},
+            "xas": {"total_points": xas_total_points},
+        }
+        page_factory = _INFO_PAGE_FACTORIES.get(task)
+        self._info_page = (
+            page_factory(self, **page_options.get(task, {}))
+            if page_factory is not None else None
+        )
+        self._consume_info = (
+            self._info_page.consume if self._info_page is not None else None
+        )
         # Every monitor can gain Results and Plot tabs after completion.
         # Preserve INFO when the task supplies a live progress page.
         self._tabs = QTabWidget(self)
-        if info_page is not None:
-            self._tabs.addTab(info_page, "INFO")
+        if self._info_page is not None:
+            self._tabs.addTab(self._info_page, "INFO")
         self._tabs.addTab(self._output, "Output")
         layout.addWidget(self._tabs, 1)
         self._completed_pages = None
@@ -299,20 +298,8 @@ class RunMonitorWindow(QDialog):
             self._output_archive.write(text)
             self._copy_output_btn.setEnabled(True)
             self._save_output_btn.setEnabled(True)
-        if self._scf_progress is not None:
-            self._scf_progress.consume(text, kind)
-        if self._jxc_progress is not None:
-            self._jxc_progress.consume(text, kind)
-        if self._dos_progress is not None:
-            self._dos_progress.consume(text, kind)
-        if self._bsf_progress is not None:
-            self._bsf_progress.consume(text, kind)
-        if self._spleed_progress is not None:
-            self._spleed_progress.consume(text, kind)
-        if self._arpes_progress is not None:
-            self._arpes_progress.consume(text, kind)
-        if self._xas_progress is not None:
-            self._xas_progress.consume(text, kind)
+        if self._consume_info is not None:
+            self._consume_info(text, kind)
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()

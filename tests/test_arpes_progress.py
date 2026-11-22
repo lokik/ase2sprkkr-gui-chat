@@ -15,9 +15,8 @@ def test_arpes_info_tab_receives_native_spec_setup_and_regular_stop():
         lambda cancellation: object(), task_name="ARPES", autostart=False
     )
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
-    page = window._arpes_progress
+    page = window._info_page
     assert page is not None
-    assert window._spleed_progress is None
     assert page.last_info.text() == "Preparing ARPES calculation..."
 
     stdout = (
@@ -48,8 +47,8 @@ def test_arpes_info_ignores_stderr_and_does_not_finish_on_eof():
     window._append_output(
         "program stopped regularly via STOP_REGULAR\n", "stderr"
     )
-    assert window._arpes_progress.last_info.text() == "Preparing ARPES calculation..."
+    assert window._info_page.last_info.text() == "Preparing ARPES calculation..."
     window._append_output("lattice constant: 5.0\n", "stdout")
-    assert window._arpes_progress.last_info.text() == "Surface lattice constant: 5"
-    assert "finished" not in window._arpes_progress.events.toPlainText()
+    assert window._info_page.last_info.text() == "Surface lattice constant: 5"
+    assert "finished" not in window._info_page.events.toPlainText()
     window.close()

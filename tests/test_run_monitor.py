@@ -197,12 +197,12 @@ def test_new_run_displays_job_id_when_persistent_id_arrives():
 def test_attached_scf_monitor_shows_info_and_accepts_replayed_iterations():
     app = QApplication.instance() or QApplication([])
     window = create_attached_run_monitor_window(_job(), _Source(None), autostart=False)
-    assert window._scf_progress is not None
+    assert window._info_page is not None
 
     line = " 5 ERR 0.211E-02 0.208E-01 EF 0.76199 0.00307 D 14.537 M 2.1740 0.0536\n"
     completed = line + " ETOT -42.5 SCF - cycle not converged - continue\n"
     window._append_output(completed, "out")
-    assert window._scf_progress.tracker.iterations[0].iteration == 5
+    assert window._info_page.tracker.iterations[0].iteration == 5
     assert window._output.toPlainText().strip() == completed.strip()
     window.close()
 
@@ -213,20 +213,20 @@ def test_jxc_monitor_uses_task_specific_info_events():
     window = RunMonitorWindow(
         lambda cancellation: object(), task_name="JXC", autostart=False
     )
-    assert window._jxc_progress is not None
+    assert window._info_page is not None
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
     window._append_output(
         "  number of TAU(I,J)'s to be calculated: 89\n",
         "out",
     )
-    assert window._jxc_progress.last_info.text() == (
+    assert window._info_page.last_info.text() == (
         "Calculating 89 TAU(I,J) pairs"
     )
     window._append_output(
         "results written to file:Fe_JXC_XCPLTEN_Jij.dat\n",
         "out",
     )
-    assert "JXC results written" in window._jxc_progress.last_info.text()
+    assert "JXC results written" in window._info_page.last_info.text()
     assert "number of TAU(I,J)" in window._output.toPlainText()
     window.close()
 
@@ -237,20 +237,20 @@ def test_dos_monitor_uses_structured_progress_and_preserves_raw_output():
     window = RunMonitorWindow(
         lambda cancellation: object(), task_name="DOS", autostart=False
     )
-    assert window._dos_progress is not None
+    assert window._info_page is not None
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
-    assert window._dos_progress.progress.isHidden()
+    assert window._info_page.progress.isHidden()
 
     window._append_output("13/300 do", "out")
-    assert window._dos_progress.last_info.text() == "Preparing DOS calculation..."
+    assert window._info_page.last_info.text() == "Preparing DOS calculation..."
     window._append_output("ne.\n14/300 done.\n", "out")
-    assert window._dos_progress.last_info.text() == "14/300 done."
-    assert window._dos_progress.progress.maximum() == 300
-    assert window._dos_progress.progress.value() == 14
+    assert window._info_page.last_info.text() == "14/300 done."
+    assert window._info_page.progress.maximum() == 300
+    assert window._info_page.progress.value() == 14
     assert window._output.toPlainText() == "13/300 done.\n14/300 done.\n"
 
     window._append_output("15/300 done.\n", "stderr")
-    assert window._dos_progress.progress.value() == 14
+    assert window._info_page.progress.value() == 14
     window.close()
 
 
@@ -328,16 +328,16 @@ def test_dos_info_native_energy_blocks_count_points_not_atomic_components():
     )
     window._append_output("13 E= 0.4061 0.0100 IT= 1 Ti\n", "out")
     window._append_output("13 E= 0.4061 0.0100 IT= 2 Co\n", "out")
-    assert window._dos_progress.last_info.text() == "Calculating density of states..."
-    assert window._dos_progress.progress.isHidden()
+    assert window._info_page.last_info.text() == "Calculating density of states..."
+    assert window._info_page.progress.isHidden()
 
     window._append_output("14 E= 0.4081 0.0100 IT= 1 Ti\n", "out")
-    assert window._dos_progress.last_info.text() == "13/300 done."
-    assert window._dos_progress.progress.maximum() == 300
-    assert window._dos_progress.progress.value() == 13
-    assert not window._dos_progress.progress.isHidden()
+    assert window._info_page.last_info.text() == "13/300 done."
+    assert window._info_page.progress.maximum() == 300
+    assert window._info_page.progress.value() == 13
+    assert not window._info_page.progress.isHidden()
     window._append_output("14 E= 0.4081 0.0100 IT= 2 Co\n", "out")
-    assert window._dos_progress.progress.value() == 13
+    assert window._info_page.progress.value() == 13
     window.close()
 
 
@@ -348,16 +348,17 @@ def test_dos_info_unknown_total_does_not_show_percentage():
     )
     window._append_output("13 E= 0.4061 0.0100 IT= 1 Ti\n", "out")
     window._append_output("14 E= 0.4081 0.0100 IT= 1 Ti\n", "out")
-    assert window._dos_progress.last_info.text() == "13 energy points done."
-    assert window._dos_progress.progress.isHidden()
+    assert window._info_page.last_info.text() == "13 energy points done."
+    assert window._info_page.progress.isHidden()
     window.close()
 
 
-def test_finished_monitor_adds_result_list_and_lazy_plot(_qt_application):
+def test_finished_monitor_adds_file_named_tabs_and_renders_selected_plot(_qt_application):
     from types import SimpleNamespace
     from matplotlib import pyplot as plt
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-    from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
+
+    from ase2sprkkr_gui.gui.dialogs.run_results import ResultFilePage, ResultPlotPage
 
     calls = []
 
@@ -382,32 +383,39 @@ def test_finished_monitor_adds_result_list_and_lazy_plot(_qt_application):
             calls.append(show)
             plt.figure()
 
-    result = SimpleNamespace(output_values={"dos": PlotFile()})
+    value = PlotFile()
+    result = SimpleNamespace(
+        output_values={"dos": value}, result_values={"dos": value}
+    )
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output"
+    ]
     window._on_finished(SimpleNamespace(result=result))
 
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Results", "example.dos"
+        "Output", "Result Overview", "example.dos"
     ]
-    browser = window._completed_pages.results_widget
-    assert isinstance(browser, ResultActionsWidget)
-    assert window._tabs.currentWidget() is browser
-    assert browser._row_count == 1
-    assert not calls
+    page = window._tabs.widget(2)
+    assert isinstance(page, ResultFilePage)
+    assert isinstance(page.plot_page, ResultPlotPage)
+    assert window._tabs.currentWidget() is page
+    assert not calls  # only render after the event loop can show the new tab
 
-    window._tabs.setCurrentIndex(2)
     _qt_application.processEvents()
     assert calls == [False]
-    assert window._tabs.widget(2).findChildren(FigureCanvasQTAgg)
-    window._tabs.setCurrentIndex(1)
+    assert page.findChildren(FigureCanvasQTAgg)
+    window._tabs.setCurrentIndex(0)
     window._tabs.setCurrentIndex(2)
     _qt_application.processEvents()
-    assert calls == [False]
+    assert calls == [False]  # a second selection must not regenerate the plot
     window.close()
 
 
-def test_finished_monitor_has_no_plots_when_output_is_not_plottable(_qt_application):
+def test_finished_monitor_keeps_non_plottable_outputs_as_file_tabs(_qt_application):
     from types import SimpleNamespace
+
+    from ase2sprkkr_gui.gui.dialogs.run_results import ResultFilePage
 
     class File:
         name = "output"
@@ -421,8 +429,169 @@ def test_finished_monitor_has_no_plots_when_output_is_not_plottable(_qt_applicat
             return ("open",)
 
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
-    window._on_finished(SimpleNamespace(output_values={"output": File()}))
+    value = File()
+    window._on_finished(SimpleNamespace(
+        output_values={"output": value}, result_values={"output": value}
+    ))
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Results"
+        "Output", "Result Overview", "example.out"
     ]
+    page = window._tabs.widget(2)
+    assert isinstance(page, ResultFilePage)
+    assert page.plot_page is None
+    assert window._tabs.currentWidget() is page
+    window.close()
+
+
+def test_all_output_files_get_one_tab_only_after_completion(_qt_application):
+    from types import SimpleNamespace
+
+    from ase2sprkkr_gui.gui.dialogs.run_results import ResultFilePage, ResultPlotPage
+
+    class File:
+        def __init__(self, filename, *, can_plot):
+            self.filename = filename
+            self.name = filename
+            self.display_name = filename
+            self.info = ""
+            self.can_plot = can_plot
+
+        def value_label(self):
+            return self.filename
+
+        def actions(self):
+            return ("plot",) if self.can_plot else ("open",)
+
+        def path(self):
+            return "/tmp/" + self.filename
+
+    window = RunMonitorWindow(
+        lambda cancellation: object(), task_name="JXC", autostart=False
+    )
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "INFO", "Output"
+    ]
+    result = SimpleNamespace(output_values={
+        "first": File("first.agr", can_plot=True),
+        "second": File("second.dat", can_plot=True),
+        "third": File("third.log", can_plot=False),
+    })
+    result.result_values = result.output_values
+    window._on_finished(result)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "INFO", "Output", "Result Overview", "first.agr", "second.dat", "third.log"
+    ]
+    assert window._tabs.tabText(window._tabs.currentIndex()) == "first.agr"
+    assert all(isinstance(window._tabs.widget(i), ResultFilePage) for i in (3, 4, 5))
+    assert all(
+        isinstance(window._tabs.widget(i).plot_page, ResultPlotPage)
+        for i in (3, 4)
+    )
+    assert window._tabs.widget(5).plot_page is None
+    assert not window._tabs.widget(3).plot_page._rendered
+    assert not window._tabs.widget(4).plot_page._rendered
+    window.close()
+
+
+def test_finished_without_output_values_does_not_create_results_tab(_qt_application):
+    from types import SimpleNamespace
+
+    window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    window._on_finished(SimpleNamespace(output_values={}))
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output"
+    ]
+    assert window._completed_pages.execution_widget is None
+    window.close()
+
+
+def test_task_metadata_selects_meaningful_result_tabs_only(_qt_application):
+    from types import SimpleNamespace
+
+    class File:
+        info = ""
+        def __init__(self, filename):
+            self.name = filename
+            self.display_name = filename
+            self.filename = filename
+
+        def value_label(self):
+            return self.filename
+
+        def actions(self):
+            return ("open",)
+
+        def path(self):
+            return "/tmp/" + self.filename
+
+    scientific = File("Fe_DOS.dos")
+    auxiliary = File("Fe.pot_new")
+    log = File("Fe_DOS.out")
+    result = SimpleNamespace(
+        output_values={"DOS": scientific, "potential": auxiliary, "output": log},
+        result_values={"DOS": scientific},
+    )
+
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window._on_finished(result)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output", "Result Overview", "Fe_DOS.dos"
+    ]
+    assert window._tabs.tabText(window._tabs.currentIndex()) == "Fe_DOS.dos"
+    all_files = window._completed_pages.execution_widget._current_presentation
+    assert len(all_files.values) == 3
+    assert {value.summary for value in all_files.values} == {
+        "Fe_DOS.dos", "Fe.pot_new", "Fe_DOS.out"
+    }
+    window.close()
+
+
+def test_task_with_auxiliary_outputs_only_gets_no_result_tabs(_qt_application):
+    from types import SimpleNamespace
+
+    class File:
+        name = "new potential"
+        display_name = "new potential"
+        info = ""
+
+        def value_label(self):
+            return "Fe.pot_new"
+
+        def actions(self):
+            return ("open",)
+
+    result = SimpleNamespace(
+        output_values={"potential": File()},
+        result_values={},
+    )
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window._on_finished(result)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output", "Result Overview"
+    ]
+    assert window._completed_pages.execution_widget is not None
+    window.close()
+
+
+def test_no_result_role_does_not_fallback_to_auxiliary_files(_qt_application):
+    from types import SimpleNamespace
+
+    class File:
+        name = "potential"
+        display_name = "Potential file"
+        info = ""
+
+        def value_label(self):
+            return "Fe.pot_new"
+
+        def actions(self):
+            return ("open",)
+
+    result = SimpleNamespace(output_values={"potential": File()})
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window._on_finished(result)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output", "Result Overview"
+    ]
+    assert window._completed_pages.execution_widget._row_count == 1
     window.close()

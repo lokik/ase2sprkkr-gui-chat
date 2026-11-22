@@ -156,13 +156,22 @@ def present_result(
     record: ResultRecord | None = None,
     store: ResultStore | None = None,
     actions: ResultActionAvailability | None = None,
+    result_only: bool = False,
 ) -> ResultPresentation | None:
-    """Convert a result and resolved artifact state into view data."""
+    """Convert result values into presentation data.
+
+    The completed-run monitor requests only task-declared scientific results;
+    the main result browser continues to expose every managed output file.
+    """
     if result is None:
         return None
 
     try:
-        items = list(result.output_values.items())
+        # Fail closed for results without explicit scientific-result metadata.
+        # Falling back to output_values would expose SCF potentials, logs and
+        # other auxiliary files as user-facing result tabs.
+        values = getattr(result, "result_values", {}) if result_only else result.output_values
+        items = list(values.items())
     except Exception as exc:
         logger.exception("Failed to load result output values")
         return ResultPresentation(
