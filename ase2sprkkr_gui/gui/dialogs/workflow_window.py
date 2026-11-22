@@ -182,7 +182,10 @@ class _HeaderActionBar(QWidget):
 
     layoutChanged = pyqtSignal()
 
-    def __init__(self, parent: QWidget, name: str, *, centered: bool = False):
+    def __init__(
+        self, parent: QWidget, name: str, *,
+        centered: bool = False, right_margin: int = 0,
+    ):
         super().__init__(parent)
         self.setObjectName(name)
         self._centered = centered
@@ -197,9 +200,9 @@ class _HeaderActionBar(QWidget):
         self._mode = "full"
         self._mode_applied = False
         layout = QHBoxLayout(self)
-        # The middle header shares the text/cards' right inset, so its
-        # button row is centered on Calculate rather than on the wider column.
-        layout.setContentsMargins(0, 0, SPACE_XL if centered else 0, 0)
+        # Center alignment is independent of the Calculate column's body inset:
+        # Results should be centered across its full-width header.
+        layout.setContentsMargins(0, 0, right_margin, 0)
         layout.setSpacing(0)
         self._button_row = QHBoxLayout()
         self._button_row.setContentsMargins(0, 0, 0, 0)
@@ -383,8 +386,11 @@ class WorkflowWindow(QMainWindow):
         # Fixed navigation is separate from the scrollable guided cards.
         # Keep these controls small and neutral, like the Results controls.
         def navigation_group(parent: QWidget, name: str) -> _HeaderActionBar:
+            calculation = name == "workflowCalculationNavigation"
             return _HeaderActionBar(
-                parent, name, centered=name == "workflowCalculationNavigation",
+                parent, name,
+                centered=calculation or name == "workflowResultsNavigation",
+                right_margin=SPACE_XL if calculation else 0,
             )
 
         def navigation_button(
