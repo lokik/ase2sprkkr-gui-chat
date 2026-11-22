@@ -547,6 +547,9 @@ def _cached_output(
         directory=record.directory,
         input_parameters=record.input_parameters,
         persistent_ref=record.persistent_ref,
+        # Revalidate the same stdout version at publication time: a cache hit
+        # must never adopt new bytes written between lookup and GUI signals.
+        parsed_output_version=record.output_version,
         cached_record_id=record.id,
     )
 
