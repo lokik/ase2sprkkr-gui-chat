@@ -584,3 +584,140 @@ def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     c = result_loading.load_result_file(third, cache=cache)
     assert c.atoms is not b.atoms
     assert seen == [pot.resolve(), pot.resolve()]
+
+
+def test_batch_embedded_cache_parses_host_and_clupot_once_without_atoms(
+    tmp_path, native_embedded_potentials, monkeypatch,
+):
+    """Native file parsing and cluster-geometry construction have one batch owner."""
+    import os
+
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+    from ase2sprkkr_gui.gui.application.result_loading import ResultImportCache
+
+    host, cluster = native_embedded_potentials
+    params = InputParameters.for_task("DOS")
+    params.CONTROL.CLUTYPE = "embedded"
+    params.CONTROL.POTFIL = host.name
+    params.CONTROL.POTFIL_CLU = cluster.name
+
+    native_from_file = result_loading_module.Potential.from_file
+    parsed = []
+
+    def track(_cls, path, *args, **kwargs):
+        parsed.append((str(path), kwargs.get("atoms")))
+        assert kwargs["atoms"] is False
+        return native_from_file(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        result_loading_module.Potential, "from_file", classmethod(track),
+    )
+
+    cache = ResultImportCache()
+
+    def read():
+        result = DosResult(params, None, tmp_path, task_name="dos")
+        return load_result(result, fallback_directory=tmp_path, import_cache=cache)
+
+    first, second = read(), read()
+    assert first.potential_error is None
+    assert second.potential_error is None
+    assert first.atoms is second.atoms
+    assert len(parsed) == 2  # host and CLUPOT, each parsed without Atoms
+    assert set(path for path, _ in parsed) == {str(host), str(cluster)}
+
+    # Even if CLUPOT is unchanged, replacing the host invalidates the
+    # reconstructed cluster and the cached host parser.
+    stat = host.stat()
+    os.utime(host, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    third = read()
+    assert third.potential_error is None
+    assert third.atoms is not second.atoms
+    assert len(parsed) == 4
+
+    stat = cluster.stat()
+    os.utime(cluster, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    fourth = read()
+    assert fourth.potential_error is None
+    assert fourth.atoms is not third.atoms
+    assert len(parsed) == 5  # host reused, only changed CLUPOT is parsed
+
+
+def test_embedded_scf_convergence_does_not_change_shared_clupot(
+    tmp_path, native_embedded_potentials,
+):
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+    from ase2sprkkr_gui.gui.application.result_loading import ResultImportCache
+
+    host, cluster = native_embedded_potentials
+    params = InputParameters.for_task("DOS")
+    params.CONTROL.CLUTYPE = "embedded"
+    params.CONTROL.POTFIL = host.name
+    params.CONTROL.POTFIL_CLU = cluster.name
+    cache = ResultImportCache()
+    dos_result = DosResult(params, None, tmp_path, task_name="dos")
+    dos = load_result(dos_result, fallback_directory=tmp_path, import_cache=cache)
+    assert dos.potential_error is None
+
+    # Simulate a CLUPOT left as ITERATING despite a converged SCF stdout.
+    dos.atoms.potential.SCF_INFO.SCFSTATUS = "ITERATING"
+    scf_result = SimpleNamespace(
+        task_name="scf", produces_potential=True, is_embedded=True,
+        return_code=0, iterations=(object(),), converged=True,
+        host_potential_filename=str(host),
+        potential_filename=str(cluster),
+        files={}, input_parameters=None,
+    )
+    scf = load_result(scf_result, fallback_directory=tmp_path, import_cache=cache)
+
+    assert scf.potential_error is None
+    assert scf.atoms is not dos.atoms
+    assert scf.atoms.potential.SCF_INFO.SCFSTATUS() == "CONVERGED"
+    assert scf.atoms.info["sprkkr_embedding_scf_status"] == "CONVERGED"
+    assert dos.atoms.potential.SCF_INFO.SCFSTATUS() == "ITERATING"
+
+
+def test_duplicate_scf_outputs_do_not_claim_the_same_overwritten_potential(
+    tmp_path,
+):
+    from ase2sprkkr_gui.gui.application.result_loading import (
+        LoadedResult, PotentialProvenanceAmbiguous, disambiguate_scf_potentials,
+    )
+
+    common = tmp_path / "sample.pot_new"
+    first, second, dos_path = (
+        tmp_path / "first.out", tmp_path / "second.out", tmp_path / "dos.out"
+    )
+
+    def loaded(path, task):
+        return LoadedResult(
+            result=SimpleNamespace(
+                task_name=task, produces_potential=task == "scf",
+            ),
+            output_path=path,
+            potential_path=common,
+            atoms=Atoms("Fe"),
+            potential_error=None,
+            directory=str(tmp_path),
+        )
+
+    entries = [
+        (first, loaded(first, "scf")),
+        (second, loaded(second, "scf")),
+        (dos_path, loaded(dos_path, "dos")),
+    ]
+    resolved, ambiguous = disambiguate_scf_potentials(entries)
+
+    assert ambiguous == ("first.out", "second.out")
+    assert all(resolved[i][1].atoms is None for i in (0, 1))
+    assert all(
+        isinstance(resolved[i][1].potential_error, PotentialProvenanceAmbiguous)
+        for i in (0, 1)
+    )
+    assert resolved[2][1].atoms is entries[2][1].atoms
+    assert resolved[2][1].potential_error is None
+    assert entries[0][1].atoms is not None  # immutable LoadedResult inputs
+
+
