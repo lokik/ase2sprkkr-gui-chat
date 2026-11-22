@@ -19,6 +19,7 @@ from ase2sprkkr_gui.gui.application.recent_files import RecentFiles, RecentKind
 from ase2sprkkr_gui.gui.application.result_loading import (
     LoadedResult,
     ResultImportCache,
+    disambiguate_scf_potentials,
     PotentialVersionChanged,
     load_potential_atoms,
     load_result_file,
@@ -353,10 +354,11 @@ def load_all_recent_outputs(
                 loaded.append((path, load_result_file(path, cache=cache)))
             except Exception as exc:  # noqa: BLE001 - unrelated/stale files must not interrupt the batch
                 failures.append((path.name, str(exc)))
-        return loaded, failures
+        loaded, ambiguous = disambiguate_scf_potentials(loaded, cache=cache)
+        return loaded, failures, ambiguous
 
     def publish(read_results):
-        loaded, failures = read_results
+        loaded, failures, ambiguous = read_results
         imported: list[Path] = []
         potential_entries: list[tuple[RecentKind, Path]] = []
         selected_id = None
@@ -376,10 +378,10 @@ def load_all_recent_outputs(
         recent_files.remember_many(potential_entries, preserve_last_kind=True)
         if selected_id is not None:
             controller.resultSelectionRequested.emit(selected_id)
-        return imported, failures
+        return imported, failures, ambiguous
 
     try:
-        imported, failures = run_modal_task(
+        imported, failures, ambiguous = run_modal_task(
             parent, read_all,
             title="Loading Recent Results",
             label="Reading recent SPR-KKR results…",
@@ -389,13 +391,20 @@ def load_all_recent_outputs(
         QMessageBox.critical(parent, "Loading Recent Results Failed", str(exc))
         return ()
 
-    if failures:
-        summary = "\n".join(f"{name}: {reason}" for name, reason in failures[:8])
-        QMessageBox.warning(
-            parent, "Loading Recent Results",
-            f"Imported {len(imported)} result(s); "
-            f"skipped {len(failures)} file(s):\n{summary}",
-        )
+    if failures or ambiguous:
+        messages = [f"Imported {len(imported)} result(s)."]
+        if failures:
+            summary = "\n".join(f"{name}: {reason}" for name, reason in failures[:8])
+            messages.append(f"Skipped {len(failures)} file(s):\n{summary}")
+        if ambiguous:
+            messages.append(
+                "Multiple SCF outputs reference the same potential. "
+                "Only the uniquely newest .out (by modification time) "
+                "keeps the potential; older or tied outputs have no reusable "
+                "structure:\n"
+                + "\n".join(ambiguous[:8])
+            )
+        QMessageBox.warning(parent, "Loading Recent Results", "\n\n".join(messages))
     return tuple(imported)
 
 
@@ -428,26 +437,31 @@ def load_output_directory(
                 loaded.append((path, load_result_file(path, cache=cache)))
             except Exception as exc:  # noqa: BLE001 - unrelated logs may exist
                 failures.append((path.name, str(exc)))
-        return loaded, failures
+        loaded, ambiguous = disambiguate_scf_potentials(loaded, cache=cache)
+        return loaded, failures, ambiguous
 
     def publish(read_results):
-        loaded, failures = read_results
+        loaded, failures, ambiguous = read_results
         imported = []
         entries: list[tuple[RecentKind, Path]] = []
         with controller.batch_external_results():
             for index, (path, result) in enumerate(loaded):
-                adoption = controller.adopt_external_result(
-                    result, select_result=index == len(loaded) - 1
-                )
+                try:
+                    adoption = controller.adopt_external_result(
+                        result, select_result=index == len(loaded) - 1
+                    )
+                except Exception as exc:  # noqa: BLE001 - independent outputs
+                    failures.append((path.name, str(exc)))
+                    continue
                 if adoption.potential_path is not None and adoption.potential_error is None:
                     entries.append(("structure", adoption.potential_path))
                 entries.append(("output", path))
                 imported.append(path)
         recent_files.remember_many(entries)
-        return imported, failures
+        return imported, failures, ambiguous
 
     try:
-        imported, failures = run_modal_task(
+        imported, failures, ambiguous = run_modal_task(
             parent, read_all,
             title="Importing Results",
             label="Reading SPR-KKR outputs…",
@@ -457,15 +471,21 @@ def load_output_directory(
         QMessageBox.critical(parent, "Directory Import Failed", str(exc))
         return ()
 
-    if failures:
-        summary = "\n".join(
-            f"{name}: {reason}" for name, reason in failures[:8]
-        )
-        QMessageBox.warning(
-            parent, "Output Directory",
-            f"Imported {len(imported)} result(s). "
-            f"Skipped {len(failures)} file(s):\n{summary}",
-        )
+    if failures or ambiguous:
+        messages = [f"Imported {len(imported)} result(s)."]
+        if failures:
+            summary = "\n".join(
+                f"{name}: {reason}" for name, reason in failures[:8]
+            )
+            messages.append(f"Skipped {len(failures)} file(s):\n{summary}")
+        if ambiguous:
+            messages.append(
+                "Multiple SCF outputs reference the same potential. "
+                "Only the uniquely newest .out (by modification time) "
+                "keeps it. Older or tied outputs were imported without "
+                "a reusable structure:\n" + "\n".join(ambiguous[:8])
+            )
+        QMessageBox.warning(parent, "Output Directory", "\n\n".join(messages))
     elif imported:
         QMessageBox.information(
             parent, "Output Directory",
@@ -487,7 +507,7 @@ def choose_and_load_output_directory(
     dialog.setFileMode(QFileDialog.FileMode.Directory)
     dialog.setOption(QFileDialog.Option.ShowDirsOnly, False)
     dialog.setNameFilters([
-        "SPR-KKR Output Files (*.out *.log *.txt)",
+        "SPR-KKR Output Files (*.out)",
         "All Files (*)",
     ])
     dialog.setViewMode(QFileDialog.ViewMode.Detail)

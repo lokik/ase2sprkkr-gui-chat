@@ -523,3 +523,57 @@ def test_reopening_unchanged_result_reuses_parsed_output(tmp_path, monkeypatch):
     potential.write_text("different potential bytes")
     assert file_flows.load_output(controller, history, output, None)
     assert reads == [output, output]
+
+
+def test_directory_import_keeps_colliding_scf_outputs_without_false_pot_provenance(
+    tmp_path, monkeypatch,
+):
+    from types import SimpleNamespace
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+
+    outputs = (tmp_path / "one.out", tmp_path / "two.out")
+    common = tmp_path / "shared.pot_new"
+    import os
+
+    for path in outputs:
+        path.write_text(path.stem)
+    os.utime(outputs[0], ns=(1_000_000_000, 1_000_000_000))
+    os.utime(outputs[1], ns=(2_000_000_000, 2_000_000_000))
+    common.write_text("present-day potential")
+    warnings = []
+
+    def load(path, *, cache=None):
+        return LoadedResult(
+            result=SimpleNamespace(
+                task_name="scf", produces_potential=True, output_values={},
+            ),
+            output_path=path,
+            potential_path=common,
+            atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True),
+            potential_error=None,
+            directory=str(tmp_path),
+        )
+
+    monkeypatch.setattr(file_flows, "load_result_file", load)
+    monkeypatch.setattr(
+        file_flows, "run_modal_task",
+        lambda _parent, operation, **kw: kw["on_success"](operation()),
+    )
+    monkeypatch.setattr(
+        file_flows.QMessageBox, "warning",
+        lambda _parent, _title, detail: warnings.append(detail),
+    )
+    controller = WorkspaceController()
+    history = RecentFiles(tmp_path / "recent.json")
+
+    assert file_flows.load_output_directory(controller, history, tmp_path, None) == outputs
+    assert len(controller.result_store.results) == 2
+    records = controller.result_store.results  # newest result first
+    assert records[0].output_path == outputs[1].resolve()
+    assert controller.result_store.state_for_result(records[0]) is not None
+    assert records[1].output_path == outputs[0].resolve()
+    assert controller.result_store.state_for_result(records[1]) is None
+    assert history.paths("structure") == (str(common.resolve()),)
+    assert len(warnings) == 1
+    assert "one.out" in warnings[0]
+    assert "two.out" not in warnings[0]

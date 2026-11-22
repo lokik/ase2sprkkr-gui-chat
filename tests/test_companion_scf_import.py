@@ -38,7 +38,10 @@ def test_companion_scf_requires_same_produced_potential(tmp_path, monkeypatch):
     corrupt = tmp_path / "broken.out"
     for path in (dos, scf, unrelated, corrupt):
         path.write_text(path.name)
-    scf.write_text(" *       KKRSCF  VERSION  9.7          *\n")
+    scf.write_text(
+        " *       KKRSCF  VERSION  9.7          *\n"
+        "TASK = SCF\npot-file: Fe.pot_new\n"
+    )
     potential = (tmp_path / "Fe.pot_new").resolve()
 
     def parse(path):
@@ -189,8 +192,15 @@ def test_companion_matches_potential_before_loading_and_reuses_atoms(
         tmp_path / "Fe_old_SCF.out",
         tmp_path / "Fe_SCF.out",
     )
-    for path in (dos, wrong, right):
-        path.write_text(" *       KKRSCF  VERSION  9.7          *\n")
+    dos.write_text("DOS")
+    wrong.write_text(
+        " *       KKRSCF  VERSION  9.7          *\n"
+        "TASK = SCF\npot-file: old.pot_new\n"
+    )
+    right.write_text(
+        " *       KKRSCF  VERSION  9.7          *\n"
+        "TASK = SCF\npot-file: Fe.pot_new\n"
+    )
     potential = (tmp_path / "Fe.pot_new").resolve()
     parsed = []
     atoms = object()
@@ -231,7 +241,10 @@ def test_companion_scf_prefilters_header_and_only_uses_out(tmp_path, monkeypatch
     long_intro = tmp_path / "Fe_old_SCF.out"
     dos.write_text(" *       KKR DOS  VERSION  9.7       *\n")
     misleading.write_text(" *       KKR DOS  VERSION  9.7       *\n")
-    valid.write_text("    *       KKRSCF  VERSION  10.1       *\n")
+    valid.write_text(
+        "    *       KKRSCF  VERSION  10.1       *\n"
+        "TASK = SCF\npot-file: Fe.pot_new\n"
+    )
     log.write_text(" *       KKRSCF  VERSION  9.7       *\n")
     txt.write_text(" *       KKRSCF  VERSION  9.7       *\n")
     long_intro.write_bytes(b" " * 8192 + b"KKRSCF VERSION 9.7")
@@ -262,8 +275,14 @@ def test_companion_scf_tries_next_candidate_if_potential_differs(
     expected_name = tmp_path / "Fe_SCF.out"
     fallback = tmp_path / "Fe_older_SCF.out"
     dos.touch()
-    expected_name.write_text(" *       KKRSCF  VERSION  9.7       *\n")
-    fallback.write_text(" *       KKRSCF  VERSION  10.1       *\n")
+    expected_name.write_text(
+        " *       KKRSCF  VERSION  9.7       *\n"
+        "TASK = SCF\npot-file: other.pot_new\n"
+    )
+    fallback.write_text(
+        " *       KKRSCF  VERSION  10.1       *\n"
+        "TASK = SCF\npot-file: Fe.pot_new\n"
+    )
     potential = (tmp_path / "Fe.pot_new").resolve()
     parsed = []
 
@@ -282,7 +301,7 @@ def test_companion_scf_tries_next_candidate_if_potential_differs(
 
     assert companion is not None
     assert companion.output_path == fallback.resolve()
-    assert parsed == [expected_name, fallback]
+    assert parsed == [fallback]
 
 
 def test_companion_scf_rejects_mismatched_native_potential_before_parsing(
@@ -321,3 +340,45 @@ def test_companion_scf_rejects_mismatched_native_potential_before_parsing(
     assert companion is not None
     assert companion.output_path == right.resolve()
     assert parsed == [right]
+
+
+def test_companion_scf_selects_latest_output_when_potential_was_overwritten(
+    tmp_path, monkeypatch,
+):
+    import os
+
+    potential = tmp_path / "Fe.pot_new"
+    potential.write_text("current potential")
+    selected = tmp_path / "Fe_DOS.out"
+    selected.write_text("DOS output")
+    older, newer = tmp_path / "Fe_SCF.out", tmp_path / "Fe_SCF_old.out"
+    for path in (older, newer):
+        path.write_text(
+            " *       KKRSCF  VERSION  9.7          *\n"
+            "TASK = SCF\n"
+            "pot-file: Fe.pot_new\n"
+        )
+    # The less similarly named output is newer; time takes priority.
+    os.utime(older, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(newer, ns=(2_000_000_000, 2_000_000_000))
+    parsed = []
+
+    def parse(path):
+        parsed.append(path)
+        result = SimpleNamespace(
+            task_name="scf", directory=str(tmp_path), is_embedded=False,
+            files={"converged": potential.name}, input_parameters=None,
+        )
+        result.path_to = lambda key: result.files[key]
+        return result
+
+    monkeypatch.setattr(result_loading.TaskResult, "from_file", staticmethod(parse))
+    companion = load_companion_scf_result(_loaded(selected, potential=potential))
+    assert companion is not None
+    assert companion.output_path == newer.resolve()
+    assert parsed == [newer]
+
+    # When both outputs are equally new, there is no safe choice.
+    os.utime(newer, ns=(1_000_000_000, 1_000_000_000))
+    assert load_companion_scf_result(_loaded(selected, potential=potential)) is None
+    assert parsed == [newer]

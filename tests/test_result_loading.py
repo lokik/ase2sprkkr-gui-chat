@@ -584,3 +584,363 @@ def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     c = result_loading.load_result_file(third, cache=cache)
     assert c.atoms is not b.atoms
     assert seen == [pot.resolve(), pot.resolve()]
+
+
+def test_batch_embedded_cache_parses_host_and_clupot_once_without_atoms(
+    tmp_path, native_embedded_potentials, monkeypatch,
+):
+    """Native file parsing and cluster-geometry construction have one batch owner."""
+    import os
+
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+    from ase2sprkkr_gui.gui.application.result_loading import ResultImportCache
+
+    host, cluster = native_embedded_potentials
+    params = InputParameters.for_task("DOS")
+    params.CONTROL.CLUTYPE = "embedded"
+    params.CONTROL.POTFIL = host.name
+    params.CONTROL.POTFIL_CLU = cluster.name
+
+    native_from_file = result_loading_module.Potential.from_file
+    parsed = []
+
+    def track(_cls, path, *args, **kwargs):
+        parsed.append((str(path), kwargs.get("atoms")))
+        assert kwargs["atoms"] is False
+        return native_from_file(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        result_loading_module.Potential, "from_file", classmethod(track),
+    )
+
+    cache = ResultImportCache()
+
+    def read():
+        result = DosResult(params, None, tmp_path, task_name="dos")
+        return load_result(result, fallback_directory=tmp_path, import_cache=cache)
+
+    first, second = read(), read()
+    assert first.potential_error is None
+    assert second.potential_error is None
+    assert first.atoms is second.atoms
+    assert len(parsed) == 2  # host and CLUPOT, each parsed without Atoms
+    assert set(path for path, _ in parsed) == {str(host), str(cluster)}
+
+    # Even if CLUPOT is unchanged, replacing the host invalidates the
+    # reconstructed cluster and the cached host parser.
+    stat = host.stat()
+    os.utime(host, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    third = read()
+    assert third.potential_error is None
+    assert third.atoms is not second.atoms
+    assert len(parsed) == 4
+
+    stat = cluster.stat()
+    os.utime(cluster, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    fourth = read()
+    assert fourth.potential_error is None
+    assert fourth.atoms is not third.atoms
+    assert len(parsed) == 5  # host reused, only changed CLUPOT is parsed
+
+
+def test_embedded_scf_convergence_does_not_change_shared_clupot(
+    tmp_path, native_embedded_potentials,
+):
+    from ase2sprkkr import InputParameters
+    from ase2sprkkr.outputs.readers.dos import DosResult
+    from ase2sprkkr_gui.gui.application.result_loading import ResultImportCache
+
+    host, cluster = native_embedded_potentials
+    params = InputParameters.for_task("DOS")
+    params.CONTROL.CLUTYPE = "embedded"
+    params.CONTROL.POTFIL = host.name
+    params.CONTROL.POTFIL_CLU = cluster.name
+    cache = ResultImportCache()
+    dos_result = DosResult(params, None, tmp_path, task_name="dos")
+    dos = load_result(dos_result, fallback_directory=tmp_path, import_cache=cache)
+    assert dos.potential_error is None
+
+    # Simulate a CLUPOT left as ITERATING despite a converged SCF stdout.
+    dos.atoms.potential.SCF_INFO.SCFSTATUS = "ITERATING"
+    scf_result = SimpleNamespace(
+        task_name="scf", produces_potential=True, is_embedded=True,
+        return_code=0, iterations=(object(),), converged=True,
+        host_potential_filename=str(host),
+        potential_filename=str(cluster),
+        files={}, input_parameters=None,
+    )
+    scf = load_result(scf_result, fallback_directory=tmp_path, import_cache=cache)
+
+    assert scf.potential_error is None
+    assert scf.atoms is not dos.atoms
+    assert scf.atoms.potential.SCF_INFO.SCFSTATUS() == "CONVERGED"
+    assert scf.atoms.info["sprkkr_embedding_scf_status"] == "CONVERGED"
+    assert dos.atoms.potential.SCF_INFO.SCFSTATUS() == "ITERATING"
+
+
+def test_duplicate_scf_outputs_do_not_claim_the_same_overwritten_potential(
+    tmp_path,
+):
+    from ase2sprkkr_gui.gui.application.result_loading import (
+        LoadedResult, PotentialProvenanceAmbiguous, disambiguate_scf_potentials,
+    )
+
+    common = tmp_path / "sample.pot_new"
+    first, second, dos_path = (
+        tmp_path / "first.out", tmp_path / "second.out", tmp_path / "dos.out"
+    )
+
+    def loaded(path, task):
+        return LoadedResult(
+            result=SimpleNamespace(
+                task_name=task, produces_potential=task == "scf",
+            ),
+            output_path=path,
+            potential_path=common,
+            atoms=Atoms("Fe"),
+            potential_error=None,
+            directory=str(tmp_path),
+        )
+
+    import os
+
+    first.write_text("old SCF")
+    second.write_text("new SCF")
+    os.utime(first, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(second, ns=(2_000_000_000, 2_000_000_000))
+    entries = [
+        (first, loaded(first, "scf")),
+        (second, loaded(second, "scf")),
+        (dos_path, loaded(dos_path, "dos")),
+    ]
+    resolved, ambiguous = disambiguate_scf_potentials(entries)
+
+    assert ambiguous == ("first.out",)
+    assert resolved[0][1].atoms is None
+    assert isinstance(resolved[0][1].potential_error, PotentialProvenanceAmbiguous)
+    assert resolved[1][1].atoms is entries[1][1].atoms
+    assert resolved[1][1].potential_error is None
+    assert resolved[2][1].atoms is entries[2][1].atoms
+    assert resolved[2][1].potential_error is None
+    assert entries[0][1].atoms is not None  # immutable LoadedResult inputs
+
+    # Equal timestamps do not identify a uniquely newest producer.
+    os.utime(second, ns=(1_000_000_000, 1_000_000_000))
+    tied, ambiguous = disambiguate_scf_potentials(entries)
+    assert ambiguous == ("first.out", "second.out")
+    assert all(tied[i][1].atoms is None for i in (0, 1))
+
+
+
+
+def test_standalone_scf_import_assigns_current_potential_to_newest_output(
+    tmp_path, monkeypatch,
+):
+    import os
+    from ase2sprkkr_gui.gui.application.result_loading import (
+        PotentialProvenanceAmbiguous,
+    )
+
+    potential = tmp_path / "Fe.pot_new"
+    potential.write_text("newest available potential")
+    first, second = tmp_path / "one.out", tmp_path / "two.out"
+    scf_head = (
+        " *       KKRSCF  VERSION  9.7          *\n"
+        "TASK = SCF\n"
+        "pot-file: Fe.pot_new\n"
+    )
+    first.write_text(scf_head)
+    second.write_text(scf_head)
+    os.utime(first, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(second, ns=(2_000_000_000, 2_000_000_000))
+
+    def parsed(path):
+        return SimpleNamespace(
+            task_name="scf", produces_potential=True,
+            directory=str(tmp_path), potential_filename=potential.name,
+            files={}, input_parameters=None,
+        )
+
+    monkeypatch.setattr(
+        result_loading_module.TaskResult, "from_file", staticmethod(parsed),
+    )
+    monkeypatch.setattr(
+        result_loading_module, "_load_potential",
+        lambda *args, **kwargs: (Atoms("Fe"), None),
+    )
+    older = load_result_file(first)
+    newest = load_result_file(second)
+    assert older.output_path == first.resolve()
+    assert older.atoms is None
+    assert isinstance(older.potential_error, PotentialProvenanceAmbiguous)
+    assert newest.atoms is not None
+    assert newest.potential_error is None
+
+
+def test_import_cache_reuses_file_digest_until_file_changes(tmp_path, monkeypatch):
+    import os
+    from ase2sprkkr_gui.gui.application.result_loading import ResultImportCache
+
+    potential = tmp_path / "huge.pot"
+    potential.write_text("first version")
+    original = result_loading_module.PotentialFileVersion.capture
+    called = []
+
+    def capture(_cls, path, **kwargs):
+        called.append((path, kwargs))
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(
+        result_loading_module.PotentialFileVersion, "capture", classmethod(capture),
+    )
+    cache = ResultImportCache()
+    a = cache.version(potential)
+    b = cache.version(potential)
+    assert a is b
+    assert len(called) == 1
+
+    stat = potential.stat()
+    potential.write_text("changed content")
+    os.utime(potential, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    c = cache.version(potential)
+    assert c != a
+    assert len(called) == 2
+
+
+def test_recent_batch_checks_newer_scf_even_when_it_was_not_imported(tmp_path):
+    from ase2sprkkr_gui.gui.application.result_loading import (
+        ResultImportCache, LoadedResult, disambiguate_scf_potentials,
+    )
+    import os
+
+    old = tmp_path / "old.out"
+    new = tmp_path / "new.out"
+    potential = tmp_path / "Fe.pot_new"
+    old.write_text(
+        " *       KKRSCF  VERSION  9.7          *\n"
+        "TASK = SCF\npot-file: Fe.pot_new\n"
+    )
+    new.write_text(
+        " *       KKRSCF  VERSION  9.7          *\n"
+        "TASK = SCF\npot-file: Fe.pot_new\n"
+    )
+    os.utime(old, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(new, ns=(2_000_000_000, 2_000_000_000))
+    loaded = LoadedResult(
+        result=SimpleNamespace(task_name="scf", produces_potential=True),
+        output_path=old, potential_path=potential, atoms=Atoms("Fe"),
+        potential_error=None, directory=str(tmp_path),
+    )
+    result, old_names = disambiguate_scf_potentials(
+        [(old, loaded)], cache=ResultImportCache(),
+    )
+    assert old_names == ("old.out",)
+    assert result[0][1].atoms is None
+
+
+def test_import_rejects_structure_changed_after_worker_read(tmp_path):
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+    from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
+
+    potential = tmp_path / "Fe.pot"
+    potential.write_text("original")
+    out = tmp_path / "Fe.out"
+    out.write_text("SCF result")
+    version = PotentialFileVersion.capture(potential)
+    loaded = LoadedResult(
+        result=SimpleNamespace(
+            task_name="scf", produces_potential=True, output_values={},
+        ),
+        output_path=out, potential_path=potential,
+        atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True),
+        potential_error=None, directory=str(tmp_path),
+        parsed_potential_version=version,
+    )
+    controller = WorkspaceController()
+    potential.write_text("later version")
+    adoption = controller.adopt_external_result(loaded)
+    assert adoption.record is not None
+    assert adoption.potential_error is not None
+    assert controller.result_store.state_for_result(adoption.record) is None
+
+
+def test_import_preserves_preparsed_potential_version(tmp_path):
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+    from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
+
+    potential = tmp_path / "Fe.pot"
+    potential.write_text("original")
+    version = PotentialFileVersion.capture(potential)
+    loaded = LoadedResult(
+        result=SimpleNamespace(
+            task_name="scf", produces_potential=True, output_values={},
+        ),
+        output_path=tmp_path / "Fe.out", potential_path=potential,
+        atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True),
+        potential_error=None, directory=str(tmp_path),
+        parsed_potential_version=version,
+    )
+    controller = WorkspaceController()
+    adoption = controller.adopt_external_result(loaded)
+    state = controller.result_store.state_for_result(adoption.record)
+    assert state is not None
+    assert state.potential_version is version
+
+
+def test_import_rejects_stdout_modified_after_worker_read(tmp_path):
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+    from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
+
+    path = tmp_path / "Fe.out"
+    path.write_text("old stdout")
+    preparse = PotentialFileVersion.capture(path, digest=False)
+    loaded = LoadedResult(
+        result=SimpleNamespace(
+            task_name="scf", produces_potential=True, output_values={},
+        ),
+        output_path=path, potential_path=None, atoms=None,
+        potential_error=None, directory=str(tmp_path),
+        parsed_output_version=preparse,
+    )
+    path.write_text("modified stdout content")
+    controller = WorkspaceController()
+    with pytest.raises(Exception, match="changed after it was presented"):
+        controller.adopt_external_result(loaded)
+    assert not controller.result_store.results
+
+
+def test_reimport_same_stdout_with_overwritten_potential_keeps_new_state(tmp_path):
+    """Unchanged stdout does not authorize reusing a stale structural record."""
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+    from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
+
+    output = tmp_path / "Fe.out"
+    output.write_text("same old stdout")
+    pot = tmp_path / "Fe.pot_new"
+    pot.write_text("first result")
+    controller = WorkspaceController()
+    result = SimpleNamespace(
+        task_name="scf", produces_potential=True, output_values={},
+    )
+
+    def adopt():
+        version = PotentialFileVersion.capture(pot)
+        return controller.adopt_external_result(LoadedResult(
+            result=result, output_path=output, potential_path=pot,
+            atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True),
+            potential_error=None, directory=str(tmp_path),
+            parsed_potential_version=version,
+        )).record
+
+    earlier = adopt()
+    old_state = controller.result_store.state_for_result(earlier)
+    pot.write_text("second result, different charge density")
+    latest = adopt()
+    latest_state = controller.result_store.state_for_result(latest)
+    assert latest.id != earlier.id
+    assert len(controller.result_store.results) == 2
+    assert old_state.potential_version != latest_state.potential_version
+    assert not old_state.potential_version.is_current()
+    assert latest_state.potential_version.is_current()
+    assert adopt().id == latest.id

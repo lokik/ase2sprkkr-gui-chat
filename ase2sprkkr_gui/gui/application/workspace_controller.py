@@ -19,7 +19,9 @@ from ase2sprkkr_gui.gui.application.historical_state import (
 )
 from ase2sprkkr_gui.gui.application.operation_results import EmptySpheresResult
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
-from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+from ase2sprkkr_gui.gui.application.result_loading import (
+    LoadedResult, PotentialVersionChanged, require_potential_version_current,
+)
 from ase2sprkkr_gui.gui.application.result_store import ResultRecord, ResultStore
 from ase2sprkkr_gui.gui.application.workspace import (
     EmptySpheresState,
@@ -837,6 +839,22 @@ class WorkspaceController(QObject):
         select_result: bool = False,
     ) -> ResultAdoption:
         """Record an imported result without implicitly replacing the workspace."""
+        # Worker and GUI publication are separate phases: neither the
+        # parsed stdout nor its structure dependencies may have changed.
+        if loaded.parsed_output_version is not None:
+            require_potential_version_current(loaded.parsed_output_version)
+        for version in (
+            (loaded.parsed_potential_version,) + loaded.source_versions
+        ):
+            if version is None or loaded.atoms is None:
+                continue
+            try:
+                require_potential_version_current(version)
+            except PotentialVersionChanged as exc:
+                # Keep the stdout history, but not a structure assembled from
+                # stale bytes. Do not re-snapshot the now overwritten POTFIL.
+                loaded = replace(loaded, atoms=None, potential_error=exc)
+                break
         previous_count = len(self._results)
         record = self._results.add_external_result(
             loaded.result,
@@ -847,6 +865,7 @@ class WorkspaceController(QObject):
             potential_path=loaded.potential_path,
             persistent_ref=loaded.persistent_ref,
             source_versions=loaded.source_versions,
+            parsed_potential_version=loaded.parsed_potential_version,
         )
         self._notify_external_result(
             loaded.result if len(self._results) != previous_count else None,

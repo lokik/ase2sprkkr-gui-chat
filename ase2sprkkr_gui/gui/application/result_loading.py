@@ -1,7 +1,7 @@
 """Interpret calculation results and result files without changing a workspace."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +15,17 @@ except ImportError:
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
+from ase2sprkkr_gui.ase.copy import copy_for_edit
+
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 
 
 class PotentialVersionChanged(RuntimeError):
     """The potential file no longer matches the version approved by the user."""
+
+
+class PotentialProvenanceAmbiguous(ValueError):
+    """Several imported SCFs claim one overwritten output potential path."""
 
 
 @dataclass(frozen=True)
@@ -63,18 +69,69 @@ class LoadedResult:
     # Captured before parsing and verified afterwards, for one-shot reuse.
     parsed_potential_version: PotentialFileVersion | None = None
     source_versions: tuple[PotentialFileVersion, ...] = ()
+    # Cheap, pre-parser stdout fingerprint used to reject concurrent rewrites.
+    parsed_output_version: PotentialFileVersion | None = None
 
 
 class ResultImportCache:
-    """Worker-local cache shared only by one batch of imported outputs."""
+    """Batch-local, version-checked parsing; distinct results keep their metadata.
+
+    CLUPOT and its host are parsed without constructing Atoms. Their joint
+    structure is reconstructed on first use, then reused until either file
+    changes. The native SCF convergence correction is never written into the
+    shared object.
+    """
 
     def __init__(self):
         self.inputs = InputFileCache() if InputFileCache is not None else None
         self.potentials: dict[Path, LoadedResult] = {}
+        self._versions: dict[Path, PotentialFileVersion] = {}
+        self._scf_candidates: dict[Path, tuple[Path, ...]] = {}
+        self._scf_claims: dict[tuple[Path, Path], tuple[Path, ...]] = {}
+        self._hosts: dict[Path, tuple[PotentialFileVersion, Any]] = {}
+        self._clusters: dict[
+            tuple[Path, Path],
+            tuple[PotentialFileVersion, PotentialFileVersion, Any],
+        ] = {}
+
+    def version(
+        self, path: Path, *, require_digest: bool = False,
+    ) -> PotentialFileVersion:
+        """Avoid rehashing identical files for every result in the same batch."""
+        path = path.resolve()
+        previous = self._versions.get(path)
+        if (
+            previous is not None
+            and (not require_digest or previous.available)
+            and previous.is_current()
+        ):
+            return previous
+        version = PotentialFileVersion.capture(path, require_digest=require_digest)
+        self._versions[path] = version
+        return version
+
+    def scf_claims(self, directory: Path, potential_path: Path) -> tuple[Path, ...]:
+        """One cheap SCF banner index per directory; refine by produced POTFIL."""
+        directory = directory.resolve()
+        potential_path = potential_path.resolve()
+        if directory not in self._scf_candidates:
+            try:
+                self._scf_candidates[directory] = tuple(
+                    path for path in directory.iterdir()
+                    if path.is_file() and path.suffix.casefold() == ".out"
+                    and looks_like_scf_output(path)
+                )
+            except OSError:
+                self._scf_candidates[directory] = ()
+        key = (directory, potential_path)
+        if key not in self._scf_claims:
+            self._scf_claims[key] = tuple(
+                path for path in self._scf_candidates[directory]
+                if looks_like_scf_output(path, potential_filename=potential_path)
+            )
+        return self._scf_claims[key]
 
     def remember(self, loaded: LoadedResult) -> None:
-        # Native embedded SCF can adjust cluster convergence status per result;
-        # do not silently reuse that result-specific object for another task.
         if (
             loaded.potential_path is not None
             and loaded.atoms is not None
@@ -82,6 +139,130 @@ class ResultImportCache:
             and not getattr(loaded.result, "is_embedded", False)
         ):
             self.potentials[loaded.potential_path] = loaded
+
+    def embedded_atoms(
+        self,
+        cluster_path: Path,
+        host_path: Path,
+        cluster_version: PotentialFileVersion,
+        host_version: PotentialFileVersion,
+    ) -> Any:
+        """Parse each native file once, with the host/CLUPOT dependency tracked."""
+        require_potential_version_current(cluster_version)
+        require_potential_version_current(host_version)
+        key = (cluster_path, host_path)
+        cached = self._clusters.get(key)
+        if cached is not None and cached[:2] == (cluster_version, host_version):
+            return cached[2]
+
+        host_entry = self._hosts.get(host_path)
+        if host_entry is not None and host_entry[0] == host_version:
+            host = host_entry[1]
+        else:
+            host = Potential.from_file(
+                host_path, atoms=False, check_file_unchanged=True,
+            )
+            require_potential_version_current(host_version)
+            self._hosts[host_path] = (host_version, host)
+
+        # Explicitly avoid any SCF-specific mutation of the cached CLUPOT.
+        cluster = Potential.from_file(
+            cluster_path, atoms=False, host=host, check_file_unchanged=True,
+        )
+        require_potential_version_current(cluster_version)
+        require_potential_version_current(host_version)
+        atoms = cluster.atoms
+        if atoms is None:
+            raise ValueError(f"Cluster potential contains no structure: {cluster_path}")
+        require_potential_version_current(cluster_version)
+        require_potential_version_current(host_version)
+        self._clusters[key] = (cluster_version, host_version, atoms)
+        return atoms
+
+
+def _embedded_atoms_for_result(result: Any, atoms: Any) -> Any:
+    """Keep output-derived convergence separate from cached CLUPOT file data."""
+    if str(getattr(result, "task_name", "")).casefold() != "scf":
+        return atoms
+    if getattr(result, "return_code", 0) != 0:
+        return atoms
+    try:
+        if not getattr(result, "iterations", None) or not result.converged:
+            return atoms
+        status = atoms.potential.SCF_INFO.SCFSTATUS()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return atoms
+    if str(status).strip().upper() != "ITERATING":
+        return atoms
+    # A shallow structural copy clones the attached potential's option
+    # containers while sharing unchanged, potentially large radial arrays.
+    selected = copy_for_edit(atoms)
+    selected.potential.SCF_INFO.SCFSTATUS = "CONVERGED"
+    selected.info["sprkkr_embedding_scf_status"] = "CONVERGED"
+    return selected
+
+
+def _newest_unique_output(paths: list[Path]) -> Path | None:
+    """Newest stdout by mtime_ns; ties or missing metadata are not decidable."""
+    if not paths:
+        return None
+    try:
+        times = [(path.stat().st_mtime_ns, path) for path in paths]
+    except OSError:
+        return None
+    maximum = max(mtime for mtime, _ in times)
+    latest = [path for mtime, path in times if mtime == maximum]
+    return latest[0] if len(latest) == 1 else None
+
+
+def disambiguate_scf_potentials(
+    loaded: list[tuple[Path, LoadedResult]],
+    *,
+    cache: ResultImportCache | None = None,
+) -> tuple[list[tuple[Path, LoadedResult]], tuple[str, ...]]:
+    """Attribute a reused SCF output POTFIL only to the newest SCF stdout.
+
+    Output modification time is a heuristic, not a native provenance proof.
+    Older outputs remain in history without a usable structure. If the newest
+    cannot be distinguished (identical mtimes), none claims the potential.
+    Ordinary DOS/BSF/ARPES consumers of the same input remain unchanged.
+    """
+    by_potential: dict[Path, list[int]] = {}
+    for index, (_, item) in enumerate(loaded):
+        result = getattr(item, "result", None)
+        path = getattr(item, "potential_path", None)
+        if (
+            path is not None
+            and str(getattr(result, "task_name", "")).casefold() == "scf"
+            and getattr(result, "produces_potential", True)
+        ):
+            by_potential.setdefault(path, []).append(index)
+
+    ambiguous = set()
+    for potential, indices in by_potential.items():
+        paths = {loaded[i][0].resolve() for i in indices}
+        if cache is not None:
+            # Recent-results import may not include the newest SCF stdout.
+            # Its presence must still invalidate an older candidate's claim.
+            for path in tuple(paths):
+                paths.update(cache.scf_claims(path.parent, potential))
+        if len(paths) <= 1:
+            continue
+        latest = _newest_unique_output(list(paths))
+        ambiguous.update(
+            i for i in indices if latest is None or loaded[i][0].resolve() != latest
+        )
+    if not ambiguous:
+        return loaded, ()
+    updated = list(loaded)
+    for index in sorted(ambiguous):
+        path, item = updated[index]
+        error = PotentialProvenanceAmbiguous(
+            f"Several SCF outputs reference {item.potential_path.name}; "
+            "this stdout is not the uniquely newest SCF output."
+        )
+        updated[index] = (path, replace(item, atoms=None, potential_error=error))
+    return updated, tuple(loaded[i][0].name for i in sorted(ambiguous))
 
 
 def load_potential_atoms(file_path: str | Path, *, embedding_host=None) -> Any:
@@ -133,11 +314,31 @@ def load_potential_version(
     return atoms
 
 
+def _newest_scf_for_potential(
+    output_path: Path, potential_path: Path,
+) -> Path | None:
+    """Fast standalone comparison: include the selected, already-parsed SCF."""
+    try:
+        candidates = [
+            candidate for candidate in output_path.parent.iterdir()
+            if candidate != output_path
+            and candidate.is_file()
+            and candidate.suffix.casefold() == ".out"
+            and looks_like_scf_output(candidate, potential_filename=potential_path)
+        ]
+    except OSError:
+        return None
+    return _newest_unique_output([output_path, *candidates])
+
+
 def load_result_file(
     file_path: str | Path, *, cache: ResultImportCache | None = None,
 ) -> LoadedResult:
     """Parse an external result, optionally reusing one batch's inputs and POTFILs."""
     path = Path(file_path).resolve()
+    output_version = (
+        PotentialFileVersion.capture(path, digest=False) if path.is_file() else None
+    )
     result = (
         TaskResult.from_file(path, input_cache=cache.inputs)
         if cache is not None and cache.inputs is not None else TaskResult.from_file(path)
@@ -147,9 +348,32 @@ def load_result_file(
         fallback_directory=path.parent,
         output_fallback=path,
         potential_cache=cache.potentials if cache is not None else None,
+        import_cache=cache,
     )
+    if output_version is not None and not output_version.is_current():
+        raise PotentialVersionChanged(
+            f"Output file changed while it was read: {path}"
+        )
+    loaded = replace(loaded, parsed_output_version=output_version)
     if cache is not None:
         cache.remember(loaded)
+    elif (
+        loaded.potential_path is not None
+        and loaded.atoms is not None
+        and loaded.potential_error is None
+        and str(getattr(result, "task_name", "")).casefold() == "scf"
+        and _newest_scf_for_potential(path, loaded.potential_path) != path
+    ):
+        # The most recent SCF stdout retains the potential association.
+        # Older stdout versions remain importable but no longer own pot_new.
+        loaded = replace(
+            loaded,
+            atoms=None,
+            potential_error=PotentialProvenanceAmbiguous(
+                f"Other SCF outputs also reference {loaded.potential_path.name}; "
+                "only the uniquely newest SCF stdout may own this potential."
+            ),
+        )
     return loaded
 
 
@@ -162,6 +386,7 @@ def load_result(
     embedding_host=None,
     reusable_potential: LoadedResult | None = None,
     potential_cache: dict[Path, LoadedResult] | None = None,
+    import_cache: ResultImportCache | None = None,
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
     output, potential = _result_files(result, fallback_directory)
@@ -177,7 +402,10 @@ def load_result(
     if potential is not None:
         try:
             if potential.is_file():
-                pre_read_potential_version = PotentialFileVersion.capture(potential)
+                pre_read_potential_version = (
+                    import_cache.version(potential) if import_cache is not None
+                    else PotentialFileVersion.capture(potential)
+                )
         except OSError:
             pass  # A missing/unreadable POTFIL is reported by the normal loader.
 
@@ -199,8 +427,12 @@ def load_result(
                 host_version = manifest.input_version(host_path)
             else:
                 try:
-                    host_version = PotentialFileVersion.capture(
-                        host_path, require_digest=True,
+                    host_version = (
+                        import_cache.version(host_path, require_digest=True)
+                        if import_cache is not None
+                        else PotentialFileVersion.capture(
+                            host_path, require_digest=True,
+                        )
                     )
                 except OSError as exc:
                     host_version_error = exc
@@ -212,10 +444,26 @@ def load_result(
         atoms, potential_error = None, exc
     else:
         if getattr(result, "is_embedded", False) and potential is not None:
-            # The result's cluster potential loader resolves its own native
-            # host POTFIL; it must not be treated as a periodic potential.
             try:
-                atoms, potential_error = result.potential.atoms, None
+                if (
+                    import_cache is not None
+                    and pre_read_potential_version is not None
+                    and host_version is not None
+                    and host_version.available
+                ):
+                    # Bulk import parses the native CLUPOT without Atoms or an
+                    # SCF-dependent status. Reuse its host and geometry.
+                    host_path = Path(host_version.path).resolve()
+                    atoms = import_cache.embedded_atoms(
+                        potential, host_path, pre_read_potential_version,
+                        host_version,
+                    )
+                    atoms = _embedded_atoms_for_result(result, atoms)
+                else:
+                    # Keep regular, standalone loading and historical manifest
+                    # semantics intact when a safe cache key is unavailable.
+                    atoms = result.potential.atoms
+                potential_error = None
             except Exception as exc:  # noqa: BLE001 - corrupted native file
                 atoms, potential_error = None, exc
         elif (
@@ -277,62 +525,37 @@ def load_result(
     )
 
 
-def _scf_candidate_sort_key(
-    path: Path, selected_stem: str, selected_task: str,
-) -> tuple[int, str]:
-    """Prioritize the same dataset's SCF output, without assuming a naming rule."""
-    base = selected_stem.casefold()
-    task = selected_task.casefold()
-    # E.g. Fe_DOS.out -> Fe_SCF.out (also handle Fe_DOS_DOS.out).
-    for separator in ("_", "-", "."):
-        suffix = separator + task
-        while base.endswith(suffix):
-            base = base[:-len(suffix)]
-
-    stem = path.stem.casefold()
-    if any(stem == base + separator + "scf" for separator in ("_", "-", ".")):
-        rank = 0
-    elif stem == base or any(
-        stem.startswith(base + separator) for separator in ("_", "-", ".")
-    ):
-        rank = 1
-    elif "scf" in stem:
-        rank = 2
-    else:
-        rank = 3
-    return rank, stem
-
-
 def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
     """Try to find the SCF output that produced a non-SCF result's potential.
 
-    First try similarly named .out files, then other .out files whose opening
-    banner says KKRSCF. A match also must reference exactly the same potential.
-    Missing, unreadable, or unrelated outputs are never errors for the result.
+    Only .out files with a KKRSCF banner and matching produced potential
+    are candidates. The newest matching SCF output owns a reused pot_new;
+    older outputs must not attach it. If mtimes tie, do not guess.
     """
     if loaded.output_path is None or loaded.potential_path is None:
         return None
-    task_name = str(getattr(loaded.result, "task_name", "")).casefold()
-    if task_name == "scf":
+    if str(getattr(loaded.result, "task_name", "")).casefold() == "scf":
         return None
 
     directory = loaded.output_path.parent
     target_potential = loaded.potential_path.resolve()
     try:
-        candidates = sorted(
-            (path for path in directory.iterdir()
-             if path != loaded.output_path and path.is_file()
-             and path.suffix.casefold() == ".out"),
-            key=lambda path: _scf_candidate_sort_key(
-                path, loaded.output_path.stem, task_name,
-            ),
-        )
+        candidates = [
+            path for path in directory.iterdir()
+            if path != loaded.output_path and path.is_file()
+            and path.suffix.casefold() == ".out"
+        ]
     except OSError:
         return None
 
-    for path in candidates:
-        if not looks_like_scf_output(path, potential_filename=target_potential):
-            continue
+    matching = [
+        path for path in candidates
+        if looks_like_scf_output(path, potential_filename=target_potential)
+    ]
+    newest = _newest_unique_output(matching)
+    if newest is None:
+        return None
+    for path in (newest,):
         try:
             result = TaskResult.from_file(path)
             if str(getattr(result, "task_name", "")).casefold() != "scf":

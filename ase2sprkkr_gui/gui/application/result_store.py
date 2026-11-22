@@ -808,13 +808,34 @@ class ResultStore:
         potential_path: Path | None,
         persistent_ref: str | None = None,
         source_versions: tuple[FileVersion, ...] = (),
+        parsed_potential_version: PotentialFileVersion | None = None,
     ) -> ResultRecord:
         existing = self.result_for_external_source(
             output_path,
             persistent_ref=persistent_ref,
         )
         if existing is not None:
-            return existing
+            if persistent_ref is not None:
+                # A persistent run has an authoritative stable identity.
+                return existing
+            state = self.state_for_result(existing)
+            same_potential = existing.potential_path == potential_path
+            same_structure_availability = (state is None) == (atoms is None)
+            still_current = (
+                state is None or (
+                    (state.potential_version is None
+                     or not state.potential_version.available
+                     or state.potential_version.is_current())
+                    and all(version.is_current() for version in state.source_dependencies)
+                    and (parsed_potential_version is None
+                         or state.potential_version == parsed_potential_version)
+                )
+            )
+            if same_potential and same_structure_availability and still_current:
+                return existing
+            # The stdout might be unchanged even though its POTFIL was
+            # overwritten or a previous ambiguous import lacked structure.
+            # Retain the historical record and create the new current state.
 
         if atoms is None:
             return self._add_result(
@@ -841,6 +862,7 @@ class ResultStore:
                 potential_path=potential_path,
                 output_atoms=atoms,
                 output_potential_path=(str(potential_path) if potential_path else None),
+                output_potential_version=parsed_potential_version,
                 source_versions=source_versions,
                 imported=True,
             )
@@ -848,6 +870,7 @@ class ResultStore:
         prepared_state = self._prepare_structure_state(
             atoms,
             potential_path=(str(potential_path) if potential_path else None),
+            potential_version=parsed_potential_version,
             source_versions=source_versions,
         )
         assert prepared_state.structure is not None
