@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from ase import Atoms
 from ase2sprkkr import InputParameters, TaskResult
 from ase2sprkkr.outputs.reader_registry import reader_registry
@@ -13,7 +11,8 @@ from kkrunner.projects import ProjectRepository, ProjectRunManager
 from kkrunner.runs import RunState, RunStore
 
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
-from ase2sprkkr_gui.gui.application.result_store import ResultStore
+from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
+from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 
 
@@ -93,7 +92,12 @@ def test_persistent_task_identity_round_trip_drives_recompute_editor(
     assert loaded.run_record.metadata["ase2sprkkr"]["task"] == "SPLEED"
     assert loaded.run_record.metadata["ase2sprkkr"]["input_definition"] == "ARPES"
 
-    history = ResultStore()
+    # Recompute now uses the actual workspace's structure/state identities
+    # and creates a one-off request instead of mutating its input document.
+    controller = WorkspaceController(
+        WorkspaceState(atoms=Atoms("Fe"), directory=str(tmp_path))
+    )
+    history = controller.result_store
     record = history.add_external_result(
         loaded,
         atoms=None,
@@ -108,21 +112,13 @@ def test_persistent_task_identity_round_trip_drives_recompute_editor(
     assert record.input_parameters.task_name.upper() == "SPLEED"
 
     edited = record.input_parameters.copy(copy_values=True)
-    replacements = []
-    controller = SimpleNamespace(
-        result_store=history,
-        directory=str(tmp_path),
-        structure_generation=object(),
-        input_parameters_generation=object(),
-        atoms=Atoms("Fe"),
-        replace_input_parameters=lambda value, **kwargs: (
-            replacements.append((value, kwargs)) or object()
-        ),
-    )
+    structure_generation = controller.structure_generation
+    input_parameters_generation = controller.input_parameters_generation
+    structure_id, state_id = controller.structure_id, controller.state_id
     editor_calls = []
 
-    def edit(parameters, *, parent, atoms):
-        editor_calls.append((parameters, parent, atoms))
+    def edit(parameters, *, parent, atoms, directory, recent_files):
+        editor_calls.append((parameters, parent, atoms, directory, recent_files))
         return edited
 
     monkeypatch.setattr(calculation_flow, "edit_input_parameters", edit)
@@ -133,35 +129,48 @@ def test_persistent_task_identity_round_trip_drives_recompute_editor(
             AssertionError("effective SPLEED must use the Expert editor")
         ),
     )
-    monkeypatch.setattr(
-        calculation_flow,
-        "document_change_applied",
-        lambda parent, change: True,
-    )
     launched = object()
-    monkeypatch.setattr(
-        calculation_flow,
-        "run_calculation",
-        lambda *_args, **_kwargs: launched,
-    )
+    launch_calls = []
 
+    def fake_run(*args, **kwargs):
+        launch_calls.append((args, kwargs))
+        return launched
+
+    monkeypatch.setattr(calculation_flow, "run_calculation", fake_run)
+
+    recent_files = object()
+    parent = object()
     result = calculation_flow.recompute_result(
-        controller,
-        object(),
-        object(),
-        record.id,
+        controller, recent_files, parent, record.id,
     )
 
     assert result is launched
     assert len(editor_calls) == 1
-    editor_parameters, _parent, editor_atoms = editor_calls[0]
+    editor_parameters, editor_parent, editor_atoms, editor_directory, editor_recent = editor_calls[0]
+    assert editor_parameters is not record.input_parameters
     assert editor_parameters.definition_name.upper() == "ARPES"
     assert editor_parameters.task_name.upper() == "SPLEED"
+    assert editor_parent is parent
     assert editor_atoms is controller.atoms
-    assert replacements == [(
-        edited,
-        {
-            "expected_input_parameters_generation": controller.input_parameters_generation,
-            "expected_structure_generation": controller.structure_generation,
-        },
-    )]
+    assert editor_directory == str(tmp_path)
+    assert editor_recent is recent_files
+
+    assert len(launch_calls) == 1
+    (launch_controller, launch_recent, launch_parent), launch_kwargs = launch_calls[0]
+    assert launch_controller is controller
+    assert launch_recent is recent_files
+    assert launch_parent is parent
+    assert launch_kwargs["position_like_window"] == "expert-input"
+    request = launch_kwargs["request_override"]
+    assert request.atoms is controller.atoms
+    assert request.input_parameters is not edited
+    assert request.input_parameters.definition_name.upper() == "ARPES"
+    assert request.input_parameters.task_name.upper() == "SPLEED"
+    assert request.directory == str(tmp_path)
+    assert (request.structure_id, request.state_id) == (structure_id, state_id)
+
+    # Recompute must not publish historical inputs or change the live structure.
+    assert controller.input_parameters is None
+    assert controller.structure_generation == structure_generation
+    assert controller.input_parameters_generation == input_parameters_generation
+    assert (controller.structure_id, controller.state_id) == (structure_id, state_id)
