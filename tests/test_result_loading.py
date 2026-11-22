@@ -216,7 +216,7 @@ def test_result_loading_resolves_relative_artifacts_from_result_directory(
             "potential": fallback_potential.name,
         },
         directory=str(run_directory),
-        potential_filename="ignored.pot",
+        potential_filename=converged.name,
         input_parameters=parameters,
     )
     result.path_to = lambda key: result.files[key]
@@ -265,11 +265,11 @@ def test_result_loading_keeps_input_parameter_parse_failure_nonfatal(tmp_path):
 @pytest.mark.parametrize(
     ("files", "potential_filename", "expected_name"),
     [
-        ({"potential": "registered.pot"}, "filename.pot", "registered.pot"),
+        ({"potential": "registered.pot"}, "filename.pot", "filename.pot"),
         ({}, "filename.pot", "filename.pot"),
     ],
 )
-def test_result_loading_uses_potential_fallbacks_and_fallback_directory(
+def test_result_loading_uses_result_potential_and_fallback_directory(
     tmp_path, monkeypatch, files, potential_filename, expected_name
 ):
     potential = tmp_path / expected_name
@@ -322,6 +322,7 @@ def test_result_loading_reports_a_potential_path_that_is_not_a_file(tmp_path):
     result = SimpleNamespace(
         files={"potential": potential_directory.name},
         directory=str(tmp_path),
+        potential_filename=potential_directory.name,
     )
     result.path_to = lambda key: result.files[key]
 
@@ -358,6 +359,7 @@ def test_missing_referenced_potential_is_nonfatal_and_does_not_replace_workspace
         files={"output": output.name, "converged": missing.name},
         directory=str(tmp_path),
         produces_potential=True,
+        potential_filename=missing.name,
     )
     result.path_to = lambda key: result.files[key]
     monkeypatch.setattr(
@@ -428,6 +430,7 @@ def test_native_cluster_result_requires_and_reuses_original_host(tmp_path, monke
     result = SimpleNamespace(
         files={"converged": cluster_path.name},
         directory=str(tmp_path),
+        potential_filename=cluster_path.name,
         input_parameters=None,
     )
     result.path_to = lambda key: result.files[key]
@@ -568,14 +571,18 @@ def test_batch_result_import_reuses_versioned_potential_and_invalidates(
         result._input_cache = input_cache
         return result
 
-    def fake_potential(path, *, embedding_host=None):
-        seen.append(path)
-        return Atoms("Fe", cell=(3, 3, 3), pbc=True), None
+    def fake_potential(_cls, path, *, atoms, check_file_unchanged, host=None):
+        assert atoms is False
+        assert check_file_unchanged
+        seen.append(Path(path).resolve())
+        return SimpleNamespace(atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True))
 
     monkeypatch.setattr(
         result_loading.TaskResult, "from_file", staticmethod(fake_result)
     )
-    monkeypatch.setattr(result_loading, "_load_potential", fake_potential)
+    monkeypatch.setattr(
+        result_loading.Potential, "from_file", classmethod(fake_potential)
+    )
 
     a = result_loading.load_result_file(first, cache=cache)
     b = result_loading.load_result_file(second, cache=cache)
@@ -760,8 +767,8 @@ def test_standalone_scf_import_assigns_current_potential_to_newest_output(
 
     monkeypatch.setattr(result_loading_module.TaskResult, "from_file", staticmethod(parsed))
     monkeypatch.setattr(
-        result_loading_module, "_load_potential",
-        lambda *args, **kwargs: (Atoms("Fe"), None),
+        FakeSCF, "_read_potential",
+        lambda self, filename: SimpleNamespace(atoms=Atoms("Fe")),
     )
     older, newer = load_result_file(first), load_result_file(second)
     assert older.atoms is None
