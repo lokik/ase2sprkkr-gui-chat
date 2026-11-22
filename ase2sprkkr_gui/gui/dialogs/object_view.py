@@ -14,6 +14,7 @@ from ase2sprkkr.common.repeated_configuration_containers import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QMessageBox,
     QToolButton,
@@ -179,6 +180,23 @@ def execute_value_action(
                 title=f"View {display_name}",
                 parent=parent,
             )
+            return
+        if action in {"copy_to", "export_nexus"}:
+            source = Path(value.path())
+            if action == "copy_to":
+                proposed = source.with_name(source.stem + "_copy" + source.suffix)
+                title = "Save Result File As"
+                file_filter = "All files (*)"
+            else:
+                proposed = source.with_suffix(".nxs")
+                title = "Export Spectrum to NeXus"
+                file_filter = "NeXus files (*.nxs);;All files (*)"
+            destination, _ = QFileDialog.getSaveFileName(
+                parent, title, str(proposed), file_filter,
+            )
+            if not destination:
+                return
+            getattr(value, action)(destination)
             return
         method = getattr(value, action)
         method()

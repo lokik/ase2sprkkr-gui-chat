@@ -36,7 +36,7 @@ from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import CenteredIconPushBut
 
 _PLOT_ICON = icon_path("labplot-xy-interpolation-curve.svg")
 _STANDARD_ICONS = {
-    "save": QStyle.StandardPixmap.SP_DialogSaveButton,
+    "copy_to": QStyle.StandardPixmap.SP_DialogSaveButton,
     "open": QStyle.StandardPixmap.SP_FileDialogContentsView,
     "open_directory": QStyle.StandardPixmap.SP_DirOpenIcon,
     "edit": QStyle.StandardPixmap.SP_FileDialogDetailedView,
@@ -44,6 +44,8 @@ _STANDARD_ICONS = {
 }
 _ACTION_LABELS = {
     "data": "View data",
+    "copy_to": "Save as…",
+    "export_nexus": "Export to NeXus…",
     "open_directory": "Open containing directory",
 }
 _RESULT_ID_ROLE = int(Qt.ItemDataRole.UserRole)
