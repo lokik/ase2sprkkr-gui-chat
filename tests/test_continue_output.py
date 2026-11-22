@@ -3,8 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from ase import Atoms
-from PyQt6.QtCore import QThread
+from PyQt6.QtCore import QThread, QTimer
 from PyQt6.QtWidgets import QApplication, QWidget
+from kkrunner.projects import ProjectRepository
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
@@ -92,6 +93,14 @@ def test_workflow_keeps_semantic_scf_action_after_continue_and_restart(
     tmp_path, monkeypatch
 ):
     application = QApplication.instance() or QApplication([])
+    # This test checks workflow planning, not the QThread/Working lifecycle.
+    # Keep the actual publish logic and GUI signals, but run its synthetic
+    # file reader inline. The real modal path is covered by the last test.
+    def run_inline(_parent, operation, *, on_success=None, **_kwargs):
+        value = operation()
+        return on_success(value) if on_success is not None else value
+
+    monkeypatch.setattr(file_flows, "run_modal_task", run_inline)
     output = tmp_path / "SCF.out"
     output.write_text("calculation", encoding="utf-8")
     loaded = _loaded_scf(output)
@@ -100,6 +109,8 @@ def test_workflow_keeps_semantic_scf_action_after_continue_and_restart(
     gui = GuiApplication(
         recent_files_path=tmp_path / "recent.json",
         settings_path=tmp_path / "settings.json",
+        # Do not load or recover actual jobs from the user's global database.
+        project_repository=ProjectRepository(tmp_path / "projects"),
     )
     window = gui.create_workflow_window()
     scf_command = RunTask("scf")
@@ -207,6 +218,13 @@ def test_continue_output_without_reconstructable_structure_reports_one_warning(
 def test_continue_finishes_state_and_recent_history_under_working(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     parent = QWidget()
+    # An unexpected Qt error dialog is otherwise modal and stalls headless
+    # pytest forever. Report the error as a normal assertion instead.
+    def unexpected_dialog(_parent, title, message, *_args, **_kwargs):
+        raise AssertionError(f"Unexpected {title} dialog: {message}")
+
+    monkeypatch.setattr(file_flows.QMessageBox, "critical", unexpected_dialog)
+    monkeypatch.setattr(file_flows.QMessageBox, "warning", unexpected_dialog)
     output = tmp_path / "SCF.out"
     output.touch()
     loaded = _loaded_scf(output)
@@ -231,7 +249,25 @@ def test_continue_finishes_state_and_recent_history_under_working(tmp_path, monk
     controller.structureChanged.connect(lambda *_args: check("structure"))
     recent.changed.connect(lambda: check("history"))
 
-    assert file_flows.continue_output(controller, recent, output, parent)
+    # If Working fails to complete, terminate the test's dialog rather than
+    # hanging indefinitely. The worker is a bounded synthetic read.
+    timed_out = []
+    watchdog = QTimer(parent)
+    watchdog.setSingleShot(True)
+
+    def abort_stalled_dialog():
+        timed_out.append(True)
+        for dialog in parent.findChildren(_ModalTaskDialog):
+            if dialog.isVisible():
+                dialog.finish_with_error()
+
+    watchdog.timeout.connect(abort_stalled_dialog)
+    watchdog.start(10000)
+    try:
+        assert file_flows.continue_output(controller, recent, output, parent)
+    finally:
+        watchdog.stop()
+    assert not timed_out, "Working dialog did not finish within 10 seconds"
     assert events[0] == "read"
     assert "result" in events and "structure" in events and "history" in events
     assert controller.atoms is not None
