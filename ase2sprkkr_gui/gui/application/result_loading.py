@@ -5,8 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ase2sprkkr import Potential, TaskResult
-from ase2sprkkr.outputs import FileAttribution, ResultLoader
+from ase2sprkkr import FileAttribution, Potential, ResultLoader, TaskResult
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
@@ -139,7 +138,7 @@ def load_potential_atoms(file_path: str | Path, *, embedding_host=None) -> Any:
             raise ValueError(
                 f"Embedded cluster {path} requires a host SPR-KKR Potential"
             )
-        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+        from ase2sprkkr import ClusterPotential
         potential = ClusterPotential.from_file(path, host=embedding_host)
     else:
         potential = Potential.from_file(str(path), check_file_unchanged=True)

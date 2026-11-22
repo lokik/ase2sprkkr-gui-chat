@@ -318,14 +318,18 @@ def test_external_result_load_survives_intervening_workspace_change(monkeypatch,
         task_name="DOS",
         produces_potential=False,
     )
+    # External loading now goes through ResultLoader and fingerprints the
+    # output. Supply a real file while replacing only scientific parsing.
+    output_path = tmp_path / "Fe.out"
+    output_path.write_text("synthetic output\n")
     monkeypatch.setattr(
-        result_loading_module.TaskResult,
-        "from_file",
-        staticmethod(lambda _path: result),
+        result_loading_module.ResultLoader,
+        "load_file",
+        lambda self, _path: result,
     )
     controller = WorkspaceController(WorkspaceState(atoms=Atoms("Cu")))
     original_structure = controller.atoms
-    loaded_result = load_result_file(tmp_path / "Fe.out")
+    loaded_result = load_result_file(output_path)
 
     controller.replace_input_parameters(object())
     adoption = controller.adopt_external_result(loaded_result)

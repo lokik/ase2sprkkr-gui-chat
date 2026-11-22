@@ -48,8 +48,8 @@ def test_run_flow_tracks_top_level_monitor_before_start(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         calculation_flow,
-        "profile_description",
-        lambda name: f"profile:{name}",
+        "profile_summary_fields",
+        lambda name: (("Profile", f"profile:{name}"),),
     )
 
     parent = object()
@@ -67,7 +67,7 @@ def test_run_flow_tracks_top_level_monitor_before_start(monkeypatch, tmp_path):
 
     assert window is not None
     assert captured["profile_name"] == "cluster"
-    assert captured["profile_description"] == "profile:cluster"
+    assert captured["profile_fields"] == (("Profile", "profile:cluster"),)
     assert captured["parent"] is None
     assert events == ["track", "show", "start"]
 
@@ -95,7 +95,7 @@ def test_monitor_is_closed_when_ownership_transfer_fails(monkeypatch, tmp_path):
         "_select_profile",
         lambda _parent, **_kwargs: (True, None, None, str(tmp_path), None),
     )
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _name: None)
 
     def fail_track(_window):
         events.append("track")
@@ -136,7 +136,7 @@ def test_tracked_monitor_is_closed_and_start_error_propagates(monkeypatch, tmp_p
         "_select_profile",
         lambda _parent, **_kwargs: (True, None, None, str(tmp_path), None),
     )
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _name: None)
 
     with pytest.raises(RuntimeError, match="worker creation failed"):
         calculation_flow.run_calculation(
@@ -173,7 +173,7 @@ def test_tracked_monitor_is_closed_when_show_fails(monkeypatch, tmp_path):
         "_select_profile",
         lambda _parent, **_kwargs: (True, None, None, str(tmp_path), None),
     )
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _name: None)
 
     with pytest.raises(RuntimeError, match="cannot show monitor"):
         calculation_flow.run_calculation(
@@ -206,7 +206,7 @@ def test_standalone_run_keeps_parent_ownership(monkeypatch, tmp_path):
         "_select_profile",
         lambda _parent, **_kwargs: (True, None, None, str(tmp_path), None),
     )
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _name: None)
 
     parent = object()
     assert calculation_flow.run_calculation(
@@ -264,8 +264,8 @@ def test_automatic_profile_is_distinct_from_cancel(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         calculation_flow,
-        "profile_description",
-        lambda name: "automatic",
+        "profile_summary_fields",
+        lambda name: (("Profile", "automatic"),),
     )
 
     assert calculation_flow.run_calculation(
@@ -298,7 +298,7 @@ def test_directory_is_chosen_with_execution_profile(monkeypatch, tmp_path):
 
     monkeypatch.setattr(calculation_flow, "_select_profile", select)
     monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _: None)
 
     assert calculation_flow.run_calculation(
         controller, RecentFiles(tmp_path / "recent.json"), object()
@@ -347,7 +347,7 @@ def test_selected_project_becomes_active_and_is_bound_to_run(
 
     monkeypatch.setattr(calculation_flow, "_select_profile", select)
     monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _: None)
 
     assert calculation_flow.run_calculation(
         controller, RecentFiles(tmp_path / "recent.json"), object()
@@ -378,7 +378,7 @@ def test_unassigned_project_is_explicit_even_when_active_project_exists(
         calculation_flow, "_select_profile",
         lambda _parent, **_kwargs: (True, None, None, str(tmp_path), None),
     )
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _: None)
     assert calculation_flow.run_calculation(
         controller, RecentFiles(tmp_path / "recent.json"), object()
     ) is not None
@@ -452,7 +452,7 @@ def test_back_from_conflict_reopens_run_picker_with_previous_settings(
     monkeypatch.setattr(calculation_flow, "_select_profile", select)
     monkeypatch.setattr(calculation_flow, "_apply_run_identification", lambda _params, _ident: None)
     monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _: None)
 
     assert calculation_flow.run_calculation(controller, recent, object()) is not None
     assert len(launched) == 1
@@ -516,7 +516,7 @@ def test_successful_submission_registers_input_before_result(tmp_path, monkeypat
             received.extend(history.paths("input"))
 
     monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _: None)
     assert calculation_flow.run_calculation(
         controller, history, object(), select_profile=False,
     ) is not None

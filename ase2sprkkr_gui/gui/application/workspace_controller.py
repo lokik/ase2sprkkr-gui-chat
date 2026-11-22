@@ -355,7 +355,7 @@ class WorkspaceController(QObject):
         # the cluster sites still carry a full set of radial data. Attach an
         # explicit START ClusterPotential rather than allowing the atom data
         # to be misinterpreted as an already converged cluster.
-        from ase2sprkkr.potentials.cluster_potentials import ClusterPotential
+        from ase2sprkkr import ClusterPotential
 
         updated._potential = None
         updated.info["sprkkr_embedding_scf_status"] = "START"
