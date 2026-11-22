@@ -746,9 +746,9 @@ def test_standalone_scf_import_assigns_current_potential_to_newest_output(
     potential.write_text("newest available potential")
     first, second = tmp_path / "one.out", tmp_path / "two.out"
     scf_head = (
-        " *       KKRSCF  VERSION  9.7          *\\n"
-        "TASK = SCF\\n"
-        "pot-file: Fe.pot_new\\n"
+        " *       KKRSCF  VERSION  9.7          *\n"
+        "TASK = SCF\n"
+        "pot-file: Fe.pot_new\n"
     )
     first.write_text(scf_head)
     second.write_text(scf_head)
