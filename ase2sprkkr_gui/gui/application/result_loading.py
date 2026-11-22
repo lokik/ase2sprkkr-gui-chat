@@ -171,19 +171,19 @@ def disambiguate_scf_potentials(
     """
     by_potential: dict[Path, list[int]] = {}
     for index, (_, item) in enumerate(loaded):
+        result = getattr(item, "result", None)
+        path = getattr(item, "potential_path", None)
         if (
-            item.potential_path is not None
-            and str(getattr(item.result, "task_name", "")).casefold() == "scf"
-            and getattr(item.result, "produces_potential", True)
+            path is not None
+            and str(getattr(result, "task_name", "")).casefold() == "scf"
+            and getattr(result, "produces_potential", True)
         ):
-            by_potential.setdefault(item.potential_path, []).append(index)
+            by_potential.setdefault(path, []).append(index)
 
-    ambiguous = {
-        index
-        for indices in by_potential.values() if len(indices) > 1
-        for index in indices
-        if len({loaded[i][0].resolve() for i in indices}) > 1
-    }
+    ambiguous = set()
+    for indices in by_potential.values():
+        if len({loaded[i][0].resolve() for i in indices}) > 1:
+            ambiguous.update(indices)
     if not ambiguous:
         return loaded, ()
     updated = list(loaded)
