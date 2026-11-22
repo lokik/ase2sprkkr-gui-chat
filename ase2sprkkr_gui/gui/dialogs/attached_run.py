@@ -75,7 +75,11 @@ def create_attached_run_monitor_window(
         lambda cancellation: AttachedRunWorker(source, job.id, cancellation),
         parent,
         title=f"Monitor {job.task or 'SPRKKR'} Calculation",
-        header=f"{title}\n{job.target} · {job.directory}",
+        header_fields=(
+            ("Directory", job.directory),
+            ("Execution", job.target),
+            ("Calculation", title),
+        ),
         initial_status=state_label(job.state),
         job_id=job.id,
         on_finished=on_finished,
