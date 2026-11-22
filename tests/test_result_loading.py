@@ -364,7 +364,7 @@ def test_missing_referenced_potential_is_nonfatal_and_does_not_replace_workspace
     result.path_to = lambda key: result.files[key]
     monkeypatch.setattr(
         result_loading_module.TaskResult,
-        "from_file",
+        "_parse_file",
         staticmethod(lambda _path, **_kwargs: result),
     )
     original_atoms = Atoms("Cu")
@@ -395,7 +395,7 @@ def test_result_parse_failure_has_no_workspace_side_effects(tmp_path, monkeypatc
     project_generation = controller.active_project_generation
     monkeypatch.setattr(
         result_loading_module.TaskResult,
-        "from_file",
+        "_parse_file",
         staticmethod(lambda _path, **_kwargs: (_ for _ in ()).throw(ValueError("broken output"))),
     )
 
@@ -544,6 +544,29 @@ def test_imported_embedded_result_uses_recorded_host_version(tmp_path, native_em
     assert loaded.source_versions[0] is host_version
 
 
+
+def test_result_rejects_primary_potential_rewritten_during_loading(tmp_path, monkeypatch):
+    """A parsed structure must never outlive the file version it came from."""
+    from ase2sprkkr.outputs.task_result import TaskResult
+
+    potential = tmp_path / "input.pot"
+    potential.write_text("before", encoding="utf-8")
+    result = TaskResult(None, None, tmp_path, task_name="DOS")
+    result.files.add_file("potential", potential)
+
+    def changed_atoms(*, loader=None):
+        potential.write_text("after modification", encoding="utf-8")
+        return Atoms("Fe")
+
+    monkeypatch.setattr(result, "get_atoms", changed_atoms)
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert loaded.atoms is None
+    assert isinstance(
+        loaded.potential_error, result_loading_module.PotentialVersionChanged
+    )
+    assert loaded.parsed_potential_version is None
+
 def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     tmp_path, monkeypatch,
 ):
@@ -562,13 +585,12 @@ def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     cache = result_loading.ResultImportCache()
     seen = []
 
-    def fake_result(path, *, input_cache=None):
-        assert input_cache is cache.inputs
+    def fake_result(path, *, on_files_parsed=None):
+        assert callable(on_files_parsed)
         result = TaskResult(
             None, None, str(tmp_path), output_file=path.name, task_name="DOS"
         )
         result.files.add_file("potential", pot.name)
-        result._input_cache = input_cache
         return result
 
     def fake_potential(_cls, path, *, atoms, check_file_unchanged, host=None):
@@ -578,7 +600,7 @@ def test_batch_result_import_reuses_versioned_potential_and_invalidates(
         return SimpleNamespace(atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True))
 
     monkeypatch.setattr(
-        result_loading.TaskResult, "from_file", staticmethod(fake_result)
+        result_loading.TaskResult, "_parse_file", staticmethod(fake_result)
     )
     monkeypatch.setattr(
         result_loading.Potential, "from_file", classmethod(fake_potential)
@@ -762,10 +784,10 @@ def test_standalone_scf_import_assigns_current_potential_to_newest_output(
         def potential_filename(self):
             return str(potential)
 
-    def parsed(path, *, input_cache=None):
+    def parsed(path, *, on_files_parsed=None):
         return FakeSCF(None, None, tmp_path, output_file=path, task_name="SCF")
 
-    monkeypatch.setattr(result_loading_module.TaskResult, "from_file", staticmethod(parsed))
+    monkeypatch.setattr(result_loading_module.TaskResult, "_parse_file", staticmethod(parsed))
     monkeypatch.setattr(
         FakeSCF, "_read_potential",
         lambda self, filename: SimpleNamespace(atoms=Atoms("Fe")),
@@ -829,8 +851,8 @@ def test_recent_batch_checks_newer_scf_even_when_not_imported(tmp_path, monkeypa
             return str(potential)
 
     monkeypatch.setattr(
-        TaskResult, "from_file",
-        staticmethod(lambda path, *, input_cache=None:
+        TaskResult, "_parse_file",
+        staticmethod(lambda path, *, on_files_parsed=None:
                      FakeSCF(None, None, tmp_path, output_file=path, task_name="SCF")),
     )
     cache = ResultImportCache()

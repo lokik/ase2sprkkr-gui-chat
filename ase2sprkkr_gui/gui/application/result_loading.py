@@ -67,17 +67,15 @@ class LoadedResult:
 
 
 class ResultImportCache:
-    """Batch-local, version-checked parsing; distinct results keep their metadata.
+    """Short-lived backend loader and GUI-side file-version checkpoints.
 
-    Embedded structure reconstruction and SCF status interpretation are
-    delegated to the backend ResultLoader. This cache retains only GUI-side
-    version snapshots and reusable imported result metadata.
+    Scientific structures, SCF interpretation and parsed native potentials
+    belong to TaskResult and ResultLoader, not this GUI adapter.
     """
 
     def __init__(self):
         self.loader = ResultLoader()
         self.inputs = self.loader.inputs
-        self.potentials: dict[Path, LoadedResult] = {}
         self._versions: dict[Path, PotentialFileVersion] = {}
 
     def version(
@@ -100,14 +98,6 @@ class ResultImportCache:
         """Use the backend's cached directory/SCF index."""
         return self.loader.scf_claims(directory, potential_path)
 
-    def remember(self, loaded: LoadedResult) -> None:
-        if (
-            loaded.potential_path is not None
-            and loaded.atoms is not None
-            and loaded.parsed_potential_version is not None
-            and not getattr(loaded.result, "potential_dependencies", ())
-        ):
-            self.potentials[loaded.potential_path] = loaded
 
 def disambiguate_scf_potentials(
     loaded: list[tuple[Path, LoadedResult]],
@@ -199,7 +189,6 @@ def load_result_file(
         result,
         fallback_directory=path.parent,
         output_fallback=path,
-        potential_cache=cache.potentials if cache is not None else None,
         import_cache=cache,
     )
     if output_version is not None and not output_version.is_current():
@@ -211,8 +200,6 @@ def load_result_file(
     if getattr(result, "produces_potential", False):
         updated, _ambiguous = disambiguate_scf_potentials([(path, loaded)])
         loaded = updated[0][1]
-    if cache is not None:
-        cache.remember(loaded)
     return loaded
 
 
@@ -224,13 +211,10 @@ def load_result(
     persistent_ref: str | None = None,
     embedding_host=None,
     reusable_potential: LoadedResult | None = None,
-    potential_cache: dict[Path, LoadedResult] | None = None,
     import_cache: ResultImportCache | None = None,
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
     output, potential = _result_files(result, fallback_directory)
-    if reusable_potential is None and potential_cache is not None:
-        reusable_potential = potential_cache.get(potential)
     manifest = result_file_manifest(result)
     if output is None and output_fallback is not None:
         output = Path(output_fallback).resolve()
@@ -333,11 +317,14 @@ def load_result(
     parsed_potential_version = None
     if atoms is not None and pre_read_potential_version is not None:
         try:
-            if (pre_read_potential_version.available
-                    and pre_read_potential_version.is_current()):
+            if not pre_read_potential_version.is_current():
+                atoms, potential_error = None, PotentialVersionChanged(
+                    f"Potential changed while the result was loaded: {pre_read_potential_version.path}"
+                )
+            elif pre_read_potential_version.available:
                 parsed_potential_version = pre_read_potential_version
-        except OSError:
-            pass  # Re-parse when restoring instead of reusing unverified data.
+        except OSError as exc:
+            atoms, potential_error = None, exc
     input_parameters, input_parameters_error = _load_input_parameters(result)
     directory = str(output.parent.resolve()) if output is not None else None
     return LoadedResult(
