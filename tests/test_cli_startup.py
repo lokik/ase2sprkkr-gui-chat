@@ -9,6 +9,7 @@ import pytest
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from ase2sprkkr_gui.gui.flows import files as file_flows
+from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
 from ase2sprkkr_gui.main import GuiApplication
 
 
@@ -46,11 +47,20 @@ def test_startup_target_uses_existing_file_flows(
 
     for kind, method in (
         ("structure", "load_structure"),
-        ("input", "load_input_parameters"),
         ("output", "load_output"),
         ("directory", "load_output_directory"),
     ):
         monkeypatch.setattr(file_flows, method, loader(kind))
+
+    def load_custom_input(_controller, _recent, _parent, target, **kwargs):
+        assert kwargs["project_repository"] is gui.projects
+        assert kwargs["track_launch_monitor"] == gui._track_launch_monitor
+        called.append(("input", target))
+        return True
+
+    # CLI --input now opens the custom-input flow, which launches a modal
+    # editor. Mock that boundary rather than the obsolete file-flow loader.
+    monkeypatch.setattr(custom_flow, "load_custom_input", load_custom_input)
 
     assert gui.open_startup_selection(explicit_kind, str(path))
     assert called == [(expected, path.resolve())]
