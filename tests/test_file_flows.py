@@ -533,8 +533,12 @@ def test_directory_import_keeps_colliding_scf_outputs_without_false_pot_provenan
 
     outputs = (tmp_path / "one.out", tmp_path / "two.out")
     common = tmp_path / "shared.pot_new"
+    import os
+
     for path in outputs:
         path.write_text(path.stem)
+    os.utime(outputs[0], ns=(1_000_000_000, 1_000_000_000))
+    os.utime(outputs[1], ns=(2_000_000_000, 2_000_000_000))
     common.write_text("present-day potential")
     warnings = []
 
@@ -564,10 +568,10 @@ def test_directory_import_keeps_colliding_scf_outputs_without_false_pot_provenan
 
     assert file_flows.load_output_directory(controller, history, tmp_path, None) == outputs
     assert len(controller.result_store.results) == 2
-    assert all(
-        controller.result_store.state_for_result(record) is None
-        for record in controller.result_store.results
-    )
-    assert history.paths("structure") == ()
+    records = controller.result_store.results
+    assert controller.result_store.state_for_result(records[0]) is None
+    assert controller.result_store.state_for_result(records[1]) is not None
+    assert history.paths("structure") == (str(common.resolve()),)
     assert len(warnings) == 1
-    assert "one.out" in warnings[0] and "two.out" in warnings[0]
+    assert "one.out" in warnings[0]
+    assert "two.out" not in warnings[0]

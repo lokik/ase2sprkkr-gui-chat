@@ -323,23 +323,43 @@ def test_companion_scf_rejects_mismatched_native_potential_before_parsing(
     assert parsed == [right]
 
 
-def test_companion_scf_does_not_choose_between_overwritten_outputs(
+def test_companion_scf_selects_latest_output_when_potential_was_overwritten(
     tmp_path, monkeypatch,
 ):
+    import os
+
     potential = tmp_path / "Fe.pot_new"
+    potential.write_text("current potential")
     selected = tmp_path / "Fe_DOS.out"
     selected.write_text("DOS output")
-    for name in ("Fe_SCF.out", "Fe_SCF_old.out"):
-        (tmp_path / name).write_text(
+    older, newer = tmp_path / "Fe_SCF.out", tmp_path / "Fe_SCF_old.out"
+    for path in (older, newer):
+        path.write_text(
             " *       KKRSCF  VERSION  9.7          *\\n"
             "TASK = SCF\\n"
             "pot-file: Fe.pot_new\\n"
         )
+    # The less similarly named output is newer; time takes priority.
+    os.utime(older, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(newer, ns=(2_000_000_000, 2_000_000_000))
+    parsed = []
 
-    def expensive_parse(_path):
-        raise AssertionError("Ambiguous SCF outputs must not be fully parsed")
+    def parse(path):
+        parsed.append(path)
+        result = SimpleNamespace(
+            task_name="scf", directory=str(tmp_path), is_embedded=False,
+            files={"converged": potential.name}, input_parameters=None,
+        )
+        result.path_to = lambda key: result.files[key]
+        return result
 
-    monkeypatch.setattr(
-        result_loading.TaskResult, "from_file", staticmethod(expensive_parse),
-    )
+    monkeypatch.setattr(result_loading.TaskResult, "from_file", staticmethod(parse))
+    companion = load_companion_scf_result(_loaded(selected, potential=potential))
+    assert companion is not None
+    assert companion.output_path == newer.resolve()
+    assert parsed == [newer]
+
+    # When both outputs are equally new, there is no safe choice.
+    os.utime(newer, ns=(1_000_000_000, 1_000_000_000))
     assert load_companion_scf_result(_loaded(selected, potential=potential)) is None
+    assert parsed == [newer]

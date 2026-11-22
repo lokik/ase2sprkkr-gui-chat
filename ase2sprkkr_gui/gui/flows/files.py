@@ -398,9 +398,10 @@ def load_all_recent_outputs(
             messages.append(f"Skipped {len(failures)} file(s):\n{summary}")
         if ambiguous:
             messages.append(
-                "These SCF outputs share an overwritten potential filename. "
-                "The current potential cannot be attributed to either run, "
-                "so they were imported without reusable structures:\n"
+                "Multiple SCF outputs reference the same potential. "
+                "Only the uniquely newest .out (by modification time) "
+                "keeps the potential; older or tied outputs have no reusable "
+                "structure:\n"
                 + "\n".join(ambiguous[:8])
             )
         QMessageBox.warning(parent, "Loading Recent Results", "\n\n".join(messages))
@@ -475,9 +476,10 @@ def load_output_directory(
             messages.append(f"Skipped {len(failures)} file(s):\n{summary}")
         if ambiguous:
             messages.append(
-                "Multiple SCF outputs reference the same overwritten potential. "
-                "These results were retained without attributing the current "
-                "potential to them:\n" + "\n".join(ambiguous[:8])
+                "Multiple SCF outputs reference the same potential. "
+                "Only the uniquely newest .out (by modification time) "
+                "keeps it. Older or tied outputs were imported without "
+                "a reusable structure:\n" + "\n".join(ambiguous[:8])
             )
         QMessageBox.warning(parent, "Output Directory", "\n\n".join(messages))
     elif imported:

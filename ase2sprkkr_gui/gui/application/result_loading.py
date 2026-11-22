@@ -160,14 +160,28 @@ def _embedded_atoms_for_result(result: Any, atoms: Any) -> Any:
     return selected
 
 
+def _newest_unique_output(paths: list[Path]) -> Path | None:
+    """Newest stdout by mtime_ns; ties or missing metadata are not decidable."""
+    if not paths:
+        return None
+    try:
+        times = [(path.stat().st_mtime_ns, path) for path in paths]
+    except OSError:
+        return None
+    maximum = max(mtime for mtime, _ in times)
+    latest = [path for mtime, path in times if mtime == maximum]
+    return latest[0] if len(latest) == 1 else None
+
+
 def disambiguate_scf_potentials(
     loaded: list[tuple[Path, LoadedResult]],
 ) -> tuple[list[tuple[Path, LoadedResult]], tuple[str, ...]]:
-    """Do not associate one current pot_new with multiple historical SCF runs.
+    """Attribute a reused SCF output POTFIL only to the newest SCF stdout.
 
-    A filename cannot tell which SCF produced the bytes now on disk. Preserve
-    each OUT/result, but leave these SCF results without a reusable state.
-    Non-SCF tasks legitimately consuming the same input POTFIL are unaffected.
+    Output modification time is a heuristic, not a native provenance proof.
+    Older outputs remain in history without a usable structure. If the newest
+    cannot be distinguished (identical mtimes), none claims the potential.
+    Ordinary DOS/BSF/ARPES consumers of the same input remain unchanged.
     """
     by_potential: dict[Path, list[int]] = {}
     for index, (_, item) in enumerate(loaded):
@@ -182,8 +196,13 @@ def disambiguate_scf_potentials(
 
     ambiguous = set()
     for indices in by_potential.values():
-        if len({loaded[i][0].resolve() for i in indices}) > 1:
-            ambiguous.update(indices)
+        paths = {loaded[i][0].resolve() for i in indices}
+        if len(paths) <= 1:
+            continue
+        latest = _newest_unique_output(list(paths))
+        ambiguous.update(
+            i for i in indices if latest is None or loaded[i][0].resolve() != latest
+        )
     if not ambiguous:
         return loaded, ()
     updated = list(loaded)
@@ -191,7 +210,7 @@ def disambiguate_scf_potentials(
         path, item = updated[index]
         error = PotentialProvenanceAmbiguous(
             f"Several SCF outputs reference {item.potential_path.name}; "
-            "the current file cannot be attributed to this SCF output."
+            "this stdout is not the uniquely newest SCF output."
         )
         updated[index] = (path, replace(item, atoms=None, potential_error=error))
     return updated, tuple(loaded[i][0].name for i in sorted(ambiguous))
@@ -246,18 +265,21 @@ def load_potential_version(
     return atoms
 
 
-def _other_scf_claims_potential(output_path: Path, potential_path: Path) -> bool:
-    """Fast provenance collision check for standalone (non-batch) SCF imports."""
+def _newest_scf_for_potential(
+    output_path: Path, potential_path: Path,
+) -> Path | None:
+    """Fast standalone comparison: include the selected, already-parsed SCF."""
     try:
-        return any(
-            candidate != output_path
+        candidates = [
+            candidate for candidate in output_path.parent.iterdir()
+            if candidate != output_path
             and candidate.is_file()
             and candidate.suffix.casefold() == ".out"
             and looks_like_scf_output(candidate, potential_filename=potential_path)
-            for candidate in output_path.parent.iterdir()
-        )
+        ]
     except OSError:
-        return False
+        return None
+    return _newest_unique_output([output_path, *candidates])
 
 
 def load_result_file(
@@ -283,16 +305,16 @@ def load_result_file(
         and loaded.atoms is not None
         and loaded.potential_error is None
         and str(getattr(result, "task_name", "")).casefold() == "scf"
-        and _other_scf_claims_potential(path, loaded.potential_path)
+        and _newest_scf_for_potential(path, loaded.potential_path) != path
     ):
-        # A standalone import has no batch to reconcile. Both stdout files
-        # survive, but neither uniquely identifies today's overwritten POTFIL.
+        # The most recent SCF stdout retains the potential association.
+        # Older stdout versions remain importable but no longer own pot_new.
         loaded = replace(
             loaded,
             atoms=None,
             potential_error=PotentialProvenanceAmbiguous(
-                f"Another SCF output refers to {loaded.potential_path.name}; "
-                "the current potential cannot safely be attributed to this run."
+                f"Other SCF outputs also reference {loaded.potential_path.name}; "
+                "only the uniquely newest SCF stdout may own this potential."
             ),
         )
     return loaded
@@ -439,56 +461,26 @@ def load_result(
     )
 
 
-def _scf_candidate_sort_key(
-    path: Path, selected_stem: str, selected_task: str,
-) -> tuple[int, str]:
-    """Prioritize the same dataset's SCF output, without assuming a naming rule."""
-    base = selected_stem.casefold()
-    task = selected_task.casefold()
-    # E.g. Fe_DOS.out -> Fe_SCF.out (also handle Fe_DOS_DOS.out).
-    for separator in ("_", "-", "."):
-        suffix = separator + task
-        while base.endswith(suffix):
-            base = base[:-len(suffix)]
-
-    stem = path.stem.casefold()
-    if any(stem == base + separator + "scf" for separator in ("_", "-", ".")):
-        rank = 0
-    elif stem == base or any(
-        stem.startswith(base + separator) for separator in ("_", "-", ".")
-    ):
-        rank = 1
-    elif "scf" in stem:
-        rank = 2
-    else:
-        rank = 3
-    return rank, stem
-
-
 def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
     """Try to find the SCF output that produced a non-SCF result's potential.
 
-    First try similarly named .out files, then other .out files whose opening
-    banner says KKRSCF. A match also must reference exactly the same potential.
-    Missing, unreadable, or unrelated outputs are never errors for the result.
+    Only .out files with a KKRSCF banner and matching produced potential
+    are candidates. The newest matching SCF output owns a reused pot_new;
+    older outputs must not attach it. If mtimes tie, do not guess.
     """
     if loaded.output_path is None or loaded.potential_path is None:
         return None
-    task_name = str(getattr(loaded.result, "task_name", "")).casefold()
-    if task_name == "scf":
+    if str(getattr(loaded.result, "task_name", "")).casefold() == "scf":
         return None
 
     directory = loaded.output_path.parent
     target_potential = loaded.potential_path.resolve()
     try:
-        candidates = sorted(
-            (path for path in directory.iterdir()
-             if path != loaded.output_path and path.is_file()
-             and path.suffix.casefold() == ".out"),
-            key=lambda path: _scf_candidate_sort_key(
-                path, loaded.output_path.stem, task_name,
-            ),
-        )
+        candidates = [
+            path for path in directory.iterdir()
+            if path != loaded.output_path and path.is_file()
+            and path.suffix.casefold() == ".out"
+        ]
     except OSError:
         return None
 
@@ -496,11 +488,10 @@ def load_companion_scf_result(loaded: LoadedResult) -> LoadedResult | None:
         path for path in candidates
         if looks_like_scf_output(path, potential_filename=target_potential)
     ]
-    if len(matching) > 1:
-        # Two SCF OUT files may remain after a later run overwrote pot_new.
-        # Their output-to-potential relationship is not recoverable by name.
+    newest = _newest_unique_output(matching)
+    if newest is None:
         return None
-    for path in matching:
+    for path in (newest,):
         try:
             result = TaskResult.from_file(path)
             if str(getattr(result, "task_name", "")).casefold() != "scf":

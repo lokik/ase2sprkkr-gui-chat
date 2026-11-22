@@ -703,6 +703,12 @@ def test_duplicate_scf_outputs_do_not_claim_the_same_overwritten_potential(
             directory=str(tmp_path),
         )
 
+    import os
+
+    first.write_text("old SCF")
+    second.write_text("new SCF")
+    os.utime(first, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(second, ns=(2_000_000_000, 2_000_000_000))
     entries = [
         (first, loaded(first, "scf")),
         (second, loaded(second, "scf")),
@@ -710,22 +716,28 @@ def test_duplicate_scf_outputs_do_not_claim_the_same_overwritten_potential(
     ]
     resolved, ambiguous = disambiguate_scf_potentials(entries)
 
-    assert ambiguous == ("first.out", "second.out")
-    assert all(resolved[i][1].atoms is None for i in (0, 1))
-    assert all(
-        isinstance(resolved[i][1].potential_error, PotentialProvenanceAmbiguous)
-        for i in (0, 1)
-    )
+    assert ambiguous == ("first.out",)
+    assert resolved[0][1].atoms is None
+    assert isinstance(resolved[0][1].potential_error, PotentialProvenanceAmbiguous)
+    assert resolved[1][1].atoms is entries[1][1].atoms
+    assert resolved[1][1].potential_error is None
     assert resolved[2][1].atoms is entries[2][1].atoms
     assert resolved[2][1].potential_error is None
     assert entries[0][1].atoms is not None  # immutable LoadedResult inputs
 
+    # Equal timestamps do not identify a uniquely newest producer.
+    os.utime(second, ns=(1_000_000_000, 1_000_000_000))
+    tied, ambiguous = disambiguate_scf_potentials(entries)
+    assert ambiguous == ("first.out", "second.out")
+    assert all(tied[i][1].atoms is None for i in (0, 1))
 
 
 
-def test_standalone_scf_import_rejects_ambiguous_overwritten_potential(
+
+def test_standalone_scf_import_assigns_current_potential_to_newest_output(
     tmp_path, monkeypatch,
 ):
+    import os
     from ase2sprkkr_gui.gui.application.result_loading import (
         PotentialProvenanceAmbiguous,
     )
@@ -740,6 +752,8 @@ def test_standalone_scf_import_rejects_ambiguous_overwritten_potential(
     )
     first.write_text(scf_head)
     second.write_text(scf_head)
+    os.utime(first, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(second, ns=(2_000_000_000, 2_000_000_000))
 
     def parsed(path):
         return SimpleNamespace(
@@ -755,8 +769,10 @@ def test_standalone_scf_import_rejects_ambiguous_overwritten_potential(
         result_loading_module, "_load_potential",
         lambda *args, **kwargs: (Atoms("Fe"), None),
     )
-    loaded = load_result_file(first)
-
-    assert loaded.output_path == first.resolve()
-    assert loaded.atoms is None
-    assert isinstance(loaded.potential_error, PotentialProvenanceAmbiguous)
+    older = load_result_file(first)
+    newest = load_result_file(second)
+    assert older.output_path == first.resolve()
+    assert older.atoms is None
+    assert isinstance(older.potential_error, PotentialProvenanceAmbiguous)
+    assert newest.atoms is not None
+    assert newest.potential_error is None
