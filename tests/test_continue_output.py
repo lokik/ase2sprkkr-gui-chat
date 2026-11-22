@@ -47,7 +47,7 @@ def test_continue_output_activates_state_and_reuses_same_result(tmp_path, monkey
     output = tmp_path / "SCF.out"
     output.write_text("first calculation", encoding="utf-8")
     loaded = _loaded_scf(output)
-    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path, **_kwargs: loaded)
 
     controller = WorkspaceController()
     recent = RecentFiles(tmp_path / "recent.json")
@@ -74,7 +74,7 @@ def test_restart_after_continue_resets_effective_scf_status(tmp_path, monkeypatc
     output = tmp_path / "SCF.out"
     output.write_text("calculation", encoding="utf-8")
     loaded = _loaded_scf(output)
-    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path, **_kwargs: loaded)
 
     controller = WorkspaceController()
     recent = RecentFiles(tmp_path / "recent.json")
@@ -95,7 +95,7 @@ def test_workflow_keeps_semantic_scf_action_after_continue_and_restart(
     output = tmp_path / "SCF.out"
     output.write_text("calculation", encoding="utf-8")
     loaded = _loaded_scf(output)
-    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path, **_kwargs: loaded)
 
     gui = GuiApplication(
         recent_files_path=tmp_path / "recent.json",
@@ -149,7 +149,7 @@ def test_continue_output_reports_potential_error_once(tmp_path, monkeypatch):
         directory=str(tmp_path),
         input_parameters=None,
     )
-    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path, **_kwargs: loaded)
     warnings = []
     monkeypatch.setattr(
         file_flows.QMessageBox,
@@ -188,7 +188,7 @@ def test_continue_output_without_reconstructable_structure_reports_one_warning(
         directory=str(tmp_path),
         input_parameters=None,
     )
-    monkeypatch.setattr(file_flows, "load_result_file", lambda _path: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda _path, **_kwargs: loaded)
     warnings = []
     monkeypatch.setattr(
         file_flows.QMessageBox,
@@ -214,7 +214,7 @@ def test_continue_finishes_state_and_recent_history_under_working(tmp_path, monk
     recent = RecentFiles(tmp_path / "recent.json")
     events = []
 
-    def read(path):
+    def read(path, **_kwargs):
         assert path == output
         assert QThread.currentThread() is not app.thread()
         events.append("read")
