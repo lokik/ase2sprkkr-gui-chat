@@ -528,7 +528,8 @@ def test_reopening_unchanged_result_reuses_parsed_output(tmp_path, monkeypatch):
 def test_directory_import_keeps_colliding_scf_outputs_without_false_pot_provenance(
     tmp_path, monkeypatch,
 ):
-    from types import SimpleNamespace
+    from ase2sprkkr.outputs import FileAssociation
+    from ase2sprkkr.outputs.task_result import TaskResult
     from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
 
     outputs = (tmp_path / "one.out", tmp_path / "two.out")
@@ -543,10 +544,18 @@ def test_directory_import_keeps_colliding_scf_outputs_without_false_pot_provenan
     warnings = []
 
     def load(path, *, cache=None):
+        result = TaskResult(None, None, tmp_path, output_file=path, task_name="SCF")
+        result.produces_potential = True
+        result.files.add_file("converged", common)
+        result.files["converged"].set_association(
+            FileAssociation.NOT_THIS_RESULT if path == outputs[0]
+            else FileAssociation.LIKELY,
+            evidence="newer_scf_stdout" if path == outputs[0]
+            else "newest_scf_stdout",
+            associated_with=outputs[1] if path == outputs[0] else None,
+        )
         return LoadedResult(
-            result=SimpleNamespace(
-                task_name="scf", produces_potential=True, output_values={},
-            ),
+            result=result,
             output_path=path,
             potential_path=common,
             atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True),

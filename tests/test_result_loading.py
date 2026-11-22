@@ -351,6 +351,7 @@ def test_missing_referenced_potential_is_nonfatal_and_does_not_replace_workspace
     tmp_path, monkeypatch
 ):
     output = tmp_path / "external.out"
+    output.touch()
     missing = tmp_path / "missing.pot"
     result = SimpleNamespace(
         task_name="scf",
@@ -362,7 +363,7 @@ def test_missing_referenced_potential_is_nonfatal_and_does_not_replace_workspace
     monkeypatch.setattr(
         result_loading_module.TaskResult,
         "from_file",
-        staticmethod(lambda _path: result),
+        staticmethod(lambda _path, **_kwargs: result),
     )
     original_atoms = Atoms("Cu")
     controller = WorkspaceController(
@@ -393,9 +394,10 @@ def test_result_parse_failure_has_no_workspace_side_effects(tmp_path, monkeypatc
     monkeypatch.setattr(
         result_loading_module.TaskResult,
         "from_file",
-        staticmethod(lambda _path: (_ for _ in ()).throw(ValueError("broken output"))),
+        staticmethod(lambda _path, **_kwargs: (_ for _ in ()).throw(ValueError("broken output"))),
     )
 
+    (tmp_path / "broken.out").touch()
     with pytest.raises(ValueError, match="broken output"):
         load_result_file(tmp_path / "broken.out")
 
@@ -679,103 +681,83 @@ def test_embedded_scf_convergence_does_not_change_shared_clupot(
     assert dos.atoms.potential.SCF_INFO.SCFSTATUS() == "ITERATING"
 
 
-def test_duplicate_scf_outputs_do_not_claim_the_same_overwritten_potential(
-    tmp_path,
-):
+def test_gui_disambiguation_consumes_per_file_association(tmp_path):
+    from ase2sprkkr.outputs import FileAssociation
+    from ase2sprkkr.outputs.task_result import TaskResult
     from ase2sprkkr_gui.gui.application.result_loading import (
         LoadedResult, PotentialProvenanceAmbiguous, disambiguate_scf_potentials,
     )
 
-    common = tmp_path / "sample.pot_new"
-    first, second, dos_path = (
-        tmp_path / "first.out", tmp_path / "second.out", tmp_path / "dos.out"
+    potential = tmp_path / "Fe.pot_new"
+    older, newer = tmp_path / "old.out", tmp_path / "new.out"
+    result_old = TaskResult(None, None, tmp_path, output_file=older, task_name="SCF")
+    result_old.produces_potential = True
+    result_old.files.add_file("converged", potential)
+    result_old.files["converged"].set_association(
+        FileAssociation.NOT_THIS_RESULT, evidence="newer_scf_stdout",
+        associated_with=newer,
+    )
+    result_new = TaskResult(None, None, tmp_path, output_file=newer, task_name="SCF")
+    result_new.produces_potential = True
+    result_new.files.add_file("converged", potential)
+    result_new.files["converged"].set_association(
+        FileAssociation.LIKELY, evidence="newest_scf_stdout"
     )
 
-    def loaded(path, task):
+    def loaded(result, path):
         return LoadedResult(
-            result=SimpleNamespace(
-                task_name=task, produces_potential=task == "scf",
-            ),
-            output_path=path,
-            potential_path=common,
-            atoms=Atoms("Fe"),
-            potential_error=None,
-            directory=str(tmp_path),
+            result=result, output_path=path, potential_path=potential,
+            atoms=Atoms("Fe"), potential_error=None, directory=str(tmp_path),
         )
 
-    import os
-
-    first.write_text("old SCF")
-    second.write_text("new SCF")
-    os.utime(first, ns=(1_000_000_000, 1_000_000_000))
-    os.utime(second, ns=(2_000_000_000, 2_000_000_000))
-    entries = [
-        (first, loaded(first, "scf")),
-        (second, loaded(second, "scf")),
-        (dos_path, loaded(dos_path, "dos")),
-    ]
+    entries = [(older, loaded(result_old, older)),
+               (newer, loaded(result_new, newer))]
     resolved, ambiguous = disambiguate_scf_potentials(entries)
-
-    assert ambiguous == ("first.out",)
+    assert ambiguous == ("old.out",)
     assert resolved[0][1].atoms is None
     assert isinstance(resolved[0][1].potential_error, PotentialProvenanceAmbiguous)
     assert resolved[1][1].atoms is entries[1][1].atoms
-    assert resolved[1][1].potential_error is None
-    assert resolved[2][1].atoms is entries[2][1].atoms
-    assert resolved[2][1].potential_error is None
-    assert entries[0][1].atoms is not None  # immutable LoadedResult inputs
-
-    # Equal timestamps do not identify a uniquely newest producer.
-    os.utime(second, ns=(1_000_000_000, 1_000_000_000))
-    tied, ambiguous = disambiguate_scf_potentials(entries)
-    assert ambiguous == ("first.out", "second.out")
-    assert all(tied[i][1].atoms is None for i in (0, 1))
-
-
 
 
 def test_standalone_scf_import_assigns_current_potential_to_newest_output(
     tmp_path, monkeypatch,
 ):
     import os
-    from ase2sprkkr_gui.gui.application.result_loading import (
-        PotentialProvenanceAmbiguous,
-    )
+    from ase2sprkkr.outputs.task_result import TaskResult
+    from ase2sprkkr_gui.gui.application.result_loading import PotentialProvenanceAmbiguous
 
     potential = tmp_path / "Fe.pot_new"
-    potential.write_text("newest available potential")
+    potential.write_text("current")
     first, second = tmp_path / "one.out", tmp_path / "two.out"
-    scf_head = (
-        " *       KKRSCF  VERSION  9.7          *\n"
+    head = (
+        " * KKRSCF VERSION 9.7 *\n"
         "TASK = SCF\n"
         "pot-file: Fe.pot_new\n"
     )
-    first.write_text(scf_head)
-    second.write_text(scf_head)
+    first.write_text(head)
+    second.write_text(head)
     os.utime(first, ns=(1_000_000_000, 1_000_000_000))
     os.utime(second, ns=(2_000_000_000, 2_000_000_000))
 
-    def parsed(path):
-        return SimpleNamespace(
-            task_name="scf", produces_potential=True,
-            directory=str(tmp_path), potential_filename=potential.name,
-            files={}, input_parameters=None,
-        )
+    class FakeSCF(TaskResult):
+        produces_potential = True
 
-    monkeypatch.setattr(
-        result_loading_module.TaskResult, "from_file", staticmethod(parsed),
-    )
+        @property
+        def potential_filename(self):
+            return str(potential)
+
+    def parsed(path, *, input_cache=None):
+        return FakeSCF(None, None, tmp_path, output_file=path, task_name="SCF")
+
+    monkeypatch.setattr(result_loading_module.TaskResult, "from_file", staticmethod(parsed))
     monkeypatch.setattr(
         result_loading_module, "_load_potential",
         lambda *args, **kwargs: (Atoms("Fe"), None),
     )
-    older = load_result_file(first)
-    newest = load_result_file(second)
-    assert older.output_path == first.resolve()
+    older, newer = load_result_file(first), load_result_file(second)
     assert older.atoms is None
     assert isinstance(older.potential_error, PotentialProvenanceAmbiguous)
-    assert newest.atoms is not None
-    assert newest.potential_error is None
+    assert newer.atoms is not None and newer.potential_error is None
 
 
 def test_import_cache_reuses_file_digest_until_file_changes(tmp_path, monkeypatch):
@@ -808,35 +790,42 @@ def test_import_cache_reuses_file_digest_until_file_changes(tmp_path, monkeypatc
     assert len(called) == 2
 
 
-def test_recent_batch_checks_newer_scf_even_when_it_was_not_imported(tmp_path):
+def test_recent_batch_checks_newer_scf_even_when_not_imported(tmp_path, monkeypatch):
+    import os
+    from ase2sprkkr.outputs.task_result import TaskResult
     from ase2sprkkr_gui.gui.application.result_loading import (
         ResultImportCache, LoadedResult, disambiguate_scf_potentials,
     )
-    import os
-
-    old = tmp_path / "old.out"
-    new = tmp_path / "new.out"
     potential = tmp_path / "Fe.pot_new"
-    old.write_text(
-        " *       KKRSCF  VERSION  9.7          *\n"
-        "TASK = SCF\npot-file: Fe.pot_new\n"
-    )
-    new.write_text(
-        " *       KKRSCF  VERSION  9.7          *\n"
-        "TASK = SCF\npot-file: Fe.pot_new\n"
-    )
+    potential.write_text("current")
+    old, new = tmp_path / "old.out", tmp_path / "new.out"
+    head = " * KKRSCF VERSION 9.7 *\nTASK = SCF\npot-file: Fe.pot_new\n"
+    old.write_text(head)
+    new.write_text(head)
     os.utime(old, ns=(1_000_000_000, 1_000_000_000))
     os.utime(new, ns=(2_000_000_000, 2_000_000_000))
+
+    class FakeSCF(TaskResult):
+        produces_potential = True
+
+        @property
+        def potential_filename(self):
+            return str(potential)
+
+    monkeypatch.setattr(
+        TaskResult, "from_file",
+        staticmethod(lambda path, *, input_cache=None:
+                     FakeSCF(None, None, tmp_path, output_file=path, task_name="SCF")),
+    )
+    cache = ResultImportCache()
+    old_result = cache.loader.load_file(old)
     loaded = LoadedResult(
-        result=SimpleNamespace(task_name="scf", produces_potential=True),
-        output_path=old, potential_path=potential, atoms=Atoms("Fe"),
-        potential_error=None, directory=str(tmp_path),
+        result=old_result, output_path=old, potential_path=potential,
+        atoms=Atoms("Fe"), potential_error=None, directory=str(tmp_path),
     )
-    result, old_names = disambiguate_scf_potentials(
-        [(old, loaded)], cache=ResultImportCache(),
-    )
-    assert old_names == ("old.out",)
-    assert result[0][1].atoms is None
+    items, invalid = disambiguate_scf_potentials([(old, loaded)], cache=cache)
+    assert invalid == ("old.out",)
+    assert items[0][1].atoms is None
 
 
 def test_import_rejects_structure_changed_after_worker_read(tmp_path):

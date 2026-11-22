@@ -332,6 +332,22 @@ def choose_and_load_output(
     return bool(file_path and load_output(controller, recent_files, file_path, parent))
 
 
+def _read_output_batch(
+    paths: tuple[Path, ...] | list[Path], *, cache: ResultImportCache | None = None,
+):
+    """One parse/cache/SCF-association pipeline for recent and directory imports."""
+    if cache is None:
+        cache = ResultImportCache()
+    loaded, failures = [], []
+    for path in paths:
+        try:
+            loaded.append((path, load_result_file(path, cache=cache)))
+        except Exception as exc:  # independent outputs need not block the batch
+            failures.append((path.name, str(exc)))
+    loaded, ambiguous = disambiguate_scf_potentials(loaded, cache=cache)
+    return loaded, failures, ambiguous
+
+
 def load_all_recent_outputs(
     controller: WorkspaceController,
     recent_files: RecentFiles,
@@ -347,15 +363,7 @@ def load_all_recent_outputs(
         return ()
 
     def read_all():
-        loaded, failures = [], []
-        cache = ResultImportCache()
-        for path in paths:
-            try:
-                loaded.append((path, load_result_file(path, cache=cache)))
-            except Exception as exc:  # noqa: BLE001 - unrelated/stale files must not interrupt the batch
-                failures.append((path.name, str(exc)))
-        loaded, ambiguous = disambiguate_scf_potentials(loaded, cache=cache)
-        return loaded, failures, ambiguous
+        return _read_output_batch(paths)
 
     def publish(read_results):
         loaded, failures, ambiguous = read_results
@@ -418,11 +426,10 @@ def load_output_directory(
     folder = Path(directory).expanduser().resolve()
     if not folder.is_dir():
         raise NotADirectoryError(folder)
-    candidates = sorted(
-        (p for p in folder.iterdir()
-         if p.is_file() and p.suffix.lower() == ".out"),
-        key=lambda p: p.name.casefold(),
-    )
+    # Use the backend's directory index for both discovery and parsing.
+    # The cache is handed to the worker only after this GUI-side selection.
+    cache = ResultImportCache()
+    candidates = cache.loader.find_outputs(folder)
     if not candidates:
         QMessageBox.information(
             parent, "No Output Files", f"No output files found in:\n{folder}"
@@ -430,15 +437,7 @@ def load_output_directory(
         return ()
 
     def read_all():
-        loaded, failures = [], []
-        cache = ResultImportCache()
-        for path in candidates:
-            try:
-                loaded.append((path, load_result_file(path, cache=cache)))
-            except Exception as exc:  # noqa: BLE001 - unrelated logs may exist
-                failures.append((path.name, str(exc)))
-        loaded, ambiguous = disambiguate_scf_potentials(loaded, cache=cache)
-        return loaded, failures, ambiguous
+        return _read_output_batch(candidates, cache=cache)
 
     def publish(read_results):
         loaded, failures, ambiguous = read_results
