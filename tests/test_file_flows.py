@@ -383,7 +383,7 @@ def test_load_output_registers_reusable_potential_without_activating_it(
         directory=str(tmp_path),
         input_parameters=None,
     )
-    monkeypatch.setattr(file_flows, "load_result_file", lambda *_args: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda *_args, **_kwargs: loaded)
 
     original_atoms = Atoms("Cu", cell=(3, 3, 3), pbc=True)
     controller = WorkspaceController(WorkspaceState(atoms=original_atoms))
@@ -418,7 +418,7 @@ def test_load_output_does_not_remember_unreadable_potential(tmp_path, monkeypatc
         directory=str(tmp_path),
         input_parameters=None,
     )
-    monkeypatch.setattr(file_flows, "load_result_file", lambda *_args: loaded)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda *_args, **_kwargs: loaded)
     warnings = []
     monkeypatch.setattr(
         file_flows.QMessageBox, "warning",
@@ -504,7 +504,7 @@ def test_reopening_unchanged_result_reuses_parsed_output(tmp_path, monkeypatch):
     reads = []
     monkeypatch.setattr(
         file_flows, "load_result_file",
-        lambda path: reads.append(path) or loaded,
+        lambda path, **_kwargs: reads.append(path) or loaded,
     )
     controller = WorkspaceController()
     history = RecentFiles(tmp_path / "recent.json")

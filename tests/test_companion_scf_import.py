@@ -34,9 +34,9 @@ def test_loading_dos_also_imports_scf_but_selects_dos(tmp_path, monkeypatch):
     potential = tmp_path / "Fe.pot_new"
     dos = _loaded(dos_path, potential=potential)
     scf = _loaded(scf_path, task="scf", potential=potential)
-    monkeypatch.setattr(file_flows, "load_result_file", lambda *_: dos)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda *_args, **_kwargs: dos)
     monkeypatch.setattr(
-        file_flows, "load_companion_scf_result", lambda _loaded: scf
+        file_flows, "load_companion_scf_result", lambda _loaded, **_kwargs: scf
     )
     controller = WorkspaceController()
     selected = []
@@ -54,10 +54,10 @@ def test_companion_failure_does_not_prevent_primary_output(tmp_path, monkeypatch
     dos_path = tmp_path / "Fe_DOS.out"
     dos_path.write_text("dos")
     monkeypatch.setattr(
-        file_flows, "load_result_file", lambda *_: _loaded(dos_path)
+        file_flows, "load_result_file", lambda *_args, **_kwargs: _loaded(dos_path)
     )
 
-    def fail(_loaded):
+    def fail(_loaded, **_kwargs):
         raise OSError("missing or broken SCF output")
 
     monkeypatch.setattr(file_flows, "load_companion_scf_result", fail)
@@ -84,12 +84,12 @@ def test_result_working_dialog_covers_companion_search_and_publication(
     scf = _loaded(scf_path, task="scf", potential=potential)
     events = []
 
-    def read(_path):
+    def read(_path, *, cache=None):
         assert QThread.currentThread() is not app.thread()
         events.append("read")
         return dos
 
-    def companion(loaded):
+    def companion(loaded, *, cache=None):
         assert QThread.currentThread() is not app.thread()
         assert loaded is dos
         events.append("companion")
@@ -148,14 +148,23 @@ def test_companion_loading_delegates_to_backend_without_rereading_potential(
         return scf
 
     monkeypatch.setattr(result_loading.ResultLoader, "companion_scf", companion)
+    cache = result_loading.ResultImportCache()
+    parses = []
+
+    def raw_potential(_cls, path, *, atoms, check_file_unchanged, host=None):
+        parses.append(path)
+        assert atoms is False and check_file_unchanged
+        return SimpleNamespace(atoms=selected.atoms)
+
     monkeypatch.setattr(
-        result_loading, "_load_potential",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("Already loaded potential must be reused")
-        ),
+        result_loading.Potential, "from_file", classmethod(raw_potential)
     )
-    companion_loaded = load_companion_scf_result(selected)
+    # An earlier result loaded this same POTFIL into the batch cache.
+    assert cache.loader.potential(potential).atoms is atoms
+
+    companion_loaded = load_companion_scf_result(selected, cache=cache)
     assert companion_loaded is not None
     assert companion_loaded.output_path == scf_path.resolve()
     assert companion_loaded.atoms is atoms
+    assert len(parses) == 1
     assert seen == [selected.result]

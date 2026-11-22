@@ -10,8 +10,6 @@ from ase2sprkkr.outputs import FileAssociation, ResultLoader
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
-from ase2sprkkr_gui.ase.copy import copy_for_edit
-
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 
 
@@ -69,18 +67,15 @@ class LoadedResult:
 
 
 class ResultImportCache:
-    """Batch-local, version-checked parsing; distinct results keep their metadata.
+    """Short-lived backend loader and GUI-side file-version checkpoints.
 
-    CLUPOT and its host are parsed without constructing Atoms. Their joint
-    structure is reconstructed on first use, then reused until either file
-    changes. The native SCF convergence correction is never written into the
-    shared object.
+    Scientific structures, SCF interpretation and parsed native potentials
+    belong to TaskResult and ResultLoader, not this GUI adapter.
     """
 
     def __init__(self):
         self.loader = ResultLoader()
         self.inputs = self.loader.inputs
-        self.potentials: dict[Path, LoadedResult] = {}
         self._versions: dict[Path, PotentialFileVersion] = {}
 
     def version(
@@ -102,54 +97,6 @@ class ResultImportCache:
     def scf_claims(self, directory: Path, potential_path: Path) -> tuple[Path, ...]:
         """Use the backend's cached directory/SCF index."""
         return self.loader.scf_claims(directory, potential_path)
-
-    def remember(self, loaded: LoadedResult) -> None:
-        if (
-            loaded.potential_path is not None
-            and loaded.atoms is not None
-            and loaded.parsed_potential_version is not None
-            and not getattr(loaded.result, "is_embedded", False)
-        ):
-            self.potentials[loaded.potential_path] = loaded
-
-    def embedded_atoms(
-        self,
-        cluster_path: Path,
-        host_path: Path,
-        cluster_version: PotentialFileVersion,
-        host_version: PotentialFileVersion,
-    ) -> Any:
-        """Reuse backend-parsed CLUPOT/host, without changing cached SCF state."""
-        require_potential_version_current(cluster_version)
-        require_potential_version_current(host_version)
-        atoms = self.loader.potential(cluster_path, host=host_path).atoms
-        if atoms is None:
-            raise ValueError(f"Cluster potential contains no structure: {cluster_path}")
-        require_potential_version_current(cluster_version)
-        require_potential_version_current(host_version)
-        return atoms
-
-
-def _embedded_atoms_for_result(result: Any, atoms: Any) -> Any:
-    """Keep output-derived convergence separate from cached CLUPOT file data."""
-    if str(getattr(result, "task_name", "")).casefold() != "scf":
-        return atoms
-    if getattr(result, "return_code", 0) != 0:
-        return atoms
-    try:
-        if not getattr(result, "iterations", None) or not result.converged:
-            return atoms
-        status = atoms.potential.SCF_INFO.SCFSTATUS()
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return atoms
-    if str(status).strip().upper() != "ITERATING":
-        return atoms
-    # A shallow structural copy clones the attached potential's option
-    # containers while sharing unchanged, potentially large radial arrays.
-    selected = copy_for_edit(atoms)
-    selected.potential.SCF_INFO.SCFSTATUS = "CONVERGED"
-    selected.info["sprkkr_embedding_scf_status"] = "CONVERGED"
-    return selected
 
 
 def disambiguate_scf_potentials(
@@ -242,7 +189,6 @@ def load_result_file(
         result,
         fallback_directory=path.parent,
         output_fallback=path,
-        potential_cache=cache.potentials if cache is not None else None,
         import_cache=cache,
     )
     if output_version is not None and not output_version.is_current():
@@ -254,8 +200,6 @@ def load_result_file(
     if getattr(result, "produces_potential", False):
         updated, _ambiguous = disambiguate_scf_potentials([(path, loaded)])
         loaded = updated[0][1]
-    if cache is not None:
-        cache.remember(loaded)
     return loaded
 
 
@@ -267,13 +211,10 @@ def load_result(
     persistent_ref: str | None = None,
     embedding_host=None,
     reusable_potential: LoadedResult | None = None,
-    potential_cache: dict[Path, LoadedResult] | None = None,
     import_cache: ResultImportCache | None = None,
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
     output, potential = _result_files(result, fallback_directory)
-    if reusable_potential is None and potential_cache is not None:
-        reusable_potential = potential_cache.get(potential)
     manifest = result_file_manifest(result)
     if output is None and output_fallback is not None:
         output = Path(output_fallback).resolve()
@@ -291,33 +232,32 @@ def load_result(
         except OSError:
             pass  # A missing/unreadable POTFIL is reported by the normal loader.
 
-    # Native embedded output identifies its host through CONTROL.POTFIL.
-    # Capture that file before parsing the CLUPOT, then verify the very same
-    # version afterwards. Do not guess a host from neighboring filenames.
-    host_version = None
-    host_version_error = None
-    if potential is not None and getattr(result, "is_embedded", False):
-        try:
-            host_path = result.host_potential_filename
-        except (AttributeError, KeyError, ValueError):
-            pass  # Without native input settings, host provenance is unknown.
-        else:
-            host_path = _resolve_path(host_path, result, fallback_directory)
+    # TaskResult declares any additional source potentials needed to
+    # reconstruct its structure. Only the backend knows whether these are
+    # periodic hosts, embedded cluster sources, or another native dependency.
+    dependency_versions = []
+    dependency_error = None
+    if potential is not None:
+        for source in getattr(result, "potential_dependencies", ()):
+            source_path = _resolve_path(source, result, fallback_directory)
             if manifest is not None:
-                # A historical manifest is authoritative; never attribute
-                # today's host bytes to a previous run.
-                host_version = manifest.input_version(host_path)
+                # Historical evidence must never be replaced by a fresh
+                # filesystem snapshot.
+                version = manifest.input_version(source_path)
             else:
                 try:
-                    host_version = (
-                        import_cache.version(host_path, require_digest=True)
+                    version = (
+                        import_cache.version(source_path, require_digest=True)
                         if import_cache is not None
                         else PotentialFileVersion.capture(
-                            host_path, require_digest=True,
+                            source_path, require_digest=True,
                         )
                     )
                 except OSError as exc:
-                    host_version_error = exc
+                    dependency_error = exc
+                    break
+            if version is not None:
+                dependency_versions.append(version)
 
     try:
         if potential is not None and callable(getattr(result, "require_current_file", None)):
@@ -325,40 +265,35 @@ def load_result(
     except OSError as exc:
         atoms, potential_error = None, exc
     else:
-        if getattr(result, "is_embedded", False) and potential is not None:
+        if potential is None:
+            atoms, potential_error = None, None
+        elif isinstance(result, TaskResult):
+            # A native result owns its scientific structure and SCF status.
+            # ResultLoader is optional and changes only parsing efficiency.
             try:
-                if (
-                    import_cache is not None
-                    and pre_read_potential_version is not None
-                    and host_version is not None
-                    and host_version.available
-                ):
-                    # Bulk import parses the native CLUPOT without Atoms or an
-                    # SCF-dependent status. Reuse its host and geometry.
-                    host_path = Path(host_version.path).resolve()
-                    atoms = import_cache.embedded_atoms(
-                        potential, host_path, pre_read_potential_version,
-                        host_version,
-                    )
-                    atoms = _embedded_atoms_for_result(result, atoms)
-                else:
-                    # Keep regular, standalone loading and historical manifest
-                    # semantics intact when a safe cache key is unavailable.
-                    atoms = result.potential.atoms
+                atoms = result.get_atoms(
+                    loader=import_cache.loader if import_cache is not None else None
+                )
+                if atoms is None:
+                    raise ValueError(f"Potential contains no structure: {potential}")
                 potential_error = None
             except Exception as exc:  # noqa: BLE001 - corrupted native file
                 atoms, potential_error = None, exc
+        elif getattr(result, "potential", None) is not None:
+            # Lightweight non-native results used by GUI operations/tests.
+            try:
+                atoms = result.potential.atoms
+                potential_error = None
+            except Exception as exc:  # noqa: BLE001 - invalid external data
+                atoms, potential_error = None, exc
         elif (
             reusable_potential is not None
-            and not getattr(result, "is_embedded", False)
             and reusable_potential.potential_path == potential
             and reusable_potential.atoms is not None
             and reusable_potential.potential_error is None
             and reusable_potential.parsed_potential_version is not None
             and reusable_potential.parsed_potential_version == pre_read_potential_version
         ):
-            # The selected output has already parsed exactly this POTFIL.
-            # Preserve the per-result manifest checks above and below.
             atoms, potential_error = reusable_potential.atoms, None
         else:
             atoms, potential_error = _load_potential(
@@ -369,23 +304,27 @@ def load_result(
                 result.require_current_file(potential)
             except OSError as exc:
                 atoms, potential_error = None, exc
-    if atoms is not None and host_version_error is not None:
-        atoms, potential_error = None, host_version_error
-    if atoms is not None and host_version is not None and not host_version.is_current():
-        atoms, potential_error = None, PotentialVersionChanged(
-            f"Host potential changed while the embedded result was loaded: {host_version.path}"
-        )
-    source_versions = (
-        (host_version,) if atoms is not None and host_version is not None else ()
-    )
+    if atoms is not None and dependency_error is not None:
+        atoms, potential_error = None, dependency_error
+    if atoms is not None:
+        for version in dependency_versions:
+            if not version.is_current():
+                atoms, potential_error = None, PotentialVersionChanged(
+                    f"Source potential changed while the result was loaded: {version.path}"
+                )
+                break
+    source_versions = tuple(dependency_versions) if atoms is not None else ()
     parsed_potential_version = None
     if atoms is not None and pre_read_potential_version is not None:
         try:
-            if (pre_read_potential_version.available
-                    and pre_read_potential_version.is_current()):
+            if not pre_read_potential_version.is_current():
+                atoms, potential_error = None, PotentialVersionChanged(
+                    f"Potential changed while the result was loaded: {pre_read_potential_version.path}"
+                )
+            elif pre_read_potential_version.available:
                 parsed_potential_version = pre_read_potential_version
-        except OSError:
-            pass  # Re-parse when restoring instead of reusing unverified data.
+        except OSError as exc:
+            atoms, potential_error = None, exc
     input_parameters, input_parameters_error = _load_input_parameters(result)
     directory = str(output.parent.resolve()) if output is not None else None
     return LoadedResult(
@@ -458,51 +397,17 @@ def _result_files(
     result: Any,
     fallback_directory: str | Path | None,
 ) -> tuple[Path | None, Path | None]:
+    """Resolve paths supplied by the result without reinterpreting its task."""
     output = _registered_path(result, "output")
     if output is None:
         output = getattr(result, "output_file", None)
     output = _resolve_path(output, result, fallback_directory)
 
-    # For embedded tasks (including DOS), the potential that defines the
-    # calculation structure is POTFIL_CLU, not the periodic host POTFIL. The
-    # latter may be registered as FILES["potential"], but restoring it as a
-    # result state would silently turn the cluster into a bulk structure.
-    embedded = getattr(result, "is_embedded", False)
-    potential = None
-    if embedded:
-        try:
-            potential = getattr(result, "potential_filename", None)
-        except (AttributeError, KeyError, ValueError):
-            pass
-        if potential is None:
-            potential = _registered_path(result, "converged")
-        # Never fall back to the host's FILES["potential"] for an embedded
-        # result: without CLUPOT the result has no reusable cluster state.
-    else:
-        potential = _registered_path(result, "converged")
-        if potential is None:
-            # The FILES entry named "potential" is the *input* POTFIL for SCF.
-            # ScfResult.potential_filename, in contrast, points to the newly
-            # produced POTFIL (_new). Never adopt the input as SCF output.
-            try:
-                is_scf = str(getattr(result, "task_name", "")).casefold() == "scf"
-            except (AttributeError, KeyError, ValueError):
-                is_scf = False
-            if is_scf:
-                try:
-                    potential = getattr(result, "potential_filename", None)
-                except (AttributeError, KeyError, ValueError):
-                    potential = None
-        if potential is None:
-            potential = _registered_path(result, "potential")
-        if potential is None:
-            try:
-                potential = getattr(result, "potential_filename", None)
-            except (AttributeError, KeyError, ValueError):
-                potential = None
-    potential = _resolve_path(potential, result, fallback_directory)
-    return output, potential
-
+    try:
+        potential = result.potential_filename
+    except (AttributeError, KeyError, ValueError):
+        potential = None
+    return output, _resolve_path(potential, result, fallback_directory)
 
 def _load_potential(
     potential: Path | None,
