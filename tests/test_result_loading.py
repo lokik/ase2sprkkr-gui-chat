@@ -649,29 +649,37 @@ def test_batch_embedded_cache_parses_host_and_clupot_once_without_atoms(
 def test_embedded_scf_convergence_does_not_change_shared_clupot(
     tmp_path, native_embedded_potentials,
 ):
+    from shutil import copyfile
+    from pathlib import Path
+
     from ase2sprkkr import InputParameters
     from ase2sprkkr.outputs.readers.dos import DosResult
+    from ase2sprkkr.outputs.readers.scf import ScfResult
     from ase2sprkkr_gui.gui.application.result_loading import ResultImportCache
+    import ase2sprkkr
 
     host, cluster = native_embedded_potentials
+    produced = tmp_path / (cluster.name + "_new")
+    examples = Path(ase2sprkkr.__file__).parent / "potentials" / "examples"
+    copyfile(examples / "Fe3CoFe3.clu.iterating.pot", produced)
+
     params = InputParameters.for_task("DOS")
     params.CONTROL.CLUTYPE = "embedded"
     params.CONTROL.POTFIL = host.name
-    params.CONTROL.POTFIL_CLU = cluster.name
+    params.CONTROL.POTFIL_CLU = produced.name
     cache = ResultImportCache()
     dos_result = DosResult(params, None, tmp_path, task_name="dos")
     dos = load_result(dos_result, fallback_directory=tmp_path, import_cache=cache)
     assert dos.potential_error is None
+    assert dos.atoms.potential.SCF_INFO.SCFSTATUS() == "ITERATING"
 
-    # Simulate a CLUPOT left as ITERATING despite a converged SCF stdout.
-    dos.atoms.potential.SCF_INFO.SCFSTATUS = "ITERATING"
-    scf_result = SimpleNamespace(
-        task_name="scf", produces_potential=True, is_embedded=True,
-        return_code=0, iterations=(object(),), converged=True,
-        host_potential_filename=str(host),
-        potential_filename=str(cluster),
-        files={}, input_parameters=None,
-    )
+    scf_parameters = InputParameters.for_task("SCF")
+    scf_parameters.CONTROL.CLUTYPE = "embedded"
+    scf_parameters.CONTROL.POTFIL = host.name
+    scf_parameters.CONTROL.POTFIL_CLU = cluster.name
+    scf_result = ScfResult(scf_parameters, None, tmp_path)
+    scf_result.return_code = 0
+    scf_result.iterations = [{"converged": lambda: True}]
     scf = load_result(scf_result, fallback_directory=tmp_path, import_cache=cache)
 
     assert scf.potential_error is None
@@ -679,6 +687,7 @@ def test_embedded_scf_convergence_does_not_change_shared_clupot(
     assert scf.atoms.potential.SCF_INFO.SCFSTATUS() == "CONVERGED"
     assert scf.atoms.info["sprkkr_embedding_scf_status"] == "CONVERGED"
     assert dos.atoms.potential.SCF_INFO.SCFSTATUS() == "ITERATING"
+    assert cache.loader.potential(produced, host=host).atoms is dos.atoms
 
 
 def test_gui_disambiguation_consumes_per_file_association(tmp_path):
