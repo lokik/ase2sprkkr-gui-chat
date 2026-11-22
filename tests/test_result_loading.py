@@ -719,8 +719,8 @@ def test_embedded_scf_convergence_does_not_change_shared_clupot(
     assert cache.loader.potential(produced, host=host).atoms is dos.atoms
 
 
-def test_gui_disambiguation_consumes_per_file_association(tmp_path):
-    from ase2sprkkr.outputs import FileAssociation
+def test_gui_disambiguation_consumes_per_file_attribution(tmp_path):
+    from ase2sprkkr.outputs import FileAttribution
     from ase2sprkkr.outputs.task_result import TaskResult
     from ase2sprkkr_gui.gui.application.result_loading import (
         LoadedResult, PotentialProvenanceAmbiguous, disambiguate_scf_potentials,
@@ -731,15 +731,15 @@ def test_gui_disambiguation_consumes_per_file_association(tmp_path):
     result_old = TaskResult(None, None, tmp_path, output_file=older, task_name="SCF")
     result_old.produces_potential = True
     result_old.files.add_file("converged", potential)
-    result_old.files["converged"].set_association(
-        FileAssociation.NOT_THIS_RESULT, evidence="newer_scf_stdout",
-        associated_with=newer,
+    result_old.files["converged"].set_attribution(
+        FileAttribution.NOT_THIS_RESULT, evidence="newer_scf_stdout",
+        attributed_to=newer,
     )
     result_new = TaskResult(None, None, tmp_path, output_file=newer, task_name="SCF")
     result_new.produces_potential = True
     result_new.files.add_file("converged", potential)
-    result_new.files["converged"].set_association(
-        FileAssociation.LIKELY, evidence="newest_scf_stdout"
+    result_new.files["converged"].set_attribution(
+        FileAttribution.LIKELY, evidence="newest_scf_stdout"
     )
 
     def loaded(result, path):
@@ -971,3 +971,38 @@ def test_reimport_same_stdout_with_overwritten_potential_keeps_new_state(tmp_pat
     assert not old_state.potential_version.is_current()
     assert latest_state.potential_version.is_current()
     assert adopt().id == latest.id
+
+
+def test_disambiguation_assesses_attribution_only_once(tmp_path, monkeypatch):
+    from ase2sprkkr.outputs import FileAttribution, TaskResult
+    from kkrunner.files import FileVersion
+    from ase2sprkkr_gui.gui.application.result_loading import (
+        LoadedResult, disambiguate_scf_potentials,
+    )
+
+    potential = tmp_path / "Fe.pot_new"
+    potential.write_text("original")
+    output = tmp_path / "scf.out"
+    result = TaskResult(None, None, tmp_path, output_file=output, task_name="SCF")
+    result.produces_potential = True
+    option = result.files.add_file("converged", potential)
+    observed = FileVersion.capture(potential, digest=False)
+    option.set_attribution(FileAttribution.LIKELY, observed_version=observed)
+
+    checks = []
+    actual_state = FileVersion.state
+
+    def counted(self):
+        if self is observed:
+            checks.append(self)
+        return actual_state(self)
+
+    monkeypatch.setattr(FileVersion, "state", counted)
+    loaded = LoadedResult(
+        result=result, output_path=output, potential_path=potential,
+        atoms=Atoms("Fe"), potential_error=None, directory=str(tmp_path),
+    )
+    resolved, ambiguous = disambiguate_scf_potentials([(output, loaded)])
+    assert not ambiguous
+    assert resolved[0][1] is loaded
+    assert len(checks) == 1

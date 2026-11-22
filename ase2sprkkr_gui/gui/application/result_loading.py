@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ase2sprkkr import Potential, TaskResult
-from ase2sprkkr.outputs import FileAssociation, ResultLoader
+from ase2sprkkr.outputs import FileAttribution, ResultLoader
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
@@ -104,24 +104,25 @@ def disambiguate_scf_potentials(
     *,
     cache: ResultImportCache | None = None,
 ) -> tuple[list[tuple[Path, LoadedResult]], tuple[str, ...]]:
-    """Adapt backend per-file association decisions to GUI structure state."""
+    """Adapt backend per-file attribution decisions to GUI structure state."""
     updated, ambiguous = [], []
     for path, item in loaded:
         files = getattr(item.result, "files", None)
         option = files["converged"] if files is not None and "converged" in files else None
-        if option is not None and hasattr(option, "association") and (
-            option.association is FileAssociation.NOT_THIS_RESULT
-            or (option.association is FileAssociation.UNKNOWN
-                and option.association_evidence == "scf_mtime_tie_or_unreadable")
-        ):
-            ambiguous.append(path.name)
-            item = replace(
-                item, atoms=None,
-                potential_error=PotentialProvenanceAmbiguous(
-                    f"Current potential {option.path()} cannot be attributed "
-                    f"to the SCF output {path.name}: {option.association_evidence}"
-                ),
-            )
+        details = getattr(option, "attribution_details", None) if option is not None else None
+        if callable(details):
+            attribution, evidence = details()  # one version-state check
+            if (attribution is FileAttribution.NOT_THIS_RESULT
+                    or (attribution is FileAttribution.UNKNOWN
+                        and evidence == "scf_mtime_tie_or_unreadable")):
+                ambiguous.append(path.name)
+                item = replace(
+                    item, atoms=None,
+                    potential_error=PotentialProvenanceAmbiguous(
+                        f"Current potential {option.path()} cannot be attributed "
+                        f"to the SCF output {path.name}: {evidence}"
+                    ),
+                )
         updated.append((path, item))
     return updated, tuple(ambiguous)
 
