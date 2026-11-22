@@ -110,7 +110,7 @@ def test_continue_current_version_reuses_scf2_state(tmp_path, monkeypatch):
     monkeypatch.setattr(
         result_loading,
         "load_potential_atoms",
-        lambda path: loaded_atoms,
+        lambda path, **_kwargs: loaded_atoms,
     )
 
     structures_before = store.structures
@@ -163,7 +163,7 @@ def test_current_version_action_hides_when_scf2_state_is_active(tmp_path):
     )
 
     assert widget.selected_result_id == scf1.id
-    assert widget._use_state_button.isHidden()
+    assert not widget._use_state_button.isEnabled()
     widget.close()
 
 
