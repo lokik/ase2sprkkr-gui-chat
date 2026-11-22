@@ -131,6 +131,31 @@ def test_run_cleanup_keeps_files_referenced_by_other_runs(tmp_path):
     assert source.job("first") is None
 
 
+def test_failed_local_file_removal_preserves_history_for_retry(tmp_path, monkeypatch):
+    from ase2sprkkr_gui.gui.application import run_file_cleanup
+
+    output = tmp_path / "result.out"
+    output.write_text("data")
+    run = _record("run", tmp_path, FileManifest(stdout=FileEntry(local_path=str(output))))
+    source, store = _source(run)
+    plan = source.referenced_file_deletion(run.id)
+
+    def fail_delete(*_args, **_kwargs):
+        raise OSError("simulated file deletion failure")
+
+    monkeypatch.setattr(run_file_cleanup, "delete_local_files", fail_delete)
+    with pytest.raises(OSError, match="simulated file deletion failure"):
+        source.forget(
+            run.id, delete_files=True,
+            expected_files=plan.files,
+            expected_file_snapshots=plan.snapshots,
+        )
+
+    assert output.exists()
+    assert run.id in store.records
+    assert source.job(run.id) is not None
+
+
 def test_cleanup_requires_confirmed_current_preview(tmp_path):
     output = tmp_path / "one.out"
     output.write_text("data")
