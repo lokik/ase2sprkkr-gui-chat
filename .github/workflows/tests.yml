@@ -72,7 +72,7 @@ jobs:
                 || github.head_ref == 'editor-native-identifiers'
                 || github.ref_name == 'cluster' || github.ref_name == 'embedding-host-scf'
                 || github.ref_name == 'guided-structure-type' || github.ref_name == 'editor'
-                || github.ref_name == 'editor-native-identifiers') && 'cluster' || 'develop') }}
+                || github.ref_name == 'editor-native-identifiers') && 'cluster' || 'develop' }}
           path: .ci/ase2sprkkr
 
       - name: Install package and test dependencies
