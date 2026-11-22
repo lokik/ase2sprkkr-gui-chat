@@ -370,6 +370,7 @@ def _one_off_task_request(
         structure_id=controller.structure_id,
         state_id=controller.state_id,
         restart_scf=controller.restarted or restart_scf,
+        reusable_potential_version=controller.reusable_potential_version(),
     )
 
 
