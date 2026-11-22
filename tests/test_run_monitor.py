@@ -623,12 +623,60 @@ def test_saved_result_window_reuses_completed_run_pages(_qt_application):
 
     assert window.windowTitle() == "Saved DOS results"
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Result Overview", "example.dos",
+        "Output", "Result Overview", "example.dos",
     ]
+    assert "not been loaded" in window._output.toPlainText()
     window.show()
     _qt_application.processEvents()
     window.close()
     _qt_application.processEvents()
+
+
+def test_reopened_spleed_result_restores_info_and_stdout(tmp_path, _qt_application):
+    from ase2sprkkr_gui.gui.application.saved_output import read_saved_output
+    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
+
+    output = tmp_path / "Fe2_SPLEED.out"
+    row = "  ".join(f"{value:12.5E}" for value in (11., .5, 0., 0., 0., 0.))
+    output.write_text(
+        row + "\nnext output section\n"
+        "program stopped regularly via STOP_REGULAR\n",
+        encoding="utf-8",
+    )
+    result = SimpleNamespace(
+        task_name="spleed", output_file=str(output),
+        output_values={}, result_values={},
+    )
+    saved_output = read_saved_output(result)
+    assert saved_output.warning is None
+
+    window = CompletedResultWindow(result, saved_output=saved_output)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "INFO", "Output",
+    ]
+    assert "SPLEED calculation finished" in window._info_page.last_info.text()
+    assert "spectral output" in window._info_page.events.toPlainText()
+    assert "11.00000E+00" in window._output.toPlainText()
+    window.close()
+
+
+def test_reopened_spleed_shows_warning_instead_of_replaying_missing_output(
+    tmp_path, _qt_application,
+):
+    from ase2sprkkr_gui.gui.application.saved_output import read_saved_output
+    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
+
+    result = SimpleNamespace(
+        task_name="spleed", output_file=str(tmp_path / "missing.out"),
+        output_values={}, result_values={},
+    )
+    window = CompletedResultWindow(result, saved_output=read_saved_output(result))
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "INFO", "Output",
+    ]
+    assert "unavailable" in window._info_page.text()
+    assert "unavailable" in window._output.toPlainText()
+    window.close()
 
 
 def test_reopening_hidden_active_monitor_restores_completion_presentation():

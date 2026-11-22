@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, PersistentJobSource
 from ase2sprkkr_gui.gui.application.result_cache import ResultLRU
+from ase2sprkkr_gui.gui.application.saved_output import read_saved_output
 from ase2sprkkr_gui.gui.dialogs.attached_run import create_attached_run_monitor_window
 from ase2sprkkr_gui.gui.dialogs.delete_run_record import DeleteRunRecordDialog
 from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
@@ -673,13 +674,15 @@ class PersistentJobsController(QObject):
         if not _can_load_result(job, self._source):
             return
 
-        def display(result: Any) -> None:
+        def display(loaded: tuple[Any, Any]) -> None:
+            result, saved_output = loaded
             self._ensure_current_result(job_id, job)
             # Displaying a historical result is not a workspace adoption.
             self._result_cache.store(job_id, _result_version(job), result)
             self._set_result_in_views(job_id, result)
             window = CompletedResultWindow(
                 result, title=f"Results — {job.dataset or job.id}",
+                saved_output=saved_output, task_name=job.task,
             )
             self._result_windows[job_id] = window
             window.destroyed.connect(
@@ -691,7 +694,13 @@ class PersistentJobsController(QObject):
         try:
             found, result = self._cached_result(job_id)
             if found:
-                display(result)
+                run_modal_task(
+                    parent,
+                    lambda: (result, read_saved_output(result)),
+                    title="Loading Saved Output",
+                    label="Restoring output and INFO pages…",
+                    on_success=display,
+                )
             else:
                 revision = _result_version(job)
                 loading = self._loads.get(job_id)
@@ -700,10 +709,14 @@ class PersistentJobsController(QObject):
                     if loading is not None and loading[0] == revision
                     else (lambda: self._source.load_result(job_id))
                 )
+                def load_with_output():
+                    result = operation()
+                    return result, read_saved_output(result)
+
                 run_modal_task(
-                    parent, operation,
+                    parent, load_with_output,
                     title="Loading Calculation Results",
-                    label="Loading result files…",
+                    label="Loading result files and output…",
                     on_success=display,
                 )
         except Exception as exc:  # noqa: BLE001 - saved-result presentation boundary

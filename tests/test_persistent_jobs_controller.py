@@ -1014,12 +1014,14 @@ def test_open_job_download_failure_explains_retry(monkeypatch):
     parent.close()
 
 
-def test_completed_job_can_reopen_result_window_without_restart(monkeypatch):
+def test_completed_job_can_reopen_result_window_without_restart(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     job = _job("finished-run", state="finished")
     source = _Source((job,))
     source.supports_results = True
-    result = SimpleNamespace(output_values={}, result_values={})
+    output = tmp_path / "Fe_SCF.out"
+    output.write_text("native SCF stdout\n", encoding="utf-8")
+    result = SimpleNamespace(output_values={}, result_values={}, output_file=output)
     loads = []
     source.load_result = lambda job_id: (loads.append(job_id), result)[1]
     controller = PersistentJobsController(source)
@@ -1031,10 +1033,13 @@ def test_completed_job_can_reopen_result_window_without_restart(monkeypatch):
     created = []
 
     class ResultWindow(_MonitorWindow):
-        def __init__(self, value, *, title):
+        def __init__(self, value, *, title, saved_output=None, task_name=None):
             super().__init__()
             assert value is result
             assert "Fe-SCF" in title
+            assert task_name == "SCF"
+            assert saved_output.warning is None
+            assert saved_output.text == "native SCF stdout\n"
             created.append(self)
 
     def modal_task(_parent, operation, *, on_success, **_kwargs):
@@ -1111,9 +1116,11 @@ def test_closed_result_window_can_be_created_again(monkeypatch):
     created = []
 
     class ResultWindow(QWidget):
-        def __init__(self, value, *, title):
+        def __init__(self, value, *, title, saved_output=None, task_name=None):
             super().__init__()
             assert value is result
+            assert task_name == "SCF"
+            assert saved_output.warning is not None
             self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
             created.append(self)
 

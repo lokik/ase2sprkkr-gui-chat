@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QObject, Qt, QTimer
-from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QTabWidget, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTabWidget, QToolButton, QVBoxLayout, QWidget
 
 from ase2sprkkr_gui.gui.application.result_presentation import present_result
+from ase2sprkkr_gui.gui.application.saved_output import SavedOutput
 from ase2sprkkr_gui.gui.application.result_store import ResultRecord, ResultStore
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
 from ase2sprkkr_gui.gui.widgets.result_actions import (
@@ -261,6 +262,8 @@ class CompletedResultWindow(QDialog):
         title: str = "Calculation Results",
         record: ResultRecord | None = None,
         store: ResultStore | None = None,
+        saved_output: SavedOutput | None = None,
+        task_name: str | None = None,
     ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -272,13 +275,57 @@ class CompletedResultWindow(QDialog):
         layout = QVBoxLayout(self)
         self._tabs = QTabWidget(self)
         layout.addWidget(self._tabs, 1)
+        # Reconstruct the same INFO and Output pages as a live monitor.
+        # Replay comes from the captured OUT file, never from a restarted job.
+        from ase2sprkkr_gui.gui.dialogs.run_monitor import (
+            _INFO_PAGE_FACTORIES, MAX_OUTPUT_BLOCKS,
+        )
+
+        replay = saved_output or SavedOutput(
+            warning="Saved output has not been loaded."
+        )
+        task = str(task_name or getattr(self._result, "task_name", "") or "").lower()
+        factory = _INFO_PAGE_FACTORIES.get(task)
+        self._info_page: QWidget | None = None
+        if factory is not None:
+            info_error = replay.warning or "The saved output is empty."
+            if replay.text:
+                info_page = None
+                try:
+                    info_page = factory(self._tabs)
+                    # Parser buffers are stream-oriented, matching the live monitor.
+                    for offset in range(0, len(replay.text), 65536):
+                        info_page.consume(replay.text[offset:offset + 65536], "out")
+                except Exception as exc:  # noqa: BLE001 - optional INFO projection
+                    logger.exception("Could not restore INFO from saved output")
+                    if info_page is not None:
+                        info_page.deleteLater()
+                    info_error = str(exc)
+                else:
+                    self._info_page = info_page
+                    self._tabs.addTab(info_page, "INFO")
+            if self._info_page is None:
+                message = QLabel("INFO is unavailable: " + info_error, self._tabs)
+                message.setWordWrap(True)
+                self._info_page = message
+                self._tabs.addTab(message, "INFO")
+
+        self._output = QPlainTextEdit(self._tabs)
+        self._output.setReadOnly(True)
+        self._output.setMaximumBlockCount(MAX_OUTPUT_BLOCKS)
+        prefix = (
+            "Earlier output was omitted to limit memory use. "
+            "INFO reflects the retained tail only.\n\n"
+            if replay.truncated else ""
+        )
+        text = replay.text if replay.text else (replay.warning or "The saved output is empty.")
+        # The monitor also displays only a bounded number of log lines.
+        visible = "\n".join(text.splitlines()[-MAX_OUTPUT_BLOCKS:])
+        self._output.setPlainText(prefix + visible)
+        self._tabs.addTab(self._output, "Output")
+
         self._completed_pages = CompletedRunPages(self._tabs, self)
         self._completed_pages.show_result(self._result, record=record, store=store)
-        if not self._tabs.count():
-            label = QLabel("No result files are available for this calculation.", self)
-            label.setWordWrap(True)
-            layout.addWidget(label)
-
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         close_button = QPushButton("Close", self)

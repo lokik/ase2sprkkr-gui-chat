@@ -64,22 +64,37 @@ def test_workspace_result_window_can_be_reopened_without_recreating(monkeypatch,
 
     _application = QApplication.instance() or QApplication([])
     gui = GuiApplication(recent_files_path=tmp_path / "recent.json")
+    output = tmp_path / "Fe_DOS.out"
+    output.write_text("native DOS stdout\n", encoding="utf-8")
     result = SimpleNamespace(output_values={}, result_values={})
-    record = SimpleNamespace(result=result, persistent_ref=None, task_name="dos")
+    record = SimpleNamespace(
+        result=result, persistent_ref=None, task_name="dos",
+        output_path=output, output_version=None,
+    )
     monkeypatch.setattr(gui.controller.result_store, "result", lambda _id: record)
 
     created = []
 
     class ResultWindow(QWidget):
-        def __init__(self, value, *, title, record=None, store=None):
+        def __init__(
+            self, value, *, title, record=None, store=None,
+            saved_output=None, task_name=None,
+        ):
             super().__init__()
             assert value is result
             assert title == "Results — DOS"
             assert record is not None
             assert store is gui.controller.result_store
+            assert saved_output.warning is None
+            assert saved_output.text == "native DOS stdout\n"
+            assert task_name == "dos"
             created.append(self)
 
     monkeypatch.setattr(main_module, "CompletedResultWindow", ResultWindow)
+    monkeypatch.setattr(
+        main_module, "run_modal_task",
+        lambda _parent, operation, **_kwargs: operation(),
+    )
 
     gui._show_result_window(42)
     gui._show_result_window(42)
