@@ -915,6 +915,55 @@ def test_import_preserves_preparsed_potential_version(tmp_path):
     assert state.potential_version is version
 
 
+def test_import_unchanged_spleed_stdout_accepts_metadata_only_version(tmp_path, monkeypatch):
+    """A metadata-only OUT snapshot is valid if its fingerprint still matches."""
+    from ase2sprkkr_gui.gui.application.result_loading import OutputVersionChanged
+
+    output = tmp_path / "Fe2_SPLEED.out"
+    output.write_text("SPR-KKR SPLEED output", encoding="utf-8")
+    result = SimpleNamespace(
+        task_name="spleed", produces_potential=False, output_values={},
+        potential_filename=None,
+    )
+    monkeypatch.setattr(
+        result_loading_module.ResultLoader, "load_file",
+        lambda _self, _path: result,
+    )
+    loaded = load_result_file(output)
+
+    assert loaded.parsed_output_version is not None
+    assert loaded.parsed_output_version.fingerprint is not None
+    assert loaded.parsed_output_version.digest is None
+    assert loaded.parsed_output_version.is_current()
+    controller = WorkspaceController()
+    adoption = controller.adopt_external_result(loaded, select_result=True)
+    assert adoption.record is not None
+    assert adoption.record.result is result
+    assert adoption.record.output_path == output
+    assert not isinstance(adoption.potential_error, OutputVersionChanged)
+
+
+def test_import_detects_stdout_changed_during_parsing(tmp_path, monkeypatch):
+    from ase2sprkkr_gui.gui.application.result_loading import OutputVersionChanged
+
+    output = tmp_path / "Fe2_SPLEED.out"
+    output.write_text("original output", encoding="utf-8")
+    result = SimpleNamespace(
+        task_name="spleed", produces_potential=False, output_values={},
+        potential_filename=None,
+    )
+
+    def load_and_change(_self, path):
+        path.write_text("new longer output after parsing", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(
+        result_loading_module.ResultLoader, "load_file", load_and_change,
+    )
+    with pytest.raises(OutputVersionChanged, match="Output file changed"):
+        load_result_file(output)
+
+
 def test_import_rejects_stdout_modified_after_worker_read(tmp_path):
     from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
     from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
@@ -932,7 +981,10 @@ def test_import_rejects_stdout_modified_after_worker_read(tmp_path):
     )
     path.write_text("modified stdout content")
     controller = WorkspaceController()
-    with pytest.raises(Exception, match="changed after it was presented"):
+    with pytest.raises(
+        result_loading_module.OutputVersionChanged,
+        match="Output file changed after it was read",
+    ):
         controller.adopt_external_result(loaded)
     assert not controller.result_store.results
 

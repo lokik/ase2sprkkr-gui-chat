@@ -17,6 +17,10 @@ class PotentialVersionChanged(RuntimeError):
     """The potential file no longer matches the version approved by the user."""
 
 
+class OutputVersionChanged(RuntimeError):
+    """The output file changed between reading and publishing its result."""
+
+
 class PotentialProvenanceAmbiguous(ValueError):
     """Several imported SCFs claim one overwritten output potential path."""
 
@@ -153,6 +157,20 @@ def require_potential_version_current(version: PotentialFileVersion) -> None:
         )
 
 
+def require_output_version_current(version: PotentialFileVersion) -> None:
+    """Reject stdout modified since reading, including metadata-only snapshots.
+
+    Unlike a scientific potential, a potentially large output is deliberately
+    fingerprinted without a content digest. Its snapshot is therefore never
+    ``available`` in FileVersion's *content identity* sense, even when the
+    recorded filesystem fingerprint still matches the current file.
+    """
+    if not version.is_current():
+        raise OutputVersionChanged(
+            f"Output file changed after it was read: {version.path}"
+        )
+
+
 def load_potential_version(
     version: PotentialFileVersion, *, embedding_host=None
 ) -> Any:
@@ -191,10 +209,8 @@ def load_result_file(
         output_fallback=path,
         import_cache=cache,
     )
-    if output_version is not None and not output_version.is_current():
-        raise PotentialVersionChanged(
-            f"Output file changed while it was read: {path}"
-        )
+    if output_version is not None:
+        require_output_version_current(output_version)
     loaded = replace(loaded, parsed_output_version=output_version)
     # A stand-alone load must honor tied SCF ownership as well as batch loads.
     if getattr(result, "produces_potential", False):
