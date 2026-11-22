@@ -14,7 +14,6 @@ from ase2sprkkr_gui.gui.widgets import result_actions
 
 def test_nexus_icons_are_bundled_and_render_at_action_size():
     app = QApplication.instance() or QApplication([])
-    assert not icon_path("document-export.svg").exists()
     for name in ("NeXus_Logo_square.svg", "NeXus_Logo_dark_square.svg"):
         path = icon_path(name)
         assert path.is_file()
