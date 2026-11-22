@@ -17,7 +17,9 @@ def test_element_info_imports_optional_package_on_demand(monkeypatch):
 
     fake.element = element
     monkeypatch.setitem(sys.modules, "mendeleev", fake)
-    monkeypatch.setattr(element_selector, "_MENDELEEV_AVAILABLE", True)
+    monkeypatch.setattr(element_selector, "missing_modules", lambda extra: ())
+    from ase2sprkkr.physics import atomic_data
+    atomic_data.mendeleev_element.cache_clear()
 
     assert calls == []
     info = element_selector._load_element_info(26)
@@ -27,7 +29,7 @@ def test_element_info_imports_optional_package_on_demand(monkeypatch):
 
 
 def test_missing_optional_element_details_are_nonfatal(monkeypatch):
-    monkeypatch.setattr(element_selector, "_MENDELEEV_AVAILABLE", False)
+    monkeypatch.setattr(element_selector, "missing_modules", lambda extra: ("mendeleev",))
     assert element_selector._load_element_info(26) is None
 
     # An unavailable optional package should never queue background work.
