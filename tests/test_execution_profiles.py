@@ -173,4 +173,4 @@ def test_profile_summary_mpi_modes(monkeypatch):
     for selected, value, description in cases:
         profile.mpi = selected
         assert execution_profiles.profile_summary_fields(None)[2] == ("MPI", value)
-        assert f"· {description}\\n" in execution_profiles.profile_description(None)
+        assert f"· {description}\n" in execution_profiles.profile_description(None)
