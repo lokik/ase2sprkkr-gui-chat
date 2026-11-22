@@ -43,3 +43,9 @@ The adjacent load/import buttons now use the same visual language.
 identifies a directory containing result files. They share a downward
 load-arrow badge instead of the history clock, while the recent-result
 button reuses the unbadged graph document as its subject.
+
+The **Export to NeXus** result action uses the official, unmodified NeXus
+International Advisory Committee square SVG logo, with a version for light
+and a version for dark backgrounds: `NeXus_Logo_square.svg` and
+`NeXus_Logo_dark_square.svg`. Source and usage guidelines:
+https://github.com/nexusformat/NIAC/tree/master/NeXus_Logo.
