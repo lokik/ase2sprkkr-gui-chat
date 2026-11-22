@@ -17,6 +17,7 @@ from ase2sprkkr_gui.gui.dialogs.attached_run import create_attached_run_monitor_
 from ase2sprkkr_gui.gui.dialogs.delete_run_record import DeleteRunRecordDialog
 from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
 from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow
+from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
 from ase2sprkkr_gui.gui.misc.modal_task import run_modal_task
 from ase2sprkkr_gui.gui.widgets.persistent_jobs import PersistentJobsWidget
 
@@ -91,6 +92,7 @@ class PersistentJobsController(QObject):
         self._launch_monitor_windows: set[SprkkrRunWindow] = set()
         self._pending_monitor_windows: set[SprkkrRunWindow] = set()
         self._monitor_windows: dict[str, RunMonitorWindow] = {}
+        self._result_windows: dict[str, CompletedResultWindow] = {}
         self._result_cache = ResultLRU()
         self._cached_presentations: dict[str, tuple[Any, ...]] = {}
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ase2sprkkr_gui-result")
@@ -134,6 +136,9 @@ class PersistentJobsController(QObject):
             lambda bound_view=view: self._refresh_requested(bound_view)
         )
         view.monitorRequested.connect(self.open_monitor_window)
+        view.showResultWindowRequested.connect(
+            lambda job_id, bound_view=view: self.open_result_window(job_id, bound_view)
+        )
         view.cancelRequested.connect(lambda job_id, bound_view=view: self._cancel_requested(bound_view, job_id))
         view.forgetRequested.connect(lambda job_id, bound_view=view: self._forget_requested(bound_view, job_id))
         view.retryDownloadRequested.connect(self.retry_download)
@@ -602,7 +607,7 @@ class PersistentJobsController(QObject):
             ).start()
 
     @staticmethod
-    def _show_monitor_window(monitor_window: RunMonitorWindow) -> None:
+    def _show_monitor_window(monitor_window: QWidget) -> None:
         monitor_window.show()
         monitor_window.raise_()
         monitor_window.activateWindow()
@@ -650,6 +655,65 @@ class PersistentJobsController(QObject):
         if job is None or not job.attachable or not self._source.supports_attach:
             return
         self._create_attached_monitor(job)
+
+    def open_result_window(self, job_id: str, parent: QWidget) -> None:
+        """Show completed result tabs using the existing monitor or saved files."""
+        job_id = str(job_id)
+        monitor = self._monitor_windows.get(job_id)
+        if monitor is not None:
+            # A live monitor already has the original output and INFO pages.
+            self._show_monitor_window(monitor)
+            return
+        window = self._result_windows.get(job_id)
+        if window is not None:
+            self._show_monitor_window(window)
+            return
+
+        job = self._source.job(job_id)
+        if not _can_load_result(job, self._source):
+            return
+
+        def display(result: Any) -> None:
+            self._ensure_current_result(job_id, job)
+            # Displaying a historical result is not a workspace adoption.
+            self._result_cache.store(job_id, _result_version(job), result)
+            self._set_result_in_views(job_id, result)
+            window = CompletedResultWindow(
+                result, title=f"Results — {job.dataset or job.id}",
+            )
+            self._result_windows[job_id] = window
+            window.destroyed.connect(
+                lambda *_args, key=job_id, target=window:
+                    self._result_window_destroyed(key, target)
+            )
+            self._show_monitor_window(window)
+
+        try:
+            found, result = self._cached_result(job_id)
+            if found:
+                display(result)
+            else:
+                revision = _result_version(job)
+                loading = self._loads.get(job_id)
+                operation = (
+                    (lambda: loading[1].result())
+                    if loading is not None and loading[0] == revision
+                    else (lambda: self._source.load_result(job_id))
+                )
+                run_modal_task(
+                    parent, operation,
+                    title="Loading Calculation Results",
+                    label="Loading result files…",
+                    on_success=display,
+                )
+        except Exception as exc:  # noqa: BLE001 - saved-result presentation boundary
+            QMessageBox.warning(parent, "Cannot Open Result Window", str(exc))
+
+    def _result_window_destroyed(
+        self, job_id: str, window: CompletedResultWindow,
+    ) -> None:
+        if self._result_windows.get(job_id) is window:
+            self._result_windows.pop(job_id, None)
 
     def open_job(self, job_id: str, parent: QWidget) -> bool:
         """Open a saved job by ID, following active runs and loading final results.

@@ -595,3 +595,60 @@ def test_no_result_role_does_not_fallback_to_auxiliary_files(_qt_application):
     ]
     assert window._completed_pages.execution_widget._row_count == 1
     window.close()
+
+
+def test_saved_result_window_reuses_completed_run_pages(_qt_application):
+    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
+
+    class OutputFile:
+        name = "DOS"
+        info = "Density of states"
+        display_name = "DOS"
+
+        def value_label(self):
+            return "DOS file"
+
+        def actions(self):
+            return ()
+
+        def path(self):
+            return "/tmp/example.dos"
+
+    value = OutputFile()
+    result = SimpleNamespace(
+        output_values={"DOS": value},
+        result_values={"DOS": value},
+    )
+    window = CompletedResultWindow(result, title="Saved DOS results")
+
+    assert window.windowTitle() == "Saved DOS results"
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Result Overview", "example.dos",
+    ]
+    window.show()
+    _qt_application.processEvents()
+    window.close()
+    _qt_application.processEvents()
+
+
+def test_reopening_hidden_active_monitor_restores_completion_presentation():
+    app = QApplication.instance() or QApplication([])
+
+    class RunningThread:
+        @staticmethod
+        def isRunning():
+            return True
+
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window._thread = RunningThread()
+    window.show()
+    app.processEvents()
+    window.close()
+    assert window._close_requested
+
+    window.show()
+    app.processEvents()
+    assert not window._close_requested
+    assert window.isVisible()
+    window._thread = None
+    window.close()

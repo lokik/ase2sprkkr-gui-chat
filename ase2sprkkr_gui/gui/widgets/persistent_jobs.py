@@ -113,6 +113,7 @@ class PersistentJobsWidget(QWidget):
     jobSelected = pyqtSignal(object)
     refreshRequested = pyqtSignal()
     monitorRequested = pyqtSignal(str)
+    showResultWindowRequested = pyqtSignal(str)
     retryDownloadRequested = pyqtSignal(str)
     retryPostprocessingRequested = pyqtSignal(str)
     loadResultRequested = pyqtSignal(str)
@@ -306,6 +307,16 @@ class PersistentJobsWidget(QWidget):
         self.refresh_result_button.clicked.connect(self._request_refresh_result)
         self.refresh_result_button.hide()
 
+        self.open_result_window_button = QPushButton("Open result window", details)
+        self.open_result_window_button.setIcon(QIcon.fromTheme(
+            "document-open", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),
+        ))
+        self.open_result_window_button.setToolTip(
+            "Open the saved result overview and plot tabs without running the calculation again."
+        )
+        self.open_result_window_button.clicked.connect(self._request_result_window)
+        self.open_result_window_button.hide()
+
         self.monitor_button = QPushButton("Reattach / monitor", details)
         self.monitor_button.setIcon(QIcon.fromTheme(
             "network-connect", self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),
@@ -359,7 +370,8 @@ class PersistentJobsWidget(QWidget):
         # All single-result operations share a footer, separated from bulk job actions.
         supplementary_actions = QGridLayout()
         for index, button in enumerate((
-            self.monitor_button, self.retry_download_button,
+            self.open_result_window_button, self.monitor_button,
+            self.retry_download_button,
             self.retry_postprocessing_button, self.cancel_button,
         )):
             supplementary_actions.addWidget(button, index // 2, index % 2)
@@ -646,6 +658,7 @@ class PersistentJobsWidget(QWidget):
                 widget.setText("—")
             self.message_value.hide()
             self.monitor_button.hide()
+            self.open_result_window_button.hide()
             self.cancel_button.hide()
             self.forget_button.hide()
             self.reattach_notice.hide()
@@ -739,6 +752,7 @@ class PersistentJobsWidget(QWidget):
             and self._supports_results
         )
         self.load_result_button.setVisible(can_load_result)
+        self.open_result_window_button.setVisible(can_load_result)
         self.refresh_result_button.setVisible(can_load_result)
         if selection_changed:
             self.jobSelected.emit(job.id)
@@ -755,6 +769,10 @@ class PersistentJobsWidget(QWidget):
         job_id = self._selected_job_id
         if job_id is not None:
             self.monitorRequested.emit(job_id)
+
+    def _request_result_window(self) -> None:
+        if self._selected_job_id is not None:
+            self.showResultWindowRequested.emit(self._selected_job_id)
 
     def _request_retry_postprocessing(self) -> None:
         if self._selected_job_id is not None:

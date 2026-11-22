@@ -118,6 +118,7 @@ class ResultActionsWidget(QWidget):
     selectionRequested = pyqtSignal(int)
     newCalculationRequested = pyqtSignal(int)
     historyRequested = pyqtSignal()
+    openResultWindowRequested = pyqtSignal(int)
     assignToProjectRequested = pyqtSignal(object)
     loadResultRequested = pyqtSignal()
     importDirectoryRequested = pyqtSignal()
@@ -250,7 +251,13 @@ class ResultActionsWidget(QWidget):
         )
         record_actions_layout.addWidget(self._recompute_button, 1)
         # The middle slot mirrors Assign to Project in the selection row.
-        record_actions_layout.addWidget(QWidget(self._record_actions), 1)
+        self.open_result_window_button = QPushButton("Open result window", self._record_actions)
+        self.open_result_window_button.setToolTip(
+            "Reopen the selected result's overview and plot tabs."
+        )
+        self.open_result_window_button.clicked.connect(self._request_result_window)
+        self.open_result_window_button.setEnabled(False)
+        record_actions_layout.addWidget(self.open_result_window_button, 1)
         values_slot = QWidget(self._record_actions)
         values_slot_layout = QHBoxLayout(values_slot)
         values_slot_layout.setContentsMargins(0, 0, 0, 0)
@@ -498,6 +505,11 @@ class ResultActionsWidget(QWidget):
         )
         self._use_state_button.setToolTip(use_state.label if use_state else "")
         self._recompute_button.setEnabled(recompute is not None)
+        self.open_result_window_button.setEnabled(
+            self._current_presentation is not None
+            and self._current_presentation.result_id is not None
+            and not self._single_result
+        )
         self._recompute_button.setText("Recompute")
         self._recompute_button.setToolTip(recompute.label if recompute else "")
         self._record_actions.setVisible(
@@ -508,6 +520,11 @@ class ResultActionsWidget(QWidget):
         result_id = self.selected_result_id
         if result_id is not None:
             self.useStateRequested.emit(result_id)
+
+    def _request_result_window(self) -> None:
+        presentation = self._current_presentation
+        if presentation is not None and presentation.result_id is not None:
+            self.openResultWindowRequested.emit(presentation.result_id)
 
     def _recompute_selected(self) -> None:
         result_id = self.selected_result_id

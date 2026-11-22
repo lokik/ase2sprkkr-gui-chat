@@ -55,3 +55,34 @@ def test_composition_root_reuses_one_guided_window_and_shared_state(tmp_path):
         action.title for action in workflow.workflow_plan.group(WorkflowSection.CUSTOM).actions
     ]
     workflow.close()
+
+
+def test_workspace_result_window_can_be_reopened_without_recreating(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from PyQt6.QtWidgets import QWidget
+    import ase2sprkkr_gui.main as main_module
+
+    _application = QApplication.instance() or QApplication([])
+    gui = GuiApplication(recent_files_path=tmp_path / "recent.json")
+    result = SimpleNamespace(output_values={}, result_values={})
+    record = SimpleNamespace(result=result, persistent_ref=None, task_name="dos")
+    monkeypatch.setattr(gui.controller.result_store, "result", lambda _id: record)
+
+    created = []
+
+    class ResultWindow(QWidget):
+        def __init__(self, value, *, title, record=None, store=None):
+            super().__init__()
+            assert value is result
+            assert title == "Results — DOS"
+            assert record is not None
+            assert store is gui.controller.result_store
+            created.append(self)
+
+    monkeypatch.setattr(main_module, "CompletedResultWindow", ResultWindow)
+
+    gui._show_result_window(42)
+    gui._show_result_window(42)
+    assert len(created) == 1
+    assert gui._result_windows[42] is created[0]
+    created[0].close()
