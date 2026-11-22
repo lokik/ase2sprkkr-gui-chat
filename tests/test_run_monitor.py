@@ -394,9 +394,9 @@ def test_finished_monitor_adds_file_named_tabs_and_renders_selected_plot(_qt_app
     window._on_finished(SimpleNamespace(result=result))
 
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "example.dos"
+        "Output", "Execution", "example.dos"
     ]
-    page = window._tabs.widget(1)
+    page = window._tabs.widget(2)
     assert isinstance(page, ResultFilePage)
     assert isinstance(page.plot_page, ResultPlotPage)
     assert window._tabs.currentWidget() is page
@@ -406,7 +406,7 @@ def test_finished_monitor_adds_file_named_tabs_and_renders_selected_plot(_qt_app
     assert calls == [False]
     assert page.findChildren(FigureCanvasQTAgg)
     window._tabs.setCurrentIndex(0)
-    window._tabs.setCurrentIndex(1)
+    window._tabs.setCurrentIndex(2)
     _qt_application.processEvents()
     assert calls == [False]  # a second selection must not regenerate the plot
     window.close()
@@ -434,9 +434,9 @@ def test_finished_monitor_keeps_non_plottable_outputs_as_file_tabs(_qt_applicati
         output_values={"output": value}, result_values={"output": value}
     ))
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "example.out"
+        "Output", "Execution", "example.out"
     ]
-    page = window._tabs.widget(1)
+    page = window._tabs.widget(2)
     assert isinstance(page, ResultFilePage)
     assert page.plot_page is None
     assert window._tabs.currentWidget() is page
@@ -479,17 +479,17 @@ def test_all_output_files_get_one_tab_only_after_completion(_qt_application):
     result.result_values = result.output_values
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "INFO", "Output", "first.agr", "second.dat", "third.log"
+        "INFO", "Output", "Execution", "first.agr", "second.dat", "third.log"
     ]
     assert window._tabs.tabText(window._tabs.currentIndex()) == "first.agr"
-    assert all(isinstance(window._tabs.widget(i), ResultFilePage) for i in (2, 3, 4))
+    assert all(isinstance(window._tabs.widget(i), ResultFilePage) for i in (3, 4, 5))
     assert all(
         isinstance(window._tabs.widget(i).plot_page, ResultPlotPage)
-        for i in (2, 3)
+        for i in (3, 4)
     )
-    assert window._tabs.widget(4).plot_page is None
-    assert not window._tabs.widget(2).plot_page._rendered
+    assert window._tabs.widget(5).plot_page is None
     assert not window._tabs.widget(3).plot_page._rendered
+    assert not window._tabs.widget(4).plot_page._rendered
     window.close()
 
 
@@ -501,6 +501,7 @@ def test_finished_without_output_values_does_not_create_results_tab(_qt_applicat
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
         "Output"
     ]
+    assert window._completed_pages.execution_widget is None
     window.close()
 
 
@@ -534,9 +535,14 @@ def test_task_metadata_selects_meaningful_result_tabs_only(_qt_application):
     window = RunMonitorWindow(lambda _: object(), autostart=False)
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Fe_DOS.dos"
+        "Output", "Execution", "Fe_DOS.dos"
     ]
     assert window._tabs.tabText(window._tabs.currentIndex()) == "Fe_DOS.dos"
+    all_files = window._completed_pages.execution_widget._current_presentation
+    assert len(all_files.values) == 3
+    assert {value.summary for value in all_files.values} == {
+        "Fe_DOS.dos", "Fe.pot_new", "Fe_DOS.out"
+    }
     window.close()
 
 
@@ -561,16 +567,31 @@ def test_task_with_auxiliary_outputs_only_gets_no_result_tabs(_qt_application):
     window = RunMonitorWindow(lambda _: object(), autostart=False)
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output"
+        "Output", "Execution"
     ]
+    assert window._completed_pages.execution_widget is not None
     window.close()
 
 
 def test_no_result_role_does_not_fallback_to_auxiliary_files(_qt_application):
     from types import SimpleNamespace
 
-    result = SimpleNamespace(output_values={"potential": object()})
+    class File:
+        name = "potential"
+        display_name = "Potential file"
+        info = ""
+
+        def value_label(self):
+            return "Fe.pot_new"
+
+        def actions(self):
+            return ("open",)
+
+    result = SimpleNamespace(output_values={"potential": File()})
     window = RunMonitorWindow(lambda _: object(), autostart=False)
     window._on_finished(result)
-    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == ["Output"]
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output", "Execution"
+    ]
+    assert window._completed_pages.execution_widget._row_count == 1
     window.close()

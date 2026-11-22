@@ -220,7 +220,7 @@ class ResultActionsWidget(QWidget):
         self.show_all_values_checkbox = QCheckBox("Show all values", self)
         self.show_all_values_checkbox.setObjectName("resultsShowAllValues")
         self.show_all_values_checkbox.setToolTip(
-            "Also display output values with no available action"
+            "Also display non-file output values with no available action"
         )
         self.show_all_values_checkbox.setChecked(show_values_without_actions)
         self.show_all_values_checkbox.toggled.connect(self._toggle_all_values)
@@ -437,6 +437,10 @@ class ResultActionsWidget(QWidget):
                 and not self._show_values_without_actions
                 and not value.show_in_summary
                 and not value.always_visible
+                and not (
+                    value.value is not None
+                    and callable(getattr(value.value, "path", None))
+                )
             ):
                 continue
             self._add_value(value)

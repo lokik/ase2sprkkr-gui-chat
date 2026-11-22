@@ -427,3 +427,20 @@ def test_empty_spheres_is_not_presented_as_recomputable_task():
     assert not widget._recompute_button.isEnabled()
     assert widget._recompute_button.isVisible() is False  # Widget is not shown.
     widget.close()
+
+
+def test_file_without_available_actions_is_still_shown_in_main_result_list():
+    application = QApplication.instance() or QApplication([])
+
+    class FileValue(_Value):
+        def path(self):
+            return "/tmp/Fe.pot_new"
+
+    widget = _widget(show_values_without_actions=False)
+    widget.set_result(_Result({
+        "auxiliary": FileValue(),
+        "inert scalar": _Value(),
+    }))
+    assert widget._row_count == 1
+    assert widget._grid.itemAtPosition(0, 0).widget().text() == "Display value"
+    widget.close()

@@ -10,7 +10,11 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QToolButton, QVBoxL
 
 from ase2sprkkr_gui.gui.application.result_presentation import present_result
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
-from ase2sprkkr_gui.gui.widgets.result_actions import result_action_icon, result_action_tooltip
+from ase2sprkkr_gui.gui.widgets.result_actions import (
+    ResultActionsWidget,
+    result_action_icon,
+    result_action_tooltip,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -167,10 +171,10 @@ def _filename_for_entry(entry: Any) -> tuple[str, str]:
 
 
 class CompletedRunPages(QObject):
-    """After completion, add one file-named tab per output, without a Results tab.
+    """After completion, show full execution files and scientific result tabs.
 
-    Each tab uses the same ResultFilePage, which contains an optional reusable,
-    lazily rendered plot. Select the first output as soon as it becomes available.
+    Execution uses the same result-list widget as the main window, with every
+    managed output. File-named plot tabs use only task-declared result_values.
     """
 
     def __init__(self, tabs: QTabWidget, parent: QWidget) -> None:
@@ -179,9 +183,29 @@ class CompletedRunPages(QObject):
         self._parent = parent
         self._pending_plots: set[ResultFilePage] = set()
         self.file_pages: list[ResultFilePage] = []
+        self.execution_widget: ResultActionsWidget | None = None
         tabs.currentChanged.connect(self._tab_changed)
 
     def show_result(self, result: Any) -> None:
+        # The execution summary must never be filtered to scientific results.
+        # It shares both the presenter and the actions widget with the main
+        # Results panel, so auxiliary files remain inspectable and exportable.
+        full_presentation = present_result(result)
+        if full_presentation is not None and full_presentation.values:
+            widget = ResultActionsWidget(
+                lambda value, action: execute_value_action(
+                    value, action, self._parent
+                ),
+                show_values_without_actions=False,
+                show_history_button=False,
+                show_assignment_controls=False,
+                single_result=True,
+                parent=self._tabs,
+            )
+            widget.set_result(full_presentation)
+            self.execution_widget = widget
+            self._tabs.addTab(widget, "Execution")
+
         presentation = present_result(result, result_only=True)
         if presentation is None:
             return
@@ -202,6 +226,8 @@ class CompletedRunPages(QObject):
 
         if first_page is not None:
             self._tabs.setCurrentWidget(first_page)
+        elif self.execution_widget is not None:
+            self._tabs.setCurrentWidget(self.execution_widget)
 
     def _tab_changed(self, index: int) -> None:
         page = self._tabs.widget(index)
