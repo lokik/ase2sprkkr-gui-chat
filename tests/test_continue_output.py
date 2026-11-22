@@ -71,6 +71,7 @@ def test_continue_output_activates_state_and_reuses_same_result(tmp_path, monkey
     assert cached is not None
     assert cached.result is record.result
     assert cached.atoms is None
+    assert cached.cached_record_id == record.id
 
     structure_generation = controller.structure_generation
     directory_generation = controller.directory_generation
@@ -146,7 +147,7 @@ def test_workflow_keeps_semantic_scf_action_after_continue_and_restart(
 
 
 def test_new_unusable_parse_does_not_inherit_cached_structure(tmp_path):
-    """New data with no atoms must not be treated as a reused cached object."""
+    """Even the same TaskResult object is not a cache hit without its marker."""
     output = tmp_path / "SCF.out"
     output.write_text("unchanged output", encoding="utf-8")
     controller = WorkspaceController()
@@ -156,11 +157,7 @@ def test_new_unusable_parse_does_not_inherit_cached_structure(tmp_path):
     assert first.output_state_id is not None
 
     missing_structure = LoadedResult(
-        result=SimpleNamespace(
-            task_name="scf",
-            produces_potential=True,
-            output_values={},
-        ),
+        result=first.result,
         output_path=output,
         potential_path=None,
         atoms=None,
@@ -174,6 +171,7 @@ def test_new_unusable_parse_does_not_inherit_cached_structure(tmp_path):
     assert second.id != first.id
     assert controller.result_store.state_for_result(second) is None
     assert controller.result_store.state_for_result(first) is not None
+
 
 def test_overwritten_output_path_creates_new_result(tmp_path):
     output = tmp_path / "SCF.out"
