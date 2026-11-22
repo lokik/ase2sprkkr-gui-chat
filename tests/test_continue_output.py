@@ -147,7 +147,6 @@ def test_workflow_keeps_semantic_scf_action_after_continue_and_restart(
     window.close()
 
 
-
 def test_new_unusable_parse_does_not_inherit_cached_structure(tmp_path):
     """Even the same TaskResult object is not a cache hit without its marker."""
     output = tmp_path / "SCF.out"
@@ -173,7 +172,6 @@ def test_new_unusable_parse_does_not_inherit_cached_structure(tmp_path):
     assert second.id != first.id
     assert controller.result_store.state_for_result(second) is None
     assert controller.result_store.state_for_result(first) is not None
-
 
 
 def test_cached_output_rejects_rewrite_between_lookup_and_publication(tmp_path):
