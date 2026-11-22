@@ -8,7 +8,7 @@ from ase2sprkkr.outputs.reader_registry import reader_registry
 from ase2sprkkr.outputs.task_result import KkrOutputReader
 from kkrunner.backends import BackendConfig
 from kkrunner.transports import LocalTransport
-from kkrunner.files import FileEntry, FileManifest
+from kkrunner.files import FileEntry, FileManifest, FileVersion
 from kkrunner.projects import ProjectRepository, ProjectRunManager
 from kkrunner.runs import RunState, RunStore
 
@@ -48,11 +48,15 @@ def test_persistent_task_identity_round_trip_drives_recompute_editor(
         }},
         files=FileManifest(
             inputs=(FileEntry(local_path=str(input_path)),),
+            # An actual submitted run records the input bytes before launch.
+            # Completing a manually constructed record captures only outputs.
+            input_versions=(FileVersion.capture(input_path, require_digest=True),),
             stdout=FileEntry(local_path=str(output_path)),
         ),
     )
     manager.store.save(run)
     run = manager.complete(run, state=RunState.FINISHED, return_code=0, artifacts_available=True)
+    assert manager.input_file_is_current(run)
 
     class SyntheticParser:
         def __init__(self, print_info=False, on_info=None):
