@@ -547,6 +547,7 @@ def _cached_output(
         directory=record.directory,
         input_parameters=record.input_parameters,
         persistent_ref=record.persistent_ref,
+        cached_record_id=record.id,
     )
 
 
