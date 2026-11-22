@@ -18,7 +18,6 @@ from kkrunner.runs.conflicts import (
 )
 from kkrunner.runs.records import CorruptRunRecord, RunStore
 from ase2sprkkr.outputs.project_results import (
-    ProjectResultUnavailableError,
     attach_project_run,
     load_project_result,
     retry_project_postprocessing,
@@ -30,7 +29,6 @@ from ase2sprkkr.sprkkr.projects import (
 from ase2sprkkr_gui.gui.application.imported_project_results import (
     assignments, reference_id, reassign_references, remove_reference,
 )
-from ase2sprkkr_gui.gui.application.output_only_result import OutputOnlyResult
 from ase2sprkkr_gui.gui.application.result_loading import load_result_file
 from ase2sprkkr_gui.gui.application.run_file_deletion import (
     FileDeletionPlan, FileDeletionSnapshot, RemoteFileReview,
@@ -832,27 +830,9 @@ class PersistentJobSource:
             raise NotImplementedError(
                 "This ASE2SPRKKR version cannot load persistent historical results."
             )
-        try:
-            result = load_project_result(self._manager, str(job_id))
-        except Exception as exc:  # noqa: BLE001 - historical native parser boundary
-            # A truncated OUT file is still useful diagnostic evidence. Only
-            # fall back when its captured historical version is available;
-            # never silently open a replaced or unverified output.
-            if isinstance(exc, ProjectResultUnavailableError):
-                raise
-            record = self._manager.store.get(str(job_id))
-            if (
-                record.files is None
-                or record.files.output_file is None
-                or not self._manager.output_file_is_current(record)
-                or not Path(record.files.output_file).is_file()
-            ):
-                raise
-            logger.warning(
-                "Could not parse persisted run %s; presenting output file only",
-                job_id, exc_info=True,
-            )
-            result = OutputOnlyResult(record, exc)
+        result = load_project_result(
+            self._manager, str(job_id), allow_unparsed=True,
+        )
         record = getattr(result, "run_record", None)
         if record is not None:
             job = PersistentJob.from_run_record(record, result_files_verified=True)

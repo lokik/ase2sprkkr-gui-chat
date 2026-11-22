@@ -93,13 +93,13 @@ def test_attach_and_load_delegate_to_backend_api(monkeypatch):
         retrieve_result_files=lambda *_args: None,
     )
     monkeypatch.setattr(module, "attach_project_run", lambda _manager, ref, **kwargs: calls.append("attach") or object())
-    monkeypatch.setattr(module, "load_project_result", lambda _manager, ref: calls.append("load") or result)
+    monkeypatch.setattr(module, "load_project_result", lambda _manager, ref, **kwargs: calls.append(("load", kwargs)) or result)
     source = PersistentJobSource(manager)
     assert source.supports_results
     assert source.supports_result_file_check
     source.attach(item.id)
     assert source.load_result(item.id) is result
-    assert calls == ["attach", "load"]
+    assert calls == ["attach", ("load", {"allow_unparsed": True})]
 
 def test_postprocessing_retry_requires_successful_execution():
     ready = PersistentJob.from_run_record(

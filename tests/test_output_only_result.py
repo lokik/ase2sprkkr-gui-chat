@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from kkrunner.files import FileVersion
 
-from ase2sprkkr_gui.gui.application.output_only_result import OutputOnlyResult
+from ase2sprkkr.outputs import OutputOnlyResult
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, PersistentJobSource
 from ase2sprkkr_gui.gui.application.result_presentation import present_result
 
@@ -64,53 +64,40 @@ def _source(record, *, current=True):
     return source
 
 
-def test_persisted_parse_error_loads_output_only_when_original_file_is_current(
-    tmp_path, monkeypatch,
-):
+def test_persistent_source_requests_backend_fallback(tmp_path, monkeypatch):
     record = _record(tmp_path)
     source = _source(record)
+    expected = OutputOnlyResult(record, EOFError("Unexpected end of output"))
+    seen = []
 
-    def fail_parse(*_args):
-        raise EOFError("Unexpected end of output")
+    def load_backend(manager, run_id, *, allow_unparsed=False):
+        seen.append((manager, run_id, allow_unparsed))
+        return expected
 
     monkeypatch.setattr(
         "ase2sprkkr_gui.gui.application.persistent_jobs.load_project_result",
-        fail_parse,
+        load_backend,
     )
     monkeypatch.setattr(
         PersistentJob, "from_run_record",
         classmethod(lambda cls, _record, **_kwargs: None),
     )
-
-    result = source.load_result("run")
-    assert isinstance(result, OutputOnlyResult)
-    assert result.run_record is record
-    assert result.output_values["output"].path() == record.files.output_file
+    assert source.load_result("run") is expected
+    assert seen == [(source._manager, "run", True)]
 
 
-def test_persisted_parse_error_does_not_reopen_unverified_or_missing_file(
-    tmp_path, monkeypatch,
-):
+@pytest.mark.parametrize("error", [ValueError("Bug"), EOFError("Truncated")])
+def test_persistent_source_does_not_translate_backend_errors(tmp_path, monkeypatch, error):
     record = _record(tmp_path)
 
-    def fail_parse(*_args):
-        raise EOFError("Unexpected end of output")
+    def load_backend(_manager, _run_id, *, allow_unparsed=False):
+        assert allow_unparsed
+        raise error
 
     monkeypatch.setattr(
         "ase2sprkkr_gui.gui.application.persistent_jobs.load_project_result",
-        fail_parse,
+        load_backend,
     )
-    with pytest.raises(EOFError):
-        _source(record, current=False).load_result("run")
-
-    from ase2sprkkr.outputs.project_results import ProjectResultUnavailableError
-
-    def unavailable(*_args):
-        raise ProjectResultUnavailableError(record, "historical output was overwritten")
-
-    monkeypatch.setattr(
-        "ase2sprkkr_gui.gui.application.persistent_jobs.load_project_result",
-        unavailable,
-    )
-    with pytest.raises(ProjectResultUnavailableError):
+    with pytest.raises(type(error)) as caught:
         _source(record).load_result("run")
+    assert caught.value is error
