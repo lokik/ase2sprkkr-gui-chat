@@ -829,59 +829,6 @@ def test_dynamic_cards_are_not_wrapped_in_extra_panels(tmp_path):
     window.close()
 
 
-def test_header_actions_and_results_footer_remain_visible_on_resize(tmp_path):
-    application = QApplication.instance() or QApplication([])
-    _gui, window = _workflow(tmp_path)
-    window.showNormal()
-    window.resize(1650, 820)
-    application.processEvents()
-
-    structure = window.findChild(QWidget, "workflowStructureColumn")
-    calculate = window.findChild(QWidget, "workflowCalculateColumn")
-    results = window.findChild(QWidget, "workflowResultsColumn")
-    controls = (
-        (structure, window._recent_structures_button),
-        (calculate, window._repeat_button),
-        (calculate, window._load_input_button),
-        (calculate, window._custom_button),
-        (results, window._recent_results_button),
-        (results, window._result_actions_widget.load_result_button),
-        (results, window._result_actions_widget.import_directory_button),
-        (results, window._project_browser_button),
-        (results, window._settings_button),
-        (results, window._close_button),
-    )
-
-    def visible_and_within_columns():
-        for column, button in controls:
-            assert button.isVisible()
-            right = button.mapTo(
-                column, QPoint(button.width() - 1, 0)
-            ).x()
-            assert right < column.width()
-            assert button.mapTo(column, QPoint(0, 0)).x() >= 0
-        footer = window._results_footer
-        assert footer.y() >= window._result_actions.y()
-        assert footer.y() + footer.height() <= results.height()
-
-    visible_and_within_columns()
-    utility_buttons = window._results_footer.findChildren(QToolButton)
-    assert max(b.width() for b in utility_buttons) - min(
-        b.width() for b in utility_buttons
-    ) <= 1
-    window.resize(1920, 820)
-    application.processEvents()
-    visible_and_within_columns()
-    assert all(bar._mode == "full" for bar in window._header_bars)
-    window.resize(1100, 750)
-    application.processEvents()
-    assert window.width() < 1350  # Must not be pinned by header labels.
-    visible_and_within_columns()
-    assert all(bar._mode == "icon" for bar in window._header_bars)
-    window.close()
-
-
-
 def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
@@ -926,7 +873,7 @@ def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
     window.close()
 
 
-def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
+def test_header_layout_modes_keep_buttons_visible_and_sized(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
     window.showNormal()
@@ -938,6 +885,35 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         window.findChild(QWidget, "workflowCalculationNavigation"),
         window.findChild(QWidget, "workflowResultsNavigation"),
     )
+    # A single workflow window exercises both the layout modes and visibility
+    # invariants at their transition widths.
+    structure_column = window.findChild(QWidget, "workflowStructureColumn")
+    calculate_column = window.findChild(QWidget, "workflowCalculateColumn")
+    results_column = window.findChild(QWidget, "workflowResultsColumn")
+    controls = (
+        (structure_column, window._recent_structures_button),
+        (calculate_column, window._repeat_button),
+        (calculate_column, window._load_input_button),
+        (calculate_column, window._custom_button),
+        (results_column, window._recent_results_button),
+        (results_column, window._result_actions_widget.load_result_button),
+        (results_column, window._result_actions_widget.import_directory_button),
+        (results_column, window._project_browser_button),
+        (results_column, window._settings_button),
+        (results_column, window._close_button),
+    )
+
+    def assert_buttons_contained():
+        for column, button in controls:
+            assert button.isVisible()
+            left = button.mapTo(column, QPoint(0, 0)).x()
+            right = button.mapTo(column, QPoint(button.width() - 1, 0)).x()
+            assert 0 <= left <= right < column.width()
+        footer = window._results_footer
+        assert footer.y() >= window._result_actions.y()
+        assert footer.y() + footer.height() <= results_column.height()
+
+    assert_buttons_contained()
     for bar in columns:
         assert bar._mode == "full"
         for button in bar._buttons:
@@ -956,6 +932,20 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
         for bar in columns
     )
 
+    # Check both sides of the wide/short threshold without reconstructing
+    # the entire GUI (and without testing another copy of its initialization).
+    window.resize(1920, 820)
+    application.processEvents()
+    assert all(bar._mode == "full" for bar in columns)
+    assert_buttons_contained()
+    window.resize(1650, 820)
+    application.processEvents()
+    assert_buttons_contained()
+    utility_buttons = window._results_footer.findChildren(QToolButton)
+    assert max(button.width() for button in utility_buttons) - min(
+        button.width() for button in utility_buttons
+    ) <= 1
+
     # Between the full and icon-only modes, shorter labels are used.
     window.resize(1600, 850)
     application.processEvents()
@@ -971,12 +961,17 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     assert window._load_input_button.text() == "Load Input"
     assert window._custom_button.text() == "Custom Input"
 
+    assert_buttons_contained()
+
     # Intermediate widths keep readable text instead of switching to icons.
     window.resize(1360, 850)
     application.processEvents()
     assert all(bar._mode == "short" for bar in columns)
-    window.resize(1100, 850)
+    assert_buttons_contained()
+    window.resize(1100, 750)
     application.processEvents()
+    assert window.width() < 1350  # Header labels must not pin the minimum width.
+    assert_buttons_contained()
     results = columns[2]
     assert results._mode == "icon"
     assert all(bar._mode == "icon" for bar in columns)
@@ -1020,6 +1015,7 @@ def test_header_buttons_have_common_width_and_collapse_together(tmp_path):
     for button in results._buttons:
         assert not button.grab().isNull()
     assert all(bar._mode == "full" for bar in columns)
+    assert_buttons_contained()
     window.close()
 
 
