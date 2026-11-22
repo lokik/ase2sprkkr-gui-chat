@@ -1,7 +1,7 @@
 """Interpret calculation results and result files without changing a workspace."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +15,17 @@ except ImportError:
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
+from ase2sprkkr_gui.ase.copy import copy_for_edit
+
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 
 
 class PotentialVersionChanged(RuntimeError):
     """The potential file no longer matches the version approved by the user."""
+
+
+class PotentialProvenanceAmbiguous(ValueError):
+    """Several imported SCFs claim one overwritten output potential path."""
 
 
 @dataclass(frozen=True)
@@ -66,15 +72,24 @@ class LoadedResult:
 
 
 class ResultImportCache:
-    """Worker-local cache shared only by one batch of imported outputs."""
+    """Batch-local, version-checked parsing; distinct results keep their metadata.
+
+    CLUPOT and its host are parsed without constructing Atoms. Their joint
+    structure is reconstructed on first use, then reused until either file
+    changes. The native SCF convergence correction is never written into the
+    shared object.
+    """
 
     def __init__(self):
         self.inputs = InputFileCache() if InputFileCache is not None else None
         self.potentials: dict[Path, LoadedResult] = {}
+        self._hosts: dict[Path, tuple[PotentialFileVersion, Any]] = {}
+        self._clusters: dict[
+            tuple[Path, Path],
+            tuple[PotentialFileVersion, PotentialFileVersion, Any],
+        ] = {}
 
     def remember(self, loaded: LoadedResult) -> None:
-        # Native embedded SCF can adjust cluster convergence status per result;
-        # do not silently reuse that result-specific object for another task.
         if (
             loaded.potential_path is not None
             and loaded.atoms is not None
@@ -82,6 +97,104 @@ class ResultImportCache:
             and not getattr(loaded.result, "is_embedded", False)
         ):
             self.potentials[loaded.potential_path] = loaded
+
+    def embedded_atoms(
+        self,
+        cluster_path: Path,
+        host_path: Path,
+        cluster_version: PotentialFileVersion,
+        host_version: PotentialFileVersion,
+    ) -> Any:
+        """Parse each native file once, with the host/CLUPOT dependency tracked."""
+        require_potential_version_current(cluster_version)
+        require_potential_version_current(host_version)
+        key = (cluster_path, host_path)
+        cached = self._clusters.get(key)
+        if cached is not None and cached[:2] == (cluster_version, host_version):
+            return cached[2]
+
+        host_entry = self._hosts.get(host_path)
+        if host_entry is not None and host_entry[0] == host_version:
+            host = host_entry[1]
+        else:
+            host = Potential.from_file(
+                host_path, atoms=False, check_file_unchanged=True,
+            )
+            require_potential_version_current(host_version)
+            self._hosts[host_path] = (host_version, host)
+
+        # Explicitly avoid any SCF-specific mutation of the cached CLUPOT.
+        cluster = Potential.from_file(
+            cluster_path, atoms=False, host=host, check_file_unchanged=True,
+        )
+        require_potential_version_current(cluster_version)
+        require_potential_version_current(host_version)
+        atoms = cluster.atoms
+        if atoms is None:
+            raise ValueError(f"Cluster potential contains no structure: {cluster_path}")
+        require_potential_version_current(cluster_version)
+        require_potential_version_current(host_version)
+        self._clusters[key] = (cluster_version, host_version, atoms)
+        return atoms
+
+
+def _embedded_atoms_for_result(result: Any, atoms: Any) -> Any:
+    """Keep output-derived convergence separate from cached CLUPOT file data."""
+    if str(getattr(result, "task_name", "")).casefold() != "scf":
+        return atoms
+    if getattr(result, "return_code", 0) != 0:
+        return atoms
+    try:
+        if not getattr(result, "iterations", None) or not result.converged:
+            return atoms
+        status = atoms.potential.SCF_INFO.SCFSTATUS()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return atoms
+    if str(status).strip().upper() != "ITERATING":
+        return atoms
+    # A shallow structural copy clones the attached potential's option
+    # containers while sharing unchanged, potentially large radial arrays.
+    selected = copy_for_edit(atoms)
+    selected.potential.SCF_INFO.SCFSTATUS = "CONVERGED"
+    selected.info["sprkkr_embedding_scf_status"] = "CONVERGED"
+    return selected
+
+
+def disambiguate_scf_potentials(
+    loaded: list[tuple[Path, LoadedResult]],
+) -> tuple[list[tuple[Path, LoadedResult]], tuple[str, ...]]:
+    """Do not associate one current pot_new with multiple historical SCF runs.
+
+    A filename cannot tell which SCF produced the bytes now on disk. Preserve
+    each OUT/result, but leave these SCF results without a reusable state.
+    Non-SCF tasks legitimately consuming the same input POTFIL are unaffected.
+    """
+    by_potential: dict[Path, list[int]] = {}
+    for index, (_, item) in enumerate(loaded):
+        if (
+            item.potential_path is not None
+            and str(getattr(item.result, "task_name", "")).casefold() == "scf"
+            and getattr(item.result, "produces_potential", True)
+        ):
+            by_potential.setdefault(item.potential_path, []).append(index)
+
+    ambiguous = {
+        index
+        for indices in by_potential.values() if len(indices) > 1
+        for index in indices
+        if len({loaded[i][0].resolve() for i in indices}) > 1
+    }
+    if not ambiguous:
+        return loaded, ()
+    updated = list(loaded)
+    for index in sorted(ambiguous):
+        path, item = updated[index]
+        error = PotentialProvenanceAmbiguous(
+            f"Several SCF outputs reference {item.potential_path.name}; "
+            "the current file cannot be attributed to this SCF output."
+        )
+        updated[index] = (path, replace(item, atoms=None, potential_error=error))
+    return updated, tuple(loaded[i][0].name for i in sorted(ambiguous))
 
 
 def load_potential_atoms(file_path: str | Path, *, embedding_host=None) -> Any:
@@ -147,6 +260,7 @@ def load_result_file(
         fallback_directory=path.parent,
         output_fallback=path,
         potential_cache=cache.potentials if cache is not None else None,
+        import_cache=cache,
     )
     if cache is not None:
         cache.remember(loaded)
@@ -162,6 +276,7 @@ def load_result(
     embedding_host=None,
     reusable_potential: LoadedResult | None = None,
     potential_cache: dict[Path, LoadedResult] | None = None,
+    import_cache: ResultImportCache | None = None,
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
     output, potential = _result_files(result, fallback_directory)
@@ -212,10 +327,26 @@ def load_result(
         atoms, potential_error = None, exc
     else:
         if getattr(result, "is_embedded", False) and potential is not None:
-            # The result's cluster potential loader resolves its own native
-            # host POTFIL; it must not be treated as a periodic potential.
             try:
-                atoms, potential_error = result.potential.atoms, None
+                if (
+                    import_cache is not None
+                    and pre_read_potential_version is not None
+                    and host_version is not None
+                    and host_version.available
+                ):
+                    # Bulk import parses the native CLUPOT without Atoms or an
+                    # SCF-dependent status. Reuse its host and geometry.
+                    host_path = Path(host_version.path).resolve()
+                    atoms = import_cache.embedded_atoms(
+                        potential, host_path, pre_read_potential_version,
+                        host_version,
+                    )
+                    atoms = _embedded_atoms_for_result(result, atoms)
+                else:
+                    # Keep regular, standalone loading and historical manifest
+                    # semantics intact when a safe cache key is unavailable.
+                    atoms = result.potential.atoms
+                potential_error = None
             except Exception as exc:  # noqa: BLE001 - corrupted native file
                 atoms, potential_error = None, exc
         elif (
