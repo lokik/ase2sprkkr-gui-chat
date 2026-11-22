@@ -105,7 +105,7 @@ class ResultImportCache:
             loaded.potential_path is not None
             and loaded.atoms is not None
             and loaded.parsed_potential_version is not None
-            and not getattr(loaded.result, "is_embedded", False)
+            and not getattr(loaded.result, "potential_dependencies", ())
         ):
             self.potentials[loaded.potential_path] = loaded
 
