@@ -26,13 +26,15 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
-from ase2sprkkr_gui.gui.dialogs.scf_progress import ScfProgressPage
+from ase2sprkkr_gui.gui.dialogs.scf_progress import ScfProgressPage, scf_tolerance_from_parameters
 from ase2sprkkr_gui.gui.dialogs.jxc_progress import JxcProgressPage
 from ase2sprkkr_gui.gui.dialogs.dos_progress import DosProgressPage
 from ase2sprkkr_gui.gui.dialogs.bsf_progress import BsfProgressPage
 from ase2sprkkr_gui.gui.dialogs.spleed_progress import SpleedProgressPage
 from ase2sprkkr_gui.gui.dialogs.arpes_progress import ArpesProgressPage
 from ase2sprkkr_gui.gui.dialogs.xas_progress import XasProgressPage
+from ase2sprkkr.outputs.readers.dos import dos_total_points_from_parameters
+from ase2sprkkr.outputs.readers.xas import xas_total_points_from_parameters
 from ase2sprkkr_gui.gui.misc.resources import icon_path
 
 
@@ -55,6 +57,43 @@ logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_BLOCKS = 4096
 MAX_LOGICAL_LINE_LENGTH = 4096
+
+
+def info_page_settings(task_name: str | None, parameters: Any) -> dict[str, Any]:
+    """Input-derived progress settings shared by live and saved INFO views.
+
+    Only the input's own task matters: an absent, incomplete or untrusted
+    parameter source must not cause us to guess an energy total or tolerance.
+    """
+    task = str(task_name or "").strip().lower()
+    if task == "scf":
+        return {"scf_tolerance": scf_tolerance_from_parameters(parameters)}
+    if task == "dos":
+        return {"dos_total_points": dos_total_points_from_parameters(parameters)}
+    if task == "xas":
+        return {"xas_total_points": xas_total_points_from_parameters(parameters)}
+    return {}
+
+
+def create_info_page(
+    task_name: str | None,
+    parent: QWidget,
+    *,
+    scf_tolerance: float | None = None,
+    dos_total_points: int | None = None,
+    xas_total_points: int | None = None,
+) -> QWidget | None:
+    """Construct the same task-specific INFO widget for live and saved runs."""
+    task = str(task_name or "").strip().lower()
+    factory = _INFO_PAGE_FACTORIES.get(task)
+    if factory is None:
+        return None
+    page_options = {
+        "scf": {"target_error": scf_tolerance},
+        "dos": {"total_points": dos_total_points},
+        "xas": {"total_points": xas_total_points},
+    }
+    return factory(parent, **page_options.get(task, {}))
 
 
 def state_label(state: Any) -> str:
@@ -185,17 +224,11 @@ class RunMonitorWindow(QDialog):
         self._output = QPlainTextEdit(self)
         self._output.setReadOnly(True)
         self._output.setMaximumBlockCount(MAX_OUTPUT_BLOCKS)
-        task = (task_name or "").strip().lower()
-        # Only these specialized pages accept input-derived progress settings.
-        page_options = {
-            "scf": {"target_error": scf_tolerance},
-            "dos": {"total_points": dos_total_points},
-            "xas": {"total_points": xas_total_points},
-        }
-        page_factory = _INFO_PAGE_FACTORIES.get(task)
-        self._info_page = (
-            page_factory(self, **page_options.get(task, {}))
-            if page_factory is not None else None
+        self._info_page = create_info_page(
+            task_name, self,
+            scf_tolerance=scf_tolerance,
+            dos_total_points=dos_total_points,
+            xas_total_points=xas_total_points,
         )
         self._consume_info = (
             self._info_page.consume if self._info_page is not None else None

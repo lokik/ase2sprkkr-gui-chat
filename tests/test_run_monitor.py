@@ -737,3 +737,83 @@ def test_reopening_hidden_active_monitor_restores_completion_presentation():
     assert window.isVisible()
     window._thread = None
     window.close()
+
+
+def test_saved_dos_replay_matches_live_monitor_with_mpi_energy_total(_qt_application):
+    """Restored ENERGY.NE must yield the same progress events as live stdout."""
+    from ase2sprkkr_gui.gui.application.saved_output import SavedOutput
+    from ase2sprkkr_gui.gui.application.result_store import ResultRecord
+    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
+    from ase2sprkkr_gui.gui.dialogs.run_monitor import info_page_settings
+
+    parameters = SimpleNamespace(ENERGY=SimpleNamespace(NE=lambda: 300))
+    result = SimpleNamespace(
+        task_name="DOS", output_values={}, result_values={},
+    )
+    record = ResultRecord(
+        id=1, result=result, task_name="DOS", structure_id=None,
+        input_state_id=None, output_state_id=None, input_parameters=parameters,
+        directory=None, result_files={},
+    )
+    stdout = (
+        "MPI calculation with NPROCS = 4\n"
+        " 226 E= 0.4061 0.0100 IT= 1 Fe\n"
+        " 227 E= 0.4081 0.0100 IT= 1 Fe\n"
+        " 228 E= 0.4101 0.0100 IT= 1 Fe\n"
+        "program stopped regularly via STOP_REGULAR\n"
+    )
+    live = RunMonitorWindow(
+        lambda _: object(), task_name="DOS",
+        **info_page_settings("DOS", parameters), autostart=False,
+    )
+    live._append_output(stdout, "out")
+    reopened = CompletedResultWindow(
+        result, record=record, saved_output=SavedOutput(text=stdout),
+    )
+    assert reopened._info_page.progress.maximum() == 300
+    assert reopened._info_page.progress.value() == 300
+    assert reopened._info_page.progress.isHidden() is False
+    assert reopened._info_page.last_info.text() == "300/300 done."
+    assert reopened._info_page.events.toPlainText() == live._info_page.events.toPlainText()
+    live.close()
+    reopened.close()
+
+
+def test_saved_xas_replay_recovers_input_energy_total(_qt_application):
+    from ase2sprkkr_gui.gui.application.saved_output import SavedOutput
+    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
+
+    parameters = SimpleNamespace(ENERGY=SimpleNamespace(NE=lambda: 180))
+    result = SimpleNamespace(
+        task_name="XAS", input_parameters=parameters,
+        output_values={}, result_values={},
+    )
+    stdout = " LOOP 1   75 E= 0.735 0.001  IQ= 1  IT= 1\n"
+    window = CompletedResultWindow(result, saved_output=SavedOutput(text=stdout))
+    assert window._info_page.progress.maximum() == 180
+    assert window._info_page.progress.value() == 74
+    assert window._info_page.last_info.text() == "Calculating XAS energy 75/180..."
+    window.close()
+
+
+def test_saved_dos_partial_output_displays_info_warning(_qt_application):
+    from ase2sprkkr_gui.gui.application.saved_output import SavedOutput
+    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
+
+    params = SimpleNamespace(ENERGY=SimpleNamespace(NE=lambda: 300))
+    result = SimpleNamespace(
+        task_name="DOS", input_parameters=params,
+        output_values={}, result_values={},
+    )
+    window = CompletedResultWindow(
+        result,
+        saved_output=SavedOutput(
+            text="MPI calculation with NPROCS = 4\n"
+                 " 226 E= 0.4061 0.0100 IT= 1 Fe\n",
+            truncated=True,
+        ),
+    )
+    assert window._info_page.progress.maximum() == 300
+    assert "Partial INFO" in window._info_page.layout().itemAt(0).widget().text()
+    assert "Earlier output was omitted" in window._output.toPlainText()
+    window.close()

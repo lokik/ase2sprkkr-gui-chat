@@ -17,11 +17,10 @@ from ase2sprkkr_gui.gui.application.execution_cancellation import (
 )
 from ase2sprkkr_gui.gui.application.sprkkr_execution import SprkkrExecution
 from ase2sprkkr_gui.gui.application.workspace_controller import CalculationRequest
-from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow, RunMonitorWorker
+from ase2sprkkr_gui.gui.dialogs.run_monitor import (
+    RunMonitorWindow, RunMonitorWorker, info_page_settings,
+)
 from ase2sprkkr_gui.gui.dialogs.run_conflict import SubmissionConflictDialog
-from ase2sprkkr_gui.gui.dialogs.scf_progress import scf_tolerance_from_parameters
-from ase2sprkkr.outputs.readers.dos import dos_total_points_from_parameters
-from ase2sprkkr.outputs.readers.xas import xas_total_points_from_parameters
 
 
 logger = logging.getLogger(__name__)
@@ -135,6 +134,8 @@ class SprkkrRunWindow(RunMonitorWindow):
         # Ownership and execution/project context are established by the caller
         # before ``start()``. This prevents a fast local submit from publishing a
         # run id before the application owns this top-level window.
+        parameters = getattr(request, "input_parameters", None)
+        task_name = str(getattr(parameters, "task_name", ""))
         super().__init__(
             worker_factory,
             parent,
@@ -143,16 +144,8 @@ class SprkkrRunWindow(RunMonitorWindow):
             header_fields=header_fields,
             warning_title="MPI Not Detected",
             on_finished=on_finished,
-            task_name=str(getattr(getattr(request, "input_parameters", None), "task_name", "")),
-            scf_tolerance=scf_tolerance_from_parameters(
-                getattr(request, "input_parameters", None)
-            ),
-            dos_total_points=dos_total_points_from_parameters(
-                getattr(request, "input_parameters", None)
-            ),
-            xas_total_points=xas_total_points_from_parameters(
-                getattr(request, "input_parameters", None)
-            ),
+            task_name=task_name,
+            **info_page_settings(task_name, parameters),
             autostart=False,
         )
         self._conflict_cancellation_pending = False

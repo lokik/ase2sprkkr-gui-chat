@@ -279,20 +279,31 @@ class CompletedResultWindow(QDialog):
         # Replay comes from the captured OUT file, never from a restarted job.
         from ase2sprkkr_gui.gui.dialogs.run_monitor import (
             _INFO_PAGE_FACTORIES, MAX_OUTPUT_BLOCKS,
+            create_info_page, info_page_settings,
         )
 
         replay = saved_output or SavedOutput(
             warning="Saved output has not been loaded."
         )
-        task = str(task_name or getattr(self._result, "task_name", "") or "").lower()
-        factory = _INFO_PAGE_FACTORIES.get(task)
+        task = str(task_name or getattr(self._result, "task_name", "") or "").strip().lower()
+        # The workspace record preserves the parameters used for this result.
+        # For standalone/persistent results, the TaskResult can resolve its own
+        # verified input. Missing/stale inputs simply leave totals unknown.
+        parameters = getattr(record, "input_parameters", None)
+        if parameters is None and task in {"scf", "dos", "xas"}:
+            try:
+                parameters = getattr(self._result, "input_parameters", None)
+            except (AttributeError, OSError, ValueError, TypeError, KeyError):
+                logger.warning("Cannot recover input parameters for saved INFO", exc_info=True)
         self._info_page: QWidget | None = None
-        if factory is not None:
+        if task in _INFO_PAGE_FACTORIES:
             info_error = replay.warning or "The saved output is empty."
             if replay.text:
                 info_page = None
                 try:
-                    info_page = factory(self._tabs)
+                    info_page = create_info_page(
+                        task, self._tabs, **info_page_settings(task, parameters)
+                    )
                     # Parser buffers are stream-oriented, matching the live monitor.
                     for offset in range(0, len(replay.text), 65536):
                         info_page.consume(replay.text[offset:offset + 65536], "out")
@@ -303,6 +314,16 @@ class CompletedResultWindow(QDialog):
                     info_error = str(exc)
                 else:
                     self._info_page = info_page
+                    if replay.truncated:
+                        # Parser settings are restored, but incomplete stdout
+                        # cannot establish all historical milestones.
+                        notice = QLabel(
+                            "Partial INFO: the beginning of the saved output "
+                            "was omitted; intermediate progress may be incomplete.",
+                            info_page,
+                        )
+                        notice.setWordWrap(True)
+                        info_page.layout().insertWidget(0, notice)
                     self._tabs.addTab(info_page, "INFO")
             if self._info_page is None:
                 message = QLabel("INFO is unavailable: " + info_error, self._tabs)
