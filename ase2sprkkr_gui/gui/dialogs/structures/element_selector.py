@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from importlib.util import find_spec
 from typing import Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, Qt, pyqtSignal
@@ -16,9 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-# Checking whether an optional module exists is cheap; importing it is not.
-# Keep the expensive import in _load_element_info(), which runs on a worker.
-_MENDELEEV_AVAILABLE = find_spec("mendeleev") is not None
+from ase2sprkkr_gui.gui.application.optional_dependencies import missing_modules
 
 # Full periodic table layout (Z, symbol, row, col) including f-block rows (8,9)
 _TABLE: List[Tuple[int, str, int, int]] = [
@@ -80,10 +77,10 @@ _CATEGORY_BY_Z = _categorize()
 
 def _load_element_info(atomic_number: int) -> Optional[Dict[str, object]]:
     """Load slow optional element metadata outside the GUI thread."""
-    if not _MENDELEEV_AVAILABLE:
+    if missing_modules("mendeleev"):
         return None
     try:
-        from mendeleev import element as mendeleev_element
+        from ase2sprkkr.physics.atomic_data import mendeleev_element
         el = mendeleev_element(atomic_number)
     except Exception:  # optional third-party data source boundary
         return None
@@ -143,7 +140,7 @@ class _ElementInfoLoader(QObject):
 
     def request(self, atomic_number: int) -> None:
         if (
-            not _MENDELEEV_AVAILABLE
+            missing_modules("mendeleev")
             or atomic_number in self._cache
             or atomic_number in self._pending
         ):
@@ -314,7 +311,7 @@ class ElementSelectorDialog(QDialog):
             self._hovered_element = (z, sym)
             data = self._info_loader.cached(z)
             text = _format_element_info(z, sym, data)
-            if data is None and _MENDELEEV_AVAILABLE:
+            if data is None and not missing_modules("mendeleev"):
                 text += "\nLoading..."
                 self._info_loader.request(z)
             self.info_label.setText(text)

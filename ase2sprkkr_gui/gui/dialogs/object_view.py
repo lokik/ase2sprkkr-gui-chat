@@ -23,6 +23,9 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.dialogs._tree_base import _TreeDialogBase
+from ase2sprkkr_gui.gui.application.optional_dependencies import (
+    action_extra, install_extra,
+)
 from ase2sprkkr_gui.gui.widgets.result_actions import result_action_icon, result_action_tooltip
 
 
@@ -168,42 +171,66 @@ class ReadOnlyObjectDialog(_TreeDialogBase):
 def execute_value_action(
     value: Any, action: str, parent: QWidget
 ) -> None:
-    """Execute one advertised result action with uniform error handling."""
-    try:
+    """Run an action, offering installation only for recognized missing extras.
+
+    GUI owns file selection and retains the destination for an optional retry.
+    """
+    destination: str | None = None
+
+    def invoke() -> None:
+        nonlocal destination
         if action in {"data", "edit"}:
             result = value.data() if action == "data" else value()
             display_name = getattr(
                 value, "display_name", getattr(value, "name", "Value")
             )
             show_readonly_object_dialog(
-                result,
-                title=f"View {display_name}",
-                parent=parent,
+                result, title=f"View {display_name}", parent=parent,
             )
             return
         if action in {"copy_to", "export_nexus"}:
-            source = Path(value.path())
-            if action == "copy_to":
-                proposed = source.with_name(source.stem + "_copy" + source.suffix)
-                title = "Save Result File As"
-                file_filter = "All files (*)"
-            else:
-                proposed = source.with_suffix(".nxs")
-                title = "Export Spectrum to NeXus"
-                file_filter = "NeXus files (*.nxs);;All files (*)"
-            destination, _ = QFileDialog.getSaveFileName(
-                parent, title, str(proposed), file_filter,
-            )
-            if not destination:
-                return
+            if destination is None:
+                source = Path(value.path())
+                if action == "copy_to":
+                    proposed = source.with_name(source.stem + "_copy" + source.suffix)
+                    title = "Save Result File As"
+                    file_filter = "All files (*)"
+                else:
+                    proposed = source.with_suffix(".nxs")
+                    title = "Export Spectrum to NeXus"
+                    file_filter = "NeXus files (*.nxs);;All files (*)"
+                selected, _ = QFileDialog.getSaveFileName(
+                    parent, title, str(proposed), file_filter,
+                )
+                if not selected:
+                    return
+                destination = selected
             getattr(value, action)(destination)
             return
-        method = getattr(value, action)
-        method()
+        getattr(value, action)()
+
+    try:
+        invoke()
+    except ModuleNotFoundError as exc:
+        extra = action_extra(action, exc)
+        if extra is None:
+            QMessageBox.critical(
+                parent, "Action Error",
+                f"Failed to execute action '{action}':\n{exc}",
+            )
+            return
+        if not install_extra(extra, parent):
+            return
+        try:
+            invoke()
+        except Exception as retry_exc:  # noqa: BLE001 - plugin action boundary
+            QMessageBox.critical(
+                parent, "Action Error",
+                f"Failed to execute action '{action}' after installation:\n{retry_exc}",
+            )
     except Exception as exc:  # noqa: BLE001 - plugin action boundary
         QMessageBox.critical(
-            parent,
-            "Action Error",
+            parent, "Action Error",
             f"Failed to execute action '{action}':\n{exc}",
         )
 

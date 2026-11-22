@@ -21,6 +21,7 @@ from ase2sprkkr_gui.gui.widgets.settings.preferred_tasks import PreferredTasksPa
 from ase2sprkkr_gui.gui.widgets.settings.run_configurations import RunConfigurationsPage
 from ase2sprkkr_gui.gui.widgets.settings.general import GeneralSettingsPage
 from ase2sprkkr_gui.gui.widgets.settings.ase2sprkkr import Ase2sprkkrSettingsPage
+from ase2sprkkr_gui.gui.widgets.settings.optional_dependencies import OptionalDependenciesPage
 
 
 class SettingsDialog(QDialog):
@@ -63,6 +64,8 @@ class SettingsDialog(QDialog):
             self.tabs, configuration=configuration
         )
         self.tabs.addTab(self.ase2sprkkr_page, "Ase2sprkkr")
+        self.optional_dependencies_page = OptionalDependenciesPage(self.tabs)
+        self.tabs.addTab(self.optional_dependencies_page, "Optional dependencies")
 
         self.viewer = self.general_page.viewer
         self.atom_size_slider = self.general_page.atom_size_slider

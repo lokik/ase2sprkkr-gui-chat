@@ -163,3 +163,22 @@ approval if a mismatch is detected. A versioned CLUPOT in calculation history
 can be restored using the host reference recorded in its lightweight snapshot;
 the full radial payload is read from the versioned CLUPOT file, not duplicated
 in the snapshot.
+
+## Optional scientific features
+
+The GUI uses Matplotlib for its own structure previews. SPR-KKR result
+plotting may also need SciPy and scikit-image; NeXus export needs HDF5/NeXus
+libraries; detailed element metadata uses Mendeleev. These packages are
+optional, and no automatic package installation takes place without approval.
+
+In **Settings → Optional dependencies**, view each feature's availability and,
+after confirming the exact installer command, install missing packages into
+the Python environment that runs the GUI. The same option is offered when a
+result plot or NeXus export fails due to a recognized missing optional module.
+
+For a manual installation use `python -m pip install "ase2sprkkr-gui[plot]"`,
+`python -m pip install "ase2sprkkr-gui[nexus]"`, or
+`python -m pip install "ase2sprkkr-gui[mendeleev]"`.
+In virtual environments the GUI uses the environment's installer; system
+Python installations managed by PEP 668 are not modified. If a new library
+is not usable immediately, restart the GUI.
