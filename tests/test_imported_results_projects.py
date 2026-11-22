@@ -199,3 +199,32 @@ def test_project_browser_file_import_uses_existing_output_loader(
     assert list(assignments(projects).values()) == [project.id]
     assert reloaded == [True]
     browser.close()
+
+
+def test_import_assignment_propagates_failed_directory_barrier(tmp_path, monkeypatch):
+    import pytest
+
+    from kkrunner.support import durability
+    from ase2sprkkr_gui.gui.application import imported_project_results as refs
+
+    projects = ProjectRepository(tmp_path / "projects")
+    project = projects.create("Durable association")
+    record = SimpleNamespace(output_path=tmp_path / "run.out", output_version=None)
+    syncs = 0
+    actual_fsync = durability.fsync_directory
+
+    def fail_second_sync(directory):
+        nonlocal syncs
+        syncs += 1
+        if syncs == 2:
+            raise OSError("directory fsync failed")
+        return actual_fsync(directory)
+
+    monkeypatch.setattr(durability, "fsync_directory", fail_second_sync)
+    with pytest.raises(OSError, match="directory fsync failed"):
+        refs.assign(projects, [record], project.id)
+
+    # The rename has happened, but its crash durability was not confirmed.
+    assert list(refs.assignments(projects).values()) == [project.id]
+    monkeypatch.setattr(durability, "fsync_directory", actual_fsync)
+    assert refs.assign(projects, [record], project.id) == 1

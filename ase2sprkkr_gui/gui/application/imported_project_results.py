@@ -6,9 +6,8 @@ from contextlib import contextmanager
 from hashlib import sha256
 from pathlib import Path
 
+from kkrunner.support.durability import durable_mkdir, durable_write_json
 from kkrunner.support.file_locks import FileLock
-
-from ase2sprkkr_gui.gui.application.atomic_io import atomic_write_json
 
 
 def assignment_path(projects) -> Path:
@@ -91,5 +90,5 @@ def remove_reference(projects, ref_id: str) -> None:
 
 def _save_assignments(projects, mapping: dict[str, str | None]) -> None:
     path = assignment_path(projects)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(path, mapping)
+    durable_mkdir(path.parent, parents=True, exist_ok=True)
+    durable_write_json(path, mapping, mode=0o600, indent=2)
