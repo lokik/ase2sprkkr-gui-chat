@@ -61,14 +61,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lokik/ase2sprkkr-chat
-          ref: >-
-            ${{ (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
-                || github.head_ref == 'cluster' || github.head_ref == 'embedding-host-scf'
-                || github.head_ref == 'guided-structure-type' || github.head_ref == 'editor'
-                || github.head_ref == 'editor-native-identifiers'
-                || github.ref_name == 'cluster' || github.ref_name == 'embedding-host-scf'
-                || github.ref_name == 'guided-structure-type' || github.ref_name == 'editor'
-                || github.ref_name == 'editor-native-identifiers') && 'cluster' || 'develop' }}
+          # Integration validation against the matching backend PR.
+          ref: refactor/embedded-interpretation-backend
           path: .ci/ase2sprkkr
 
       - name: Install package and test dependencies
