@@ -19,7 +19,7 @@ from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
 # Switching a requested BSF alias intentionally changes its mode, producing
 # a library warning; only the tests that assert the warning catch it explicitly.
 pytestmark = pytest.mark.filterwarnings(
-    r"ignore:ENERGY\.NE selects BSF-(EK|KK), (?:but|although) BSF-(EK|KK) was requested:"
+    r"ignore:ENERGY\.NE selects BSF-(EK|KK), (but|although) BSF-(EK|KK) was requested:"
     r"ase2sprkkr.common.warnings.DataValidityWarning"
 )
 
