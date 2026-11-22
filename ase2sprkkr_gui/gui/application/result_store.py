@@ -847,6 +847,7 @@ class ResultStore:
         persistent_ref: str | None = None,
         source_versions: tuple[FileVersion, ...] = (),
         parsed_potential_version: PotentialFileVersion | None = None,
+        cached_record_id: int | None = None,
     ) -> ResultRecord:
         existing = self.result_for_external_source(
             output_path,
