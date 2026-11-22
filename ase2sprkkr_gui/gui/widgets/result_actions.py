@@ -226,6 +226,7 @@ class ResultActionsWidget(QWidget):
             "Also display non-file output values with no available action"
         )
         self.show_all_values_checkbox.setChecked(show_values_without_actions)
+        self.show_all_values_checkbox.setEnabled(False)
         self.show_all_values_checkbox.toggled.connect(self._toggle_all_values)
         layout.addWidget(self._selector)
         self._assignment_controls = (self.select_all_button, self.assign_project_button)
@@ -416,6 +417,19 @@ class ResultActionsWidget(QWidget):
         self.set_result(None)
         self._show_empty(message)
 
+    @staticmethod
+    def _is_extra_value(value: ResultValuePresentation) -> bool:
+        """Whether the value would only be shown by Show all values."""
+        return (
+            not value.actions
+            and not value.show_in_summary
+            and not value.always_visible
+            and not (
+                value.value is not None
+                and callable(getattr(value.value, "path", None))
+            )
+        )
+
     def _toggle_all_values(self, checked: bool) -> None:
         """Re-render the selected result without changing selection or state."""
         self._show_values_without_actions = checked
@@ -427,6 +441,10 @@ class ResultActionsWidget(QWidget):
         if presentation is not None and not isinstance(presentation, ResultPresentation):
             presentation = present_result(presentation)
         self._current_presentation = presentation
+        self.show_all_values_checkbox.setEnabled(
+            presentation is not None
+            and any(self._is_extra_value(value) for value in presentation.values)
+        )
 
         self._clear()
         self._result_file_warning.hide()
@@ -441,16 +459,7 @@ class ResultActionsWidget(QWidget):
             self._result_file_warning.show()
 
         for value in presentation.values:
-            if (
-                not value.actions
-                and not self._show_values_without_actions
-                and not value.show_in_summary
-                and not value.always_visible
-                and not (
-                    value.value is not None
-                    and callable(getattr(value.value, "path", None))
-                )
-            ):
+            if not self._show_values_without_actions and self._is_extra_value(value):
                 continue
             self._add_value(value)
 
