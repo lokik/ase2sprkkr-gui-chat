@@ -10,7 +10,6 @@ from ase2sprkkr.outputs import FileAssociation, ResultLoader
 from ase2sprkkr.outputs.file_provenance import result_file_manifest, result_file_version
 from ase2sprkkr.potentials.potentials import PotentialFileChanged
 
-
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 
 
