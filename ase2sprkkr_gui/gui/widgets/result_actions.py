@@ -4,8 +4,9 @@ from collections.abc import Callable
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QKeySequence, QMouseEvent, QResizeEvent
+from PyQt6.QtGui import QIcon, QKeySequence, QMouseEvent, QResizeEvent, QPalette
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QGridLayout,
     QHBoxLayout,
@@ -55,6 +56,12 @@ _STRUCTURE_ID_ROLE = _RESULT_ID_ROLE + 1
 def result_action_icon(style: QStyle, action: str) -> QIcon:
     if action == "plot":
         return QIcon(str(_PLOT_ICON))
+    if action == "export_nexus":
+        app = QApplication.instance()
+        palette = app.palette() if app is not None else style.standardPalette()
+        dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        name = "NeXus_Logo_dark_square.svg" if dark else "NeXus_Logo_square.svg"
+        return QIcon(str(icon_path(name)))
     return style.standardIcon(
         _STANDARD_ICONS.get(action, QStyle.StandardPixmap.SP_FileIcon)
     )
