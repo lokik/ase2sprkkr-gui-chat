@@ -94,7 +94,10 @@ class ResultPlotPage(QWidget):
 class ResultFilePage(QWidget):
     """One output value/file, its available actions, and an optional inline plot."""
 
-    def __init__(self, entry: Any, parent: QWidget, action_parent: QWidget) -> None:
+    def __init__(
+        self, entry: Any, parent: QWidget, action_parent: QWidget,
+        *, file_warning: str | None = None,
+    ) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         self.plot_page: ResultPlotPage | None = None
@@ -111,10 +114,11 @@ class ResultFilePage(QWidget):
                 Qt.TextInteractionFlag.TextSelectableByMouse
             )
             layout.addWidget(description)
-        if entry.warning:
-            warning = QLabel(entry.warning, self)
-            warning.setWordWrap(True)
-            layout.addWidget(warning)
+        for detail_warning in (file_warning, entry.warning):
+            if detail_warning:
+                warning = QLabel(detail_warning, self)
+                warning.setWordWrap(True)
+                layout.addWidget(warning)
 
         if entry.actions and entry.value is not None:
             buttons = QHBoxLayout()
@@ -147,8 +151,9 @@ def _filename_for_entry(entry: Any) -> tuple[str, str]:
     value = entry.value
     if value is not None:
         try:
-            path = str(value.path())
-            if path:
+            raw_path = value.path()
+            if raw_path:
+                path = str(raw_path)
                 return Path(path).name, path
         except (AttributeError, TypeError, ValueError, OSError):
             pass
@@ -183,7 +188,10 @@ class CompletedRunPages(QObject):
         first_page = None
         for entry in presentation.values:
             filename, path = _filename_for_entry(entry)
-            page = ResultFilePage(entry, self._tabs, self._parent)
+            page = ResultFilePage(
+                entry, self._tabs, self._parent,
+                file_warning=presentation.file_warning,
+            )
             index = self._tabs.addTab(page, filename)
             self._tabs.setTabToolTip(index, path)
             self.file_pages.append(page)
