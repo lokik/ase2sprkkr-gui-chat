@@ -383,7 +383,10 @@ def test_finished_monitor_adds_file_named_tabs_and_renders_selected_plot(_qt_app
             calls.append(show)
             plt.figure()
 
-    result = SimpleNamespace(output_values={"dos": PlotFile()})
+    value = PlotFile()
+    result = SimpleNamespace(
+        output_values={"dos": value}, result_values={"dos": value}
+    )
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
         "Output"
@@ -426,7 +429,10 @@ def test_finished_monitor_keeps_non_plottable_outputs_as_file_tabs(_qt_applicati
             return ("open",)
 
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
-    window._on_finished(SimpleNamespace(output_values={"output": File()}))
+    value = File()
+    window._on_finished(SimpleNamespace(
+        output_values={"output": value}, result_values={"output": value}
+    ))
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
         "Output", "example.out"
     ]
@@ -470,6 +476,7 @@ def test_all_output_files_get_one_tab_only_after_completion(_qt_application):
         "second": File("second.dat", can_plot=True),
         "third": File("third.log", can_plot=False),
     })
+    result.result_values = result.output_values
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
         "INFO", "Output", "first.agr", "second.dat", "third.log"
@@ -556,4 +563,14 @@ def test_task_with_auxiliary_outputs_only_gets_no_result_tabs(_qt_application):
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
         "Output"
     ]
+    window.close()
+
+
+def test_no_result_role_does_not_fallback_to_auxiliary_files(_qt_application):
+    from types import SimpleNamespace
+
+    result = SimpleNamespace(output_values={"potential": object()})
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window._on_finished(result)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == ["Output"]
     window.close()

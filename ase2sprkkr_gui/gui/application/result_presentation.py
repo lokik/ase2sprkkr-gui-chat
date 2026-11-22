@@ -167,10 +167,11 @@ def present_result(
         return None
 
     try:
-        values = (
-            getattr(result, "result_values", None) if result_only else None
-        )
-        items = list((result.output_values if values is None else values).items())
+        # Fail closed for results without explicit scientific-result metadata.
+        # Falling back to output_values would expose SCF potentials, logs and
+        # other auxiliary files as user-facing result tabs.
+        values = getattr(result, "result_values", {}) if result_only else result.output_values
+        items = list(values.items())
     except Exception as exc:
         logger.exception("Failed to load result output values")
         return ResultPresentation(
