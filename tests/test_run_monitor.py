@@ -353,11 +353,12 @@ def test_dos_info_unknown_total_does_not_show_percentage():
     window.close()
 
 
-def test_finished_monitor_adds_result_list_and_lazy_plot(_qt_application):
+def test_finished_monitor_adds_file_named_tabs_and_renders_selected_plot(_qt_application):
     from types import SimpleNamespace
     from matplotlib import pyplot as plt
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-    from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
+
+    from ase2sprkkr_gui.gui.dialogs.run_results import ResultFilePage, ResultPlotPage
 
     calls = []
 
@@ -384,30 +385,34 @@ def test_finished_monitor_adds_result_list_and_lazy_plot(_qt_application):
 
     result = SimpleNamespace(output_values={"dos": PlotFile()})
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output"
+    ]
     window._on_finished(SimpleNamespace(result=result))
 
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Results", "example.dos"
+        "Output", "example.dos"
     ]
-    browser = window._completed_pages.results_widget
-    assert isinstance(browser, ResultActionsWidget)
-    assert window._tabs.currentWidget() is browser
-    assert browser._row_count == 1
-    assert not calls
+    page = window._tabs.widget(1)
+    assert isinstance(page, ResultFilePage)
+    assert isinstance(page.plot_page, ResultPlotPage)
+    assert window._tabs.currentWidget() is page
+    assert not calls  # only render after the event loop can show the new tab
 
-    window._tabs.setCurrentIndex(2)
     _qt_application.processEvents()
     assert calls == [False]
-    assert window._tabs.widget(2).findChildren(FigureCanvasQTAgg)
+    assert page.findChildren(FigureCanvasQTAgg)
+    window._tabs.setCurrentIndex(0)
     window._tabs.setCurrentIndex(1)
-    window._tabs.setCurrentIndex(2)
     _qt_application.processEvents()
-    assert calls == [False]
+    assert calls == [False]  # a second selection must not regenerate the plot
     window.close()
 
 
-def test_finished_monitor_has_no_plots_when_output_is_not_plottable(_qt_application):
+def test_finished_monitor_keeps_non_plottable_outputs_as_file_tabs(_qt_application):
     from types import SimpleNamespace
+
+    from ase2sprkkr_gui.gui.dialogs.run_results import ResultFilePage
 
     class File:
         name = "output"
@@ -423,27 +428,33 @@ def test_finished_monitor_has_no_plots_when_output_is_not_plottable(_qt_applicat
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
     window._on_finished(SimpleNamespace(output_values={"output": File()}))
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Results"
+        "Output", "example.out"
     ]
+    page = window._tabs.widget(1)
+    assert isinstance(page, ResultFilePage)
+    assert page.plot_page is None
+    assert window._tabs.currentWidget() is page
     window.close()
 
-def test_run_results_pages_are_added_only_after_finish_and_reuse_one_plot_widget(_qt_application):
+
+def test_all_output_files_get_one_tab_only_after_completion(_qt_application):
     from types import SimpleNamespace
 
-    from ase2sprkkr_gui.gui.dialogs.run_results import ResultPlotPage
+    from ase2sprkkr_gui.gui.dialogs.run_results import ResultFilePage, ResultPlotPage
 
     class File:
-        def __init__(self, filename):
+        def __init__(self, filename, *, can_plot):
             self.filename = filename
             self.name = filename
             self.display_name = filename
             self.info = ""
+            self.can_plot = can_plot
 
         def value_label(self):
             return self.filename
 
         def actions(self):
-            return ("plot",)
+            return ("plot",) if self.can_plot else ("open",)
 
         def path(self):
             return "/tmp/" + self.filename
@@ -455,16 +466,32 @@ def test_run_results_pages_are_added_only_after_finish_and_reuse_one_plot_widget
         "INFO", "Output"
     ]
     result = SimpleNamespace(output_values={
-        "first": File("first.agr"),
-        "second": File("second.dat"),
+        "first": File("first.agr", can_plot=True),
+        "second": File("second.dat", can_plot=True),
+        "third": File("third.log", can_plot=False),
     })
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "INFO", "Output", "Results", "first.agr", "second.dat"
+        "INFO", "Output", "first.agr", "second.dat", "third.log"
     ]
-    assert window._tabs.tabText(window._tabs.currentIndex()) == "Results"
-    assert isinstance(window._tabs.widget(3), ResultPlotPage)
-    assert isinstance(window._tabs.widget(4), ResultPlotPage)
-    assert not window._tabs.widget(3)._rendered
-    assert not window._tabs.widget(4)._rendered
+    assert window._tabs.tabText(window._tabs.currentIndex()) == "first.agr"
+    assert all(isinstance(window._tabs.widget(i), ResultFilePage) for i in (2, 3, 4))
+    assert all(
+        isinstance(window._tabs.widget(i).plot_page, ResultPlotPage)
+        for i in (2, 3)
+    )
+    assert window._tabs.widget(4).plot_page is None
+    assert not window._tabs.widget(2).plot_page._rendered
+    assert not window._tabs.widget(3).plot_page._rendered
+    window.close()
+
+
+def test_finished_without_output_values_does_not_create_results_tab(_qt_application):
+    from types import SimpleNamespace
+
+    window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    window._on_finished(SimpleNamespace(output_values={}))
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output"
+    ]
     window.close()

@@ -5,12 +5,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QObject, QTimer
-from PyQt6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
+from PyQt6.QtCore import QObject, Qt, QTimer
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QToolButton, QVBoxLayout, QWidget
 
 from ase2sprkkr_gui.gui.application.result_presentation import present_result
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
-from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
+from ase2sprkkr_gui.gui.widgets.result_actions import result_action_icon, result_action_tooltip
 
 
 logger = logging.getLogger(__name__)
@@ -91,64 +91,118 @@ class ResultPlotPage(QWidget):
             canvas.draw_idle()
 
 
-class CompletedRunPages(QObject):
-    """Add results and file-specific plots only after calculation completion.
+class ResultFilePage(QWidget):
+    """One output value/file, its available actions, and an optional inline plot."""
 
-    The Results browser is selected immediately; heavyweight figures are
-    deferred until their individual plot tab is first selected.
+    def __init__(self, entry: Any, parent: QWidget, action_parent: QWidget) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self.plot_page: ResultPlotPage | None = None
+
+        detail = f"{entry.name}: {entry.summary}" if entry.summary else entry.name
+        heading = QLabel(detail, self)
+        heading.setWordWrap(True)
+        heading.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(heading)
+        if entry.info:
+            description = QLabel(entry.info, self)
+            description.setWordWrap(True)
+            description.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            layout.addWidget(description)
+        if entry.warning:
+            warning = QLabel(entry.warning, self)
+            warning.setWordWrap(True)
+            layout.addWidget(warning)
+
+        if entry.actions and entry.value is not None:
+            buttons = QHBoxLayout()
+            for action in entry.actions:
+                button = QToolButton(self)
+                button.setAutoRaise(True)
+                button.setIcon(result_action_icon(self.style(), action))
+                button.setToolTip(result_action_tooltip(entry.value, action))
+                button.clicked.connect(
+                    lambda _checked=False, v=entry.value, a=action:
+                        execute_value_action(v, a, action_parent)
+                )
+                buttons.addWidget(button)
+            buttons.addStretch(1)
+            layout.addLayout(buttons)
+
+        if "plot" in entry.actions and entry.value is not None:
+            self.plot_page = ResultPlotPage(entry.value, self)
+            layout.addWidget(self.plot_page, 1)
+        else:
+            layout.addStretch(1)
+
+    def render(self) -> None:
+        if self.plot_page is not None:
+            self.plot_page.render()
+
+
+def _filename_for_entry(entry: Any) -> tuple[str, str]:
+    """Use the actual file path when provided, otherwise a presentation label."""
+    value = entry.value
+    if value is not None:
+        try:
+            path = str(value.path())
+            if path:
+                return Path(path).name, path
+        except (AttributeError, TypeError, ValueError, OSError):
+            pass
+    # Some non-plottable output values expose the filename as their summary.
+    summary = entry.summary.strip()
+    if summary and not summary.startswith("<") and (
+        "." in Path(summary).name and "\n" not in summary
+    ):
+        return Path(summary).name, summary
+    return entry.name, entry.name
+
+
+class CompletedRunPages(QObject):
+    """After completion, add one file-named tab per output, without a Results tab.
+
+    Each tab uses the same ResultFilePage, which contains an optional reusable,
+    lazily rendered plot. Select the first output as soon as it becomes available.
     """
 
     def __init__(self, tabs: QTabWidget, parent: QWidget) -> None:
         super().__init__(parent)
         self._tabs = tabs
         self._parent = parent
-        self._pending_plots: set[ResultPlotPage] = set()
-        self.results_widget: ResultActionsWidget | None = None
+        self._pending_plots: set[ResultFilePage] = set()
+        self.file_pages: list[ResultFilePage] = []
         tabs.currentChanged.connect(self._tab_changed)
 
     def show_result(self, result: Any) -> None:
         presentation = present_result(result)
         if presentation is None:
             return
-
-        browser = ResultActionsWidget(
-            lambda value, action: execute_value_action(value, action, self._parent),
-            show_values_without_actions=False,
-            show_history_button=False,
-            show_assignment_controls=False,
-            single_result=True,
-            parent=self._tabs,
-        )
-        browser.set_result(presentation)
-        self.results_widget = browser
-        self._tabs.addTab(browser, "Results")
-
+        first_page = None
         for entry in presentation.values:
-            if "plot" not in entry.actions or entry.value is None:
-                continue
-            value = entry.value
-            try:
-                filename = Path(value.path()).name
-                full_path = str(value.path())
-            except (AttributeError, TypeError, ValueError, OSError):
-                filename = entry.name
-                full_path = entry.name
-
-            page = ResultPlotPage(value, self._tabs)
+            filename, path = _filename_for_entry(entry)
+            page = ResultFilePage(entry, self._tabs, self._parent)
             index = self._tabs.addTab(page, filename)
-            self._tabs.setTabToolTip(index, full_path)
-            self._pending_plots.add(page)
+            self._tabs.setTabToolTip(index, path)
+            self.file_pages.append(page)
+            if page.plot_page is not None:
+                self._pending_plots.add(page)
+            if first_page is None:
+                first_page = page
 
-        self._tabs.setCurrentWidget(browser)
+        if first_page is not None:
+            self._tabs.setCurrentWidget(first_page)
 
     def _tab_changed(self, index: int) -> None:
         page = self._tabs.widget(index)
         if page not in self._pending_plots:
             return
-        # Let Qt display the page before plotting potentially large results.
+        # Wait for the tab to become visible before rendering a heavy plot.
         QTimer.singleShot(0, lambda p=page: self._render_plot(p))
 
-    def _render_plot(self, page: ResultPlotPage) -> None:
+    def _render_plot(self, page: ResultFilePage) -> None:
         if page not in self._pending_plots or self._tabs.currentWidget() is not page:
             return
         self._pending_plots.remove(page)
