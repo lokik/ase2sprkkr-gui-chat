@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Callable
+from collections.abc import Sequence
 
 from PyQt6.QtCore import QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QMessageBox
@@ -93,14 +94,21 @@ class SprkkrRunWindow(RunMonitorWindow):
         *,
         profile_name: str | None = None,
         profile_description: str | None = None,
+        profile_fields: Sequence[tuple[str, str]] | None = None,
         project_id: str | None = None,
         on_finished=None,
         on_submitted: Callable[[str | None], None] | None = None,
         on_back_to_setup: Callable[[], None] | None = None,
     ) -> None:
-        header = f"Directory: {request.directory}"
-        if profile_description:
-            header = f"{header}\n{profile_description}"
+        # Preserve the old free-form interface for external callers, but use
+        # structured fields whenever the profile has been resolved by the GUI.
+        header = None
+        header_fields = [("Directory", str(request.directory))]
+        if profile_fields is None and profile_description:
+            header = f"Directory: {request.directory}\n{profile_description}"
+            header_fields = None
+        elif profile_fields is not None:
+            header_fields.extend(profile_fields)
 
         self._request = request
         self._execution_manager = None
@@ -132,6 +140,7 @@ class SprkkrRunWindow(RunMonitorWindow):
             parent,
             title="SPRKKR Run",
             header=header,
+            header_fields=header_fields,
             warning_title="MPI Not Detected",
             on_finished=on_finished,
             task_name=str(getattr(getattr(request, "input_parameters", None), "task_name", "")),
