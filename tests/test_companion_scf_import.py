@@ -321,3 +321,25 @@ def test_companion_scf_rejects_mismatched_native_potential_before_parsing(
     assert companion is not None
     assert companion.output_path == right.resolve()
     assert parsed == [right]
+
+
+def test_companion_scf_does_not_choose_between_overwritten_outputs(
+    tmp_path, monkeypatch,
+):
+    potential = tmp_path / "Fe.pot_new"
+    selected = tmp_path / "Fe_DOS.out"
+    selected.write_text("DOS output")
+    for name in ("Fe_SCF.out", "Fe_SCF_old.out"):
+        (tmp_path / name).write_text(
+            " *       KKRSCF  VERSION  9.7          *\\n"
+            "TASK = SCF\\n"
+            "pot-file: Fe.pot_new\\n"
+        )
+
+    def expensive_parse(_path):
+        raise AssertionError("Ambiguous SCF outputs must not be fully parsed")
+
+    monkeypatch.setattr(
+        result_loading.TaskResult, "from_file", staticmethod(expensive_parse),
+    )
+    assert load_companion_scf_result(_loaded(selected, potential=potential)) is None

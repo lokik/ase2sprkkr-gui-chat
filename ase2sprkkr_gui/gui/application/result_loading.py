@@ -280,6 +280,8 @@ def load_result_file(
         cache.remember(loaded)
     elif (
         loaded.potential_path is not None
+        and loaded.atoms is not None
+        and loaded.potential_error is None
         and str(getattr(result, "task_name", "")).casefold() == "scf"
         and _other_scf_claims_potential(path, loaded.potential_path)
     ):

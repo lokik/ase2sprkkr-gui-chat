@@ -721,3 +721,42 @@ def test_duplicate_scf_outputs_do_not_claim_the_same_overwritten_potential(
     assert entries[0][1].atoms is not None  # immutable LoadedResult inputs
 
 
+
+
+def test_standalone_scf_import_rejects_ambiguous_overwritten_potential(
+    tmp_path, monkeypatch,
+):
+    from ase2sprkkr_gui.gui.application.result_loading import (
+        PotentialProvenanceAmbiguous,
+    )
+
+    potential = tmp_path / "Fe.pot_new"
+    potential.write_text("newest available potential")
+    first, second = tmp_path / "one.out", tmp_path / "two.out"
+    scf_head = (
+        " *       KKRSCF  VERSION  9.7          *\\n"
+        "TASK = SCF\\n"
+        "pot-file: Fe.pot_new\\n"
+    )
+    first.write_text(scf_head)
+    second.write_text(scf_head)
+
+    def parsed(path):
+        return SimpleNamespace(
+            task_name="scf", produces_potential=True,
+            directory=str(tmp_path), potential_filename=potential.name,
+            files={}, input_parameters=None,
+        )
+
+    monkeypatch.setattr(
+        result_loading_module.TaskResult, "from_file", staticmethod(parsed),
+    )
+    monkeypatch.setattr(
+        result_loading_module, "_load_potential",
+        lambda *args, **kwargs: (Atoms("Fe"), None),
+    )
+    loaded = load_result_file(first)
+
+    assert loaded.output_path == first.resolve()
+    assert loaded.atoms is None
+    assert isinstance(loaded.potential_error, PotentialProvenanceAmbiguous)
