@@ -144,6 +144,6 @@ def test_profile_summary_fields_preserve_the_legacy_description(monkeypatch):
         ("MPI", "automatic"),
     )
     assert execution_profiles.profile_description(None) == (
-        "Local execution · direct · MPI automatic\\n"
+        "Local execution · direct · MPI automatic\n"
         "Executables: /home/user/SPRKKR"
     )
