@@ -537,3 +537,50 @@ def test_imported_embedded_result_uses_recorded_host_version(tmp_path, native_em
     assert loaded.potential_error is None
     assert loaded.source_versions == (host_version,)
     assert loaded.source_versions[0] is host_version
+
+
+def test_batch_result_import_reuses_versioned_potential_and_invalidates(
+    tmp_path, monkeypatch,
+):
+    from ase import Atoms
+    from ase2sprkkr.outputs.task_result import TaskResult
+    from ase2sprkkr_gui.gui.application import result_loading
+
+    pot = tmp_path / "shared.pot"
+    pot.write_text("first version")
+    first, second, third = [tmp_path / name for name in (
+        "first.out", "second.out", "third.out",
+    )]
+    for output in (first, second, third):
+        output.touch()
+
+    cache = result_loading.ResultImportCache()
+    seen = []
+
+    def fake_result(path, *, input_cache=None):
+        assert input_cache is cache.inputs
+        result = TaskResult(
+            None, None, str(tmp_path), output_file=path.name, task_name="DOS"
+        )
+        result.files.add_file("potential", pot.name)
+        result._input_cache = input_cache
+        return result
+
+    def fake_potential(path, *, embedding_host=None):
+        seen.append(path)
+        return Atoms("Fe", cell=(3, 3, 3), pbc=True), None
+
+    monkeypatch.setattr(
+        result_loading.TaskResult, "from_file", staticmethod(fake_result)
+    )
+    monkeypatch.setattr(result_loading, "_load_potential", fake_potential)
+
+    a = result_loading.load_result_file(first, cache=cache)
+    b = result_loading.load_result_file(second, cache=cache)
+    assert a.atoms is b.atoms
+    assert seen == [pot.resolve()]
+
+    pot.write_text("changed version, not the same bytes")
+    c = result_loading.load_result_file(third, cache=cache)
+    assert c.atoms is not b.atoms
+    assert seen == [pot.resolve(), pot.resolve()]

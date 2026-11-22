@@ -326,7 +326,7 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
                 potential_error=None,
             )
 
-    def load(path):
+    def load(path, *, cache=None):
         parsed.append(path)
         if path == broken:
             raise ValueError("invalid output")
@@ -441,10 +441,11 @@ def test_directory_import_adds_only_successfully_loaded_potentials(
 
     output_a, output_b = tmp_path / "a.out", tmp_path / "b.out"
     potential_a, potential_b = tmp_path / "a.pot_new", tmp_path / "b.clu"
-    for path in (output_a, output_b, potential_a):
+    for path in (output_a, output_b, potential_a, tmp_path / "ignored.log",
+                 tmp_path / "ignored.txt"):
         path.touch()
 
-    def load(path):
+    def load(path, *, cache=None):
         good = path == output_a
         return LoadedResult(
             result=SimpleNamespace(
