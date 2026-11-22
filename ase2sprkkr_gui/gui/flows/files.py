@@ -570,11 +570,14 @@ def _read_output(
     def read():
         if cached_loaded is not None:
             return cached_loaded, None
-        loaded = load_result_file(file_path)
+        # One short-lived import scope for the primary output and its SCF:
+        # reuse ResultLoader's directory, input and SCF-probe caches.
+        cache = ResultImportCache()
+        loaded = load_result_file(file_path, cache=cache)
         companion = None
         if loaded.potential_path not in known_scf_potentials:
             try:
-                companion = load_companion_scf_result(loaded)
+                companion = load_companion_scf_result(loaded, cache=cache)
             except Exception:  # noqa: BLE001 - companion history is best effort
                 pass
         return loaded, companion

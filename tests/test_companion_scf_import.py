@@ -34,9 +34,9 @@ def test_loading_dos_also_imports_scf_but_selects_dos(tmp_path, monkeypatch):
     potential = tmp_path / "Fe.pot_new"
     dos = _loaded(dos_path, potential=potential)
     scf = _loaded(scf_path, task="scf", potential=potential)
-    monkeypatch.setattr(file_flows, "load_result_file", lambda *_: dos)
+    monkeypatch.setattr(file_flows, "load_result_file", lambda *_args, **_kwargs: dos)
     monkeypatch.setattr(
-        file_flows, "load_companion_scf_result", lambda _loaded: scf
+        file_flows, "load_companion_scf_result", lambda _loaded, **_kwargs: scf
     )
     controller = WorkspaceController()
     selected = []
@@ -54,10 +54,10 @@ def test_companion_failure_does_not_prevent_primary_output(tmp_path, monkeypatch
     dos_path = tmp_path / "Fe_DOS.out"
     dos_path.write_text("dos")
     monkeypatch.setattr(
-        file_flows, "load_result_file", lambda *_: _loaded(dos_path)
+        file_flows, "load_result_file", lambda *_args, **_kwargs: _loaded(dos_path)
     )
 
-    def fail(_loaded):
+    def fail(_loaded, *, cache):
         raise OSError("missing or broken SCF output")
 
     monkeypatch.setattr(file_flows, "load_companion_scf_result", fail)
@@ -84,13 +84,17 @@ def test_result_working_dialog_covers_companion_search_and_publication(
     scf = _loaded(scf_path, task="scf", potential=potential)
     events = []
 
-    def read(_path):
+    seen_loaders = []
+
+    def read(_path, *, cache):
         assert QThread.currentThread() is not app.thread()
+        seen_loaders.append(cache.loader)
         events.append("read")
         return dos
 
-    def companion(loaded):
+    def companion(loaded, *, cache):
         assert QThread.currentThread() is not app.thread()
+        assert cache.loader is seen_loaders[0]
         assert loaded is dos
         events.append("companion")
         return scf
@@ -159,3 +163,46 @@ def test_companion_loading_delegates_to_backend_without_rereading_potential(
     assert companion_loaded.output_path == scf_path.resolve()
     assert companion_loaded.atoms is atoms
     assert seen == [selected.result]
+
+
+def test_explicit_load_shares_one_loader_but_next_load_starts_fresh(
+    tmp_path, monkeypatch,
+):
+    """The per-import SCF lookup reuses filesystem probes, not stale history."""
+    path = tmp_path / "Fe_DOS.out"
+    path.touch()
+    main = _loaded(path, potential=tmp_path / "Fe.pot_new")
+    seen = []
+
+    def read(_path, *, cache):
+        assert _path == path
+        seen.append(("main", cache.loader))
+        return main
+
+    def companion(loaded, *, cache):
+        assert loaded is main
+        seen.append(("companion", cache.loader))
+        return None
+
+    # Keep this a pure orchestration test; backend directory/SCF caching is
+    # covered by ASE2SPRKKR's ResultLoader tests.
+    monkeypatch.setattr(file_flows, "load_result_file", read)
+    monkeypatch.setattr(file_flows, "load_companion_scf_result", companion)
+    monkeypatch.setattr(
+        file_flows, "run_modal_task",
+        lambda _parent, operation, **kwargs: kwargs["on_success"](operation()),
+    )
+    def explicit_load():
+        return file_flows._read_output(
+            path, None, known_scf_potentials=frozenset(),
+            on_success=lambda loaded, scf: (loaded, scf),
+        )
+
+    assert explicit_load() == (main, None)
+    assert explicit_load() == (main, None)
+    assert [kind for kind, _ in seen] == [
+        "main", "companion", "main", "companion",
+    ]
+    assert seen[0][1] is seen[1][1]
+    assert seen[2][1] is seen[3][1]
+    assert seen[0][1] is not seen[2][1]
