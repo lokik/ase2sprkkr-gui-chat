@@ -258,6 +258,7 @@ def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
     assert min(full_widths) >= 3 * 200 + 2 * 2
     assert all(bar._mode == "short" for bar in window._header_bars)
     assert window._calculate_navigation.layout().contentsMargins().right() == 24
+    assert window._header_bars[2].layout().contentsMargins().right() == 0
     window.resize(1360, 800)
     application.processEvents()
     narrow_widths = equal_thirds()
@@ -838,20 +839,27 @@ def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
         for header in window._header_bars:
             buttons = [button for button in header._buttons if button.isVisible()]
             assert header._button_row.count() == len(header._buttons)
-            middle = header is window._calculate_navigation
-            assert header.layout().itemAt(1 if middle else 0).layout() is header._button_row
-            assert header.layout().itemAt(2 if middle else 1).spacerItem() is not None
+            centered = header in (
+                window._calculate_navigation, window._header_bars[2],
+            )
+            assert header.layout().itemAt(
+                1 if centered else 0
+            ).layout() is header._button_row
+            assert header.layout().itemAt(
+                2 if centered else 1
+            ).spacerItem() is not None
             assert buttons
-            if middle:
+            left = buttons[0].mapTo(header, QPoint(0, 0)).x()
+            right = buttons[-1].mapTo(header, QPoint(buttons[-1].width(), 0)).x()
+            if centered:
                 assert header.layout().itemAt(0).spacerItem() is not None
-                # Keep the toolbar centered on the padded Calculate body.
-                left = buttons[0].mapTo(header, QPoint(0, 0)).x()
-                right = buttons[-1].mapTo(header, QPoint(buttons[-1].width(), 0)).x()
-                expected_center = (header.width() - 24) / 2
+                # Calculate keeps its body inset; Results uses the full width.
+                right_margin = header.layout().contentsMargins().right()
+                expected_center = (header.width() - right_margin) / 2
                 assert abs((left + right) / 2 - expected_center) <= 2
-                assert left >= 0 and right <= header.width() - 24
+                assert left >= 0 and right <= header.width() - right_margin
             else:
-                assert abs(buttons[0].mapTo(header, QPoint(0, 0)).x()) <= 1
+                assert abs(left) <= 1
             for left, right in zip(buttons, buttons[1:]):
                 assert right.mapTo(header, QPoint(0, 0)).x() >= (
                     left.mapTo(header, QPoint(0, 0)).x()
@@ -866,7 +874,7 @@ def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
     application.processEvents()
     check_positions()
     assert all(bar._mode == "icon" for bar in window._header_bars)
-    # In particular, Results buttons must not jump to the far right.
+    # In particular, centered Results buttons must stay within their header.
     results = window._header_bars[2]
     assert window._result_actions_widget.load_result_button.x() >= 0
     assert window._result_actions_widget.import_directory_button.x() >= 0
