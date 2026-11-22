@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from shutil import copyfileobj
 from tempfile import SpooledTemporaryFile
 from threading import Thread
@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -93,6 +94,7 @@ class RunMonitorWindow(QDialog):
         *,
         title: str = "Calculation Run",
         header: str | None = None,
+        header_fields: Sequence[tuple[str, str]] | None = None,
         initial_status: str = "",
         job_id: str | None = None,
         warning_title: str = "Warning",
@@ -127,20 +129,58 @@ class RunMonitorWindow(QDialog):
         self.refreshed.connect(self._set_status)
 
         layout = QVBoxLayout(self)
-        if header:
-            header_widget = QLabel(header, self)
-            header_widget.setWordWrap(True)
-            layout.addWidget(header_widget)
+        # Keep labels aligned independently from their variable-length values.
+        # Two label/value groups per row make room for the result tabs below.
+        self._header_grid = QGridLayout()
+        self._header_grid.setContentsMargins(0, 0, 0, 0)
+        self._header_grid.setHorizontalSpacing(10)
+        self._header_grid.setVerticalSpacing(3)
+        self._header_grid.setColumnStretch(1, 3)
+        self._header_grid.setColumnStretch(3, 2)
 
-        self._job_id_label = QLabel(self)
-        self._job_id_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
+        def add_field(label: str, value: str, index: int) -> tuple[QLabel, QLabel]:
+            row, pair = divmod(index, 2)
+            caption = QLabel(f"{label}:", self)
+            caption.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            content = QLabel(str(value), self)
+            content.setWordWrap(True)
+            content.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self._header_grid.addWidget(caption, row, pair * 2)
+            self._header_grid.addWidget(content, row, pair * 2 + 1)
+            return caption, content
+
+        if header_fields is None:
+            # Backwards-compatible free-form headers supplied by other callers.
+            fields = []
+            for line in (header or "").splitlines():
+                if not line.strip():
+                    continue
+                if ":" in line:
+                    label, value = line.split(":", 1)
+                    fields.append((label.strip(), value.strip()))
+                else:
+                    fields.append(("Details", line.strip()))
+        else:
+            fields = list(header_fields)
+
+        for index, (label, value) in enumerate(fields):
+            add_field(label, value, index)
+
+        # Job identity and state can arrive or change while the window is open.
+        # Place both on the same final row, avoiding two more full-width lines.
+        dynamic_row = (len(fields) + 1) // 2
+        self._job_id_title, self._job_id_label = add_field(
+            "Job ID", "", dynamic_row * 2
         )
-        layout.addWidget(self._job_id_label)
+        self._status_title, self._status = add_field(
+            "Status", initial_status, dynamic_row * 2 + 1
+        )
         self.set_job_id(job_id)
-
-        self._status = QLabel(initial_status, self)
-        layout.addWidget(self._status)
+        layout.addLayout(self._header_grid)
 
         self._output = QPlainTextEdit(self)
         self._output.setReadOnly(True)
@@ -214,10 +254,9 @@ class RunMonitorWindow(QDialog):
 
     def set_job_id(self, job_id: str | None) -> None:
         """Show the stable persistent run ID once one is known."""
-        self._job_id_label.setText(
-            f"Job ID: {job_id}" if job_id else ""
-        )
+        self._job_id_label.setText(job_id or "")
         self._job_id_label.setVisible(bool(job_id))
+        self._job_id_title.setVisible(bool(job_id))
 
     @property
     def runner(self) -> Any | None:
