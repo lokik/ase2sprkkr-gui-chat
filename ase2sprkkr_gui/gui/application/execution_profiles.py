@@ -63,8 +63,8 @@ def kind_label(kind: str) -> str:
 
 def _profile_presentation(
     name: str | None, *, configuration: Any | None = None
-) -> tuple[str, str, str]:
-    """Resolve execution location, MPI mode and executable path once."""
+) -> tuple[str, str, str, str]:
+    """Resolve execution location, MPI description/value and executable path."""
     profile = resolve_sprkkr_profile(name, configuration=configuration)
     kind = backend_kind(profile)
     if kind == "local":
@@ -85,27 +85,33 @@ def _profile_presentation(
 
     mpi = profile.mpi
     if mpi is False:
-        mpi_text = "MPI disabled"
+        mpi_value = "disabled"
+        mpi_text = f"MPI {mpi_value}"
     elif mpi is True:
-        mpi_text = "MPI enabled"
+        mpi_value = "enabled"
+        mpi_text = f"MPI {mpi_value}"
     elif mpi is None or mpi == "auto":
-        mpi_text = "MPI automatic"
+        mpi_value = "automatic"
+        mpi_text = f"MPI {mpi_value}"
     elif isinstance(mpi, int):
-        mpi_text = f"MPI: {mpi} processes"
+        mpi_value = f"{mpi} processes"
+        mpi_text = f"MPI: {mpi_value}"
     elif isinstance(mpi, (tuple, list)):
-        mpi_text = "MPI: " + shlex.join(str(item) for item in mpi)
+        mpi_value = shlex.join(str(item) for item in mpi)
+        mpi_text = f"MPI: {mpi_value}"
     else:
-        mpi_text = f"MPI: {mpi}"
+        mpi_value = str(mpi)
+        mpi_text = f"MPI: {mpi_value}"
 
     executable = profile.executable_dir or "PATH"
     if profile.executable_suffix:
         executable = f"{executable} (suffix {profile.executable_suffix})"
-    return where, mpi_text, executable
+    return where, mpi_text, mpi_value, executable
 
 
 def profile_description(name: str | None, *, configuration: Any | None = None) -> str:
     """Return the existing short text description of a resolved profile."""
-    where, mpi_text, executable = _profile_presentation(
+    where, mpi_text, _mpi_value, executable = _profile_presentation(
         name, configuration=configuration
     )
     return f"{where} · {mpi_text}\nExecutables: {executable}"
@@ -115,13 +121,9 @@ def profile_summary_fields(
     name: str | None, *, configuration: Any | None = None
 ) -> tuple[tuple[str, str], ...]:
     """Structured monitor metadata, without parsing display strings."""
-    where, mpi_text, executable = _profile_presentation(
+    where, _mpi_text, mpi_value, executable = _profile_presentation(
         name, configuration=configuration
     )
-    if mpi_text.startswith("MPI: "):
-        mpi_value = mpi_text[len("MPI: "):]
-    else:
-        mpi_value = mpi_text.removeprefix("MPI ")
     return (
         ("Execution", where),
         ("Executables", executable),
