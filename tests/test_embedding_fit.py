@@ -23,7 +23,11 @@ def _set_atoms(preview, sizes, widths):
 
 def _assert_markers_inside_canvas(preview):
     """Marker radius includes half the scatter linewidth."""
+    xlim, ylim = preview.axes.get_xlim(), preview.axes.get_ylim()
     preview.canvas.draw()
+    # Drawing must not override limits that include the rendered marker radii.
+    np.testing.assert_allclose(preview.axes.get_xlim(), xlim)
+    np.testing.assert_allclose(preview.axes.get_ylim(), ylim)
     projected, _ = preview.project(preview._positions)
     centres = preview.axes.transData.transform(projected)
     radii = (
