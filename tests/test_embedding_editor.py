@@ -1549,11 +1549,31 @@ def test_embedding_symmetry_colors_and_actions_follow_same_checkbox():
     assert set(dialog.draft.entries) == {site}
 
 
-def test_displacement_is_debounced_and_flushed_before_changing_selected_site():
+@pytest.fixture
+def unexpected_embedding_warnings(monkeypatch):
+    """Record rather than display modal warnings in displacement interaction tests."""
+    from PyQt6.QtWidgets import QMessageBox
+
+    messages = []
+
+    def record(_parent, title, message, *_args, **_kwargs):
+        messages.append((title, message))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "warning", record)
+    return messages
+
+
+def test_displacement_is_debounced_and_flushed_before_changing_selected_site(
+    unexpected_embedding_warnings,
+):
     dialog = BuildEmbeddingDialog(
         Atoms("Cu2", positions=[[0, 0, 0], [1, 1, 1]],
               cell=[2, 2, 2], pbc=True)
     )
+    # A Cartesian site-local displacement is not necessarily invariant under
+    # the host symmetry. This test verifies debounce, not symmetry constraints.
+    dialog.symmetric.setChecked(False)
     original = dialog._selected_site
     assert original == dialog._site_rows[0]
     dialog.deltas[0].setValue(0.12)
@@ -1563,6 +1583,20 @@ def test_displacement_is_debounced_and_flushed_before_changing_selected_site():
     assert not dialog._displacement_timer.isActive()
     assert dialog.draft.entries[original].displacement[0] == pytest.approx(0.12)
     assert dialog._selected_site == dialog._site_rows[1]
+    assert not unexpected_embedding_warnings
+
+
+def test_noninvariant_displacement_warns_without_modifying_the_draft(
+    unexpected_embedding_warnings,
+):
+    dialog = BuildEmbeddingDialog(host())
+    assert dialog.symmetric.isChecked()  # Keep the actual default.
+    dialog.deltas[0].setValue(0.12)
+    dialog._apply_pending_displacement()
+    assert len(unexpected_embedding_warnings) == 1
+    assert "conflicts" in unexpected_embedding_warnings[0][1]
+    assert not dialog.draft.entries
+    assert not dialog._displacement_timer.isActive()
 
 
 def test_restore_occupation_is_shared_and_hidden_when_none():
@@ -1603,8 +1637,11 @@ def test_bulk_restore_original_occupation_restores_model_values():
     assert editor._draft.sites[0].occupancies[0].symbol == "Cu"
 
 
-def test_pending_displacement_is_not_lost_when_occupation_changes():
+def test_pending_displacement_is_not_lost_when_occupation_changes(
+    unexpected_embedding_warnings,
+):
     dialog = BuildEmbeddingDialog(host())
+    dialog.symmetric.setChecked(False)
     site = dialog.draft.center
     dialog.deltas[2].setValue(0.08)
     assert dialog._displacement_timer.isActive()
@@ -1613,15 +1650,20 @@ def test_pending_displacement_is_not_lost_when_occupation_changes():
     entry = dialog.draft.entries[site]
     assert entry.displacement[2] == pytest.approx(0.08)
     assert entry.occupation == {"Fe": 1.0}
+    assert not unexpected_embedding_warnings
 
 
-def test_exclude_after_pending_displacement_does_not_reinclude_atom():
+def test_exclude_after_pending_displacement_does_not_reinclude_atom(
+    unexpected_embedding_warnings,
+):
     dialog = BuildEmbeddingDialog(host())
+    dialog.symmetric.setChecked(False)
     site = dialog.draft.center
     dialog.deltas[0].setValue(0.14)
     dialog._exclude()
     assert not dialog._displacement_timer.isActive()
     assert site not in dialog.draft.entries
+    assert not unexpected_embedding_warnings
 
 
 def test_2d_multilayer_detail_contains_entire_transition_region_of_one_cell():
@@ -2149,8 +2191,11 @@ def test_multiselection_occupation_restore_and_include_exclude_keep_all_rows():
     assert set(dialog.draft.entries) == selected
 
 
-def test_multiselection_pending_displacement_applies_before_selecting_other_row():
+def test_multiselection_pending_displacement_applies_before_selecting_other_row(
+    unexpected_embedding_warnings,
+):
     dialog = BuildEmbeddingDialog(three_site_host())
+    dialog.symmetric.setChecked(False)
     select_table_rows(dialog, (0, 1))
     dialog.deltas[0].setValue(.12)
     select_table_rows(dialog, (2,))
@@ -2160,6 +2205,7 @@ def test_multiselection_pending_displacement_applies_before_selecting_other_row(
         np.testing.assert_allclose(dialog.draft.entries[HostSite(index, (0, 0, 0))].displacement,
                                    [.12, 0, 0])
     assert HostSite(2, (0, 0, 0)) not in dialog.draft.entries
+    assert not unexpected_embedding_warnings
 
 
 def test_shift_selection_keeps_range_and_uses_clicked_site_as_active():
