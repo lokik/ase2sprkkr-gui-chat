@@ -156,13 +156,21 @@ def present_result(
     record: ResultRecord | None = None,
     store: ResultStore | None = None,
     actions: ResultActionAvailability | None = None,
+    result_only: bool = False,
 ) -> ResultPresentation | None:
-    """Convert a result and resolved artifact state into view data."""
+    """Convert result values into presentation data.
+
+    The completed-run monitor requests only task-declared scientific results;
+    the main result browser continues to expose every managed output file.
+    """
     if result is None:
         return None
 
     try:
-        items = list(result.output_values.items())
+        values = (
+            getattr(result, "result_values", None) if result_only else None
+        )
+        items = list((result.output_values if values is None else values).items())
     except Exception as exc:
         logger.exception("Failed to load result output values")
         return ResultPresentation(

@@ -495,3 +495,65 @@ def test_finished_without_output_values_does_not_create_results_tab(_qt_applicat
         "Output"
     ]
     window.close()
+
+
+def test_task_metadata_selects_meaningful_result_tabs_only(_qt_application):
+    from types import SimpleNamespace
+
+    class File:
+        info = ""
+        def __init__(self, filename):
+            self.name = filename
+            self.display_name = filename
+            self.filename = filename
+
+        def value_label(self):
+            return self.filename
+
+        def actions(self):
+            return ("open",)
+
+        def path(self):
+            return "/tmp/" + self.filename
+
+    scientific = File("Fe_DOS.dos")
+    auxiliary = File("Fe.pot_new")
+    log = File("Fe_DOS.out")
+    result = SimpleNamespace(
+        output_values={"DOS": scientific, "potential": auxiliary, "output": log},
+        result_values={"DOS": scientific},
+    )
+
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window._on_finished(result)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output", "Fe_DOS.dos"
+    ]
+    assert window._tabs.tabText(window._tabs.currentIndex()) == "Fe_DOS.dos"
+    window.close()
+
+
+def test_task_with_auxiliary_outputs_only_gets_no_result_tabs(_qt_application):
+    from types import SimpleNamespace
+
+    class File:
+        name = "new potential"
+        display_name = "new potential"
+        info = ""
+
+        def value_label(self):
+            return "Fe.pot_new"
+
+        def actions(self):
+            return ("open",)
+
+    result = SimpleNamespace(
+        output_values={"potential": File()},
+        result_values={},
+    )
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window._on_finished(result)
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
+        "Output"
+    ]
+    window.close()

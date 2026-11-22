@@ -182,7 +182,7 @@ class CompletedRunPages(QObject):
         tabs.currentChanged.connect(self._tab_changed)
 
     def show_result(self, result: Any) -> None:
-        presentation = present_result(result)
+        presentation = present_result(result, result_only=True)
         if presentation is None:
             return
         first_page = None
