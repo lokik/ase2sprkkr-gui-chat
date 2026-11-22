@@ -67,6 +67,9 @@ class LoadedResult:
     source_versions: tuple[PotentialFileVersion, ...] = ()
     # Cheap, pre-parser stdout fingerprint used to reject concurrent rewrites.
     parsed_output_version: PotentialFileVersion | None = None
+    # The GUI's existing result record, when atoms were deliberately omitted
+    # because its captured structure state can be reused without re-parsing.
+    cached_record_id: int | None = None
 
 
 class ResultImportCache:
