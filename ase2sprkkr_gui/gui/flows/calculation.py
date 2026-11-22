@@ -8,7 +8,7 @@ from typing import Callable
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 from kkrunner.projects import ProjectRepository
 
-from ase2sprkkr_gui.gui.application.execution_profiles import profile_description
+from ase2sprkkr_gui.gui.application.execution_profiles import profile_summary_fields
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.result_loading import PotentialVersionChanged
@@ -296,9 +296,9 @@ def run_calculation(
             recent_files.remember("input", input_file)
 
     try:
-        description = profile_description(profile_name)
+        profile_fields = profile_summary_fields(profile_name)
     except (KeyError, TypeError, ValueError):
-        description = None
+        profile_fields = None
 
     def back_to_run_setup() -> None:
         # Submission was rejected before the new job started. Open the
@@ -322,7 +322,7 @@ def run_calculation(
     window = SprkkrRunWindow(
         request=request,
         profile_name=profile_name,
-        profile_description=description,
+        profile_fields=profile_fields,
         project_id=project_id,
         parent=None if track_launch_monitor is not None else parent,
         on_finished=finished,
