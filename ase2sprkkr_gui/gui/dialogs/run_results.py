@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QObject, Qt, QTimer
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QTabWidget, QToolButton, QVBoxLayout, QWidget
 
 from ase2sprkkr_gui.gui.application.result_presentation import present_result
+from ase2sprkkr_gui.gui.application.result_store import ResultRecord, ResultStore
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
 from ase2sprkkr_gui.gui.widgets.result_actions import (
     ResultActionsWidget,
@@ -186,11 +187,17 @@ class CompletedRunPages(QObject):
         self.execution_widget: ResultActionsWidget | None = None
         tabs.currentChanged.connect(self._tab_changed)
 
-    def show_result(self, result: Any) -> None:
+    def show_result(
+        self,
+        result: Any,
+        *,
+        record: ResultRecord | None = None,
+        store: ResultStore | None = None,
+    ) -> None:
         # The execution summary must never be filtered to scientific results.
         # It shares both the presenter and the actions widget with the main
         # Results panel, so auxiliary files remain inspectable and exportable.
-        full_presentation = present_result(result)
+        full_presentation = present_result(result, record=record, store=store)
         if full_presentation is not None and full_presentation.values:
             widget = ResultActionsWidget(
                 lambda value, action: execute_value_action(
@@ -206,7 +213,7 @@ class CompletedRunPages(QObject):
             self.execution_widget = widget
             self._tabs.addTab(widget, "Result Overview")
 
-        presentation = present_result(result, result_only=True)
+        presentation = present_result(result, result_only=True, record=record, store=store)
         if presentation is None:
             return
         first_page = None
@@ -241,3 +248,40 @@ class CompletedRunPages(QObject):
             return
         self._pending_plots.remove(page)
         page.render()
+
+
+class CompletedResultWindow(QDialog):
+    """Reopen saved scientific results without restarting or attaching to a run."""
+
+    def __init__(
+        self,
+        result: Any,
+        parent: QWidget | None = None,
+        *,
+        title: str = "Calculation Results",
+        record: ResultRecord | None = None,
+        store: ResultStore | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setWindowTitle(title)
+        self.resize(900, 600)
+        # Retain the native result for as long as its file actions and plots exist.
+        self._result = getattr(result, "result", result)
+
+        layout = QVBoxLayout(self)
+        self._tabs = QTabWidget(self)
+        layout.addWidget(self._tabs, 1)
+        self._completed_pages = CompletedRunPages(self._tabs, self)
+        self._completed_pages.show_result(self._result, record=record, store=store)
+        if not self._tabs.count():
+            label = QLabel("No result files are available for this calculation.", self)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        close_button = QPushButton("Close", self)
+        close_button.clicked.connect(self.close)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)

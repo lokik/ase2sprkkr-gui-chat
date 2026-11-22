@@ -29,6 +29,7 @@ from ase2sprkkr_gui.gui.application.workspace_controller import (
 from ase2sprkkr_gui.gui.controllers.persistent_jobs import PersistentJobsController
 from ase2sprkkr_gui.gui.dialogs.project_browser import ProjectBrowserDialog
 from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
+from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
 from ase2sprkkr_gui.gui.dialogs.workflow_window import WorkflowWindow
 from ase2sprkkr_gui.gui.misc.icons import application_icon
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
@@ -84,6 +85,7 @@ class GuiApplication(QObject):
         )
         self._workflow_window: WorkflowWindow | None = None
         self._project_browser: ProjectBrowserDialog | None = None
+        self._result_windows: dict[int, CompletedResultWindow] = {}
         self.persistent_jobs_controller.resultOpened.connect(self._show_loaded_result)
         self._exit_in_progress = False
         self._exit_approved = False
@@ -141,6 +143,7 @@ class GuiApplication(QObject):
         widget = window.result_actions_widget
         if widget is None:
             return
+        widget.openResultWindowRequested.connect(self._show_result_window)
 
         presenter = ResultActionsPresenter(
             self.controller,
@@ -191,6 +194,46 @@ class GuiApplication(QObject):
                 target
             )
         )
+
+    def _show_result_window(self, result_id: int) -> None:
+        """Reopen the selected scientific result without launching a calculation."""
+        parent = self.create_workflow_window()
+        try:
+            record = self.controller.result_store.result(result_id)
+        except KeyError:
+            QMessageBox.warning(parent, "Cannot Open Result", "Result is no longer available.")
+            return
+
+        if record.persistent_ref is not None and self.persistent_jobs.supports_results:
+            job = self.persistent_jobs.job(record.persistent_ref)
+            if job is not None and job.is_final and not job.can_retry_download:
+                self.persistent_jobs_controller.open_result_window(
+                    record.persistent_ref, parent,
+                )
+                return
+
+        existing = self._result_windows.get(result_id)
+        if existing is not None:
+            self._show_window(existing)
+            return
+        result_window = CompletedResultWindow(
+            record.result,
+            title=f"Results — {record.task_name.upper()}",
+            record=record,
+            store=self.controller.result_store,
+        )
+        self._result_windows[result_id] = result_window
+        result_window.destroyed.connect(
+            lambda *_args, key=result_id, target=result_window:
+                self._result_window_destroyed(key, target)
+        )
+        self._show_window(result_window)
+
+    def _result_window_destroyed(
+        self, result_id: int, window: CompletedResultWindow,
+    ) -> None:
+        if self._result_windows.get(result_id) is window:
+            self._result_windows.pop(result_id, None)
 
     def _assign_results_to_project(self, result_ids, parent: QWidget) -> None:
         from ase2sprkkr_gui.gui.dialogs.assign_results import assign_results_to_project

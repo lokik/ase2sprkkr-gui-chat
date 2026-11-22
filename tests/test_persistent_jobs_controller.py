@@ -1012,3 +1012,125 @@ def test_open_job_download_failure_explains_retry(monkeypatch):
     assert not controller.open_job(job.id, parent)
     assert "Retry download" in warnings[-1][1]
     parent.close()
+
+
+def test_completed_job_can_reopen_result_window_without_restart(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    job = _job("finished-run", state="finished")
+    source = _Source((job,))
+    source.supports_results = True
+    result = SimpleNamespace(output_values={}, result_values={})
+    loads = []
+    source.load_result = lambda job_id: (loads.append(job_id), result)[1]
+    controller = PersistentJobsController(source)
+    view = _view()
+    controller.bind_view(view)
+    view._show_job(job)
+    assert not view.open_result_window_button.isHidden()
+
+    created = []
+
+    class ResultWindow(_MonitorWindow):
+        def __init__(self, value, *, title):
+            super().__init__()
+            assert value is result
+            assert "Fe-SCF" in title
+            created.append(self)
+
+    def modal_task(_parent, operation, *, on_success, **_kwargs):
+        return on_success(operation())
+
+    monkeypatch.setattr(controller_module, "CompletedResultWindow", ResultWindow)
+    monkeypatch.setattr(controller_module, "run_modal_task", modal_task)
+
+    view.open_result_window_button.click()
+    view.showResultWindowRequested.emit(job.id)
+
+    assert loads == [job.id]
+    assert len(created) == 1
+    assert created[0].show_calls == 2
+    assert created[0].raise_calls == 2
+    assert controller._result_windows[job.id] is created[0]
+    assert controller._monitor_windows == {}
+    app.processEvents()
+
+
+def test_completed_job_reuses_original_monitor_instead_of_reloading(monkeypatch):
+    _app = QApplication.instance() or QApplication([])
+    job = _job("finished-run", state="finished")
+    source = _Source((job,))
+    source.supports_results = True
+    controller = PersistentJobsController(source)
+    view = _view()
+    controller.bind_view(view)
+    monitor = _MonitorWindow()
+    controller._monitor_windows[job.id] = monitor
+
+    def unexpected_load(_job_id):
+        raise AssertionError("Result must not be parsed again with a live monitor")
+
+    source.load_result = unexpected_load
+    controller.open_result_window(job.id, view)
+
+    assert monitor.show_calls == 1
+    assert monitor.raise_calls == 1
+    assert controller._result_windows == {}
+
+
+def test_result_window_is_not_offered_for_active_or_unavailable_results():
+    _app = QApplication.instance() or QApplication([])
+    running = _job("running")
+    finished = _job("finished", state="finished")
+    source = _Source((running, finished))
+    controller = PersistentJobsController(source)
+    view = _view()
+    controller.bind_view(view)
+
+    view._show_job(running)
+    assert view.open_result_window_button.isHidden()
+    view._show_job(finished)
+    assert view.open_result_window_button.isHidden()
+
+    source.supports_results = True
+    controller.refresh_view(view)
+    view._show_job(finished)
+    assert not view.open_result_window_button.isHidden()
+
+
+def test_closed_result_window_can_be_created_again(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    job = _job("finished-run", state="finished")
+    source = _Source((job,))
+    source.supports_results = True
+    result = SimpleNamespace(output_values={}, result_values={})
+    source.load_result = lambda _job_id: result
+    controller = PersistentJobsController(source)
+    parent = _view()
+    controller.bind_view(parent)
+
+    created = []
+
+    class ResultWindow(QWidget):
+        def __init__(self, value, *, title):
+            super().__init__()
+            assert value is result
+            self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            created.append(self)
+
+    monkeypatch.setattr(controller_module, "CompletedResultWindow", ResultWindow)
+    monkeypatch.setattr(
+        controller_module, "run_modal_task",
+        lambda _parent, operation, *, on_success, **kwargs: on_success(operation()),
+    )
+
+    controller.open_result_window(job.id, parent)
+    assert len(created) == 1
+    created[-1].close()
+    app.processEvents()
+    assert job.id not in controller._result_windows
+
+    controller.open_result_window(job.id, parent)
+    assert len(created) == 2
+    assert controller._result_windows[job.id] is created[-1]
+    created[-1].close()
+    app.processEvents()

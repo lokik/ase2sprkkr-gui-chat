@@ -223,6 +223,13 @@ class RunMonitorWindow(QDialog):
     def runner(self) -> Any | None:
         return self._cancellation.runner
 
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        # A monitor hidden during execution may be reopened before the worker
+        # finishes. Its former close request must not suppress result tabs or
+        # destroy the now-visible window when that worker completes.
+        self._close_requested = False
+        super().showEvent(event)
+
     def closeEvent(self, event) -> None:  # type: ignore[override]
         if self._thread is not None and self._thread.isRunning():
             self._close_requested = True

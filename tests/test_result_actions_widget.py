@@ -444,3 +444,21 @@ def test_file_without_available_actions_is_still_shown_in_main_result_list():
     assert widget._row_count == 1
     assert widget._grid.itemAtPosition(0, 0).widget().text() == "Display value"
     widget.close()
+
+
+def test_selected_workspace_result_can_request_standalone_window():
+    from ase2sprkkr_gui.gui.application.result_presentation import ResultPresentation
+
+    _application = QApplication.instance() or QApplication([])
+    widget = _widget()
+    requested = []
+    widget.openResultWindowRequested.connect(requested.append)
+
+    widget.set_result(ResultPresentation(result_id=42))
+    assert widget.open_result_window_button.isEnabled()
+    widget.open_result_window_button.click()
+    assert requested == [42]
+
+    widget.set_result(None)
+    assert not widget.open_result_window_button.isEnabled()
+    widget.close()
