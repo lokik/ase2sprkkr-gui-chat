@@ -16,6 +16,7 @@ from ase2sprkkr_gui.gui.application.imported_project_results import assign
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
+from ase2sprkkr_gui.gui.application.saved_output import read_saved_output
 from ase2sprkkr_gui.gui.application.result_loading import (
     PotentialVersionChanged,
     load_result as interpret_result,
@@ -32,6 +33,7 @@ from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
 from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
 from ase2sprkkr_gui.gui.dialogs.workflow_window import WorkflowWindow
 from ase2sprkkr_gui.gui.misc.icons import application_icon
+from ase2sprkkr_gui.gui.misc.modal_task import run_modal_task
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
 from ase2sprkkr_gui.gui.flows import files as file_flows
@@ -216,11 +218,19 @@ class GuiApplication(QObject):
         if existing is not None:
             self._show_window(existing)
             return
+        saved_output = run_modal_task(
+            parent,
+            lambda: read_saved_output(record.result, record=record),
+            title="Loading Saved Output",
+            label="Restoring output and INFO pages…",
+        )
         result_window = CompletedResultWindow(
             record.result,
             title=f"Results — {record.task_name.upper()}",
             record=record,
             store=self.controller.result_store,
+            saved_output=saved_output,
+            task_name=record.task_name,
         )
         self._result_windows[result_id] = result_window
         result_window.destroyed.connect(
