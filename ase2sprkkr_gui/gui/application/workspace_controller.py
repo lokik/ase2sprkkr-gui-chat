@@ -898,6 +898,7 @@ class WorkspaceController(QObject):
             persistent_ref=loaded.persistent_ref,
             source_versions=loaded.source_versions,
             parsed_potential_version=loaded.parsed_potential_version,
+            cached_record_id=loaded.cached_record_id,
         )
         self._notify_external_result(
             loaded.result if len(self._results) != previous_count else None,
