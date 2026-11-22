@@ -168,3 +168,46 @@ def test_companion_loading_delegates_to_backend_without_rereading_potential(
     assert companion_loaded.atoms is atoms
     assert len(parses) == 1
     assert seen == [selected.result]
+
+
+def test_explicit_load_shares_one_loader_but_next_load_starts_fresh(
+    tmp_path, monkeypatch,
+):
+    """One import shares its loader with companion SCF; the next starts fresh."""
+    path = tmp_path / "Fe_DOS.out"
+    path.touch()
+    main = _loaded(path, potential=tmp_path / "Fe.pot_new")
+    seen = []
+
+    def read(_path, *, cache):
+        assert _path == path
+        seen.append(("main", cache.loader))
+        return main
+
+    def companion(loaded, *, cache):
+        assert loaded is main
+        seen.append(("companion", cache.loader))
+        return None
+
+    # Native directory and parsed-potential caching is covered in ASE2SPRKKR.
+    monkeypatch.setattr(file_flows, "load_result_file", read)
+    monkeypatch.setattr(file_flows, "load_companion_scf_result", companion)
+    monkeypatch.setattr(
+        file_flows, "run_modal_task",
+        lambda _parent, operation, **kwargs: kwargs["on_success"](operation()),
+    )
+
+    def explicit_load():
+        return file_flows._read_output(
+            path, None, known_scf_potentials=frozenset(),
+            on_success=lambda loaded, scf: (loaded, scf),
+        )
+
+    assert explicit_load() == (main, None)
+    assert explicit_load() == (main, None)
+    assert [kind for kind, _ in seen] == [
+        "main", "companion", "main", "companion",
+    ]
+    assert seen[0][1] is seen[1][1]
+    assert seen[2][1] is seen[3][1]
+    assert seen[0][1] is not seen[2][1]
