@@ -435,6 +435,9 @@ class WorkspaceController(QObject):
             structure.restarted
             or structure.state_id is None
             or structure.potential_path is None
+            # Embedded runs have a distinct POTFIL (host) and POTFIL_CLU.
+            # Reusing one path as a periodic POTFIL would be incorrect.
+            or getattr(structure.atoms, "embedding_host", None) is not None
             or self.has_unsaved_structure
         ):
             return None
