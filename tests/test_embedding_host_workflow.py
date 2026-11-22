@@ -143,12 +143,19 @@ def test_completed_embedded_scf_output_unlocks_post_scf_tasks_when_clupot_still_
     parameters.CONTROL.POTFIL = "host.pot"
     parameters.CONTROL.POTFIL_CLU = "cluster.pot"
     result = ScfResult(parameters, None, tmp_path)
+    # GUI provenance validates the periodic host dependency even when the
+    # native potential parser is replaced with a fixture in this test.
+    (tmp_path / "host.pot").write_bytes(b"mock host potential")
     result.iterations = [{"converged": lambda: True}]
     result.require_current_file = lambda _path: None
     result._read_potential = lambda _path: native_cluster
 
     loaded = load_result(result, fallback_directory=tmp_path)
-    assert loaded.atoms is cluster
+    # The OUT-specific CONVERGED interpretation must not mutate the shared
+    # native CLUPOT, which may also belong to earlier/ongoing calculations.
+    assert loaded.atoms is not cluster
+    assert native_cluster.SCF_INFO.SCFSTATUS() == "ITERATING"
+    assert not cluster.sprkkr_is_scf_converged()
     assert loaded.potential_error is None
     assert loaded.atoms.sprkkr_is_scf_converged()
     assert loaded.atoms.info["sprkkr_embedding_scf_status"] == "CONVERGED"

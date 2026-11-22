@@ -217,7 +217,10 @@ class EmbeddingPreview(QWidget):
         ax = self.axes
         ax.clear()
         ax.set_axis_off()
-        ax.set_aspect("equal", adjustable="datalim")
+        # _apply_limits sets a common x/y pixel scale and exact limits.
+        # Matplotlib's equal/datalim aspect changes them again at draw time,
+        # possibly clipping the larger marker rims after resizing.
+        ax.set_aspect("auto")
         self._scatter = None
         self._label_artists = []
         points, depth = self.project(self._positions)
