@@ -1,39 +1,18 @@
-"""SPLEED INFO page backed by native ase2sprkkr parser events."""
+"""SPLEED INFO page, using the shared text-only parser event view."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QPlainTextEdit, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QWidget
 
 from ase2sprkkr.outputs.readers.spleed import SpleedProgressParser
+from ase2sprkkr_gui.gui.dialogs.info_progress import InfoProgressPage
 
 
-class SpleedProgressPage(QWidget):
-    """Show verified SPLEED diagram milestones, not guessed completion %."""
+class SpleedProgressPage(InfoProgressPage):
+    """Display SPLEED parser events without inventing completion percentages."""
 
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.parser = SpleedProgressParser(on_info=self._on_info)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Latest INFO", self))
-
-        self.last_info = QLabel("Preparing SPLEED calculation...", self)
-        self.last_info.setWordWrap(True)
-        self.last_info.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            parent,
+            parser_factory=SpleedProgressParser,
+            initial_info="Preparing SPLEED calculation...",
         )
-        layout.addWidget(self.last_info)
-
-        self.events = QPlainTextEdit(self)
-        self.events.setReadOnly(True)
-        self.events.setMaximumBlockCount(1024)
-        layout.addWidget(self.events, 1)
-
-    def _on_info(self, *, kind: str, data: object):
-        line = self.parser.format_info(kind, data)
-        if line is not None:
-            self.last_info.setText(line)
-            self.events.appendPlainText(line)
-
-    def consume(self, text: str, kind: str):
-        if kind.lower() not in {"err", "stderr"} and text:
-            self.parser.feed(text)

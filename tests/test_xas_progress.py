@@ -22,7 +22,7 @@ def test_xas_info_tab_uses_native_progress_and_completion():
         task_name="XAS", xas_total_points=180, autostart=False,
     )
     assert [monitor._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
-    page = monitor._xas_progress
+    page = monitor._info_page
     assert page is not None
     assert page.progress.isHidden()
 
@@ -55,7 +55,7 @@ def test_xas_generic_stop_is_not_a_completed_spectrum():
         task_name="xas", xas_total_points=180, autostart=False,
     )
     monitor._append_output(loop(1), "stderr")
-    page = monitor._xas_progress
+    page = monitor._info_page
     assert page.progress.isHidden()
 
     monitor._append_output("program stopped regularly via STOP_REGULAR\n", "stdout")
@@ -69,7 +69,7 @@ def test_xas_completion_without_known_input_ne():
     monitor = RunMonitorWindow(
         lambda cancellation: object(), task_name="XAS", autostart=False,
     )
-    page = monitor._xas_progress
+    page = monitor._info_page
     monitor._append_output(loop(3), "stdout")
     assert page.progress.isHidden()
     monitor._append_output(

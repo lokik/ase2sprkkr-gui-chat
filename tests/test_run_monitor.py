@@ -197,12 +197,12 @@ def test_new_run_displays_job_id_when_persistent_id_arrives():
 def test_attached_scf_monitor_shows_info_and_accepts_replayed_iterations():
     app = QApplication.instance() or QApplication([])
     window = create_attached_run_monitor_window(_job(), _Source(None), autostart=False)
-    assert window._scf_progress is not None
+    assert window._info_page is not None
 
     line = " 5 ERR 0.211E-02 0.208E-01 EF 0.76199 0.00307 D 14.537 M 2.1740 0.0536\n"
     completed = line + " ETOT -42.5 SCF - cycle not converged - continue\n"
     window._append_output(completed, "out")
-    assert window._scf_progress.tracker.iterations[0].iteration == 5
+    assert window._info_page.tracker.iterations[0].iteration == 5
     assert window._output.toPlainText().strip() == completed.strip()
     window.close()
 
@@ -213,20 +213,20 @@ def test_jxc_monitor_uses_task_specific_info_events():
     window = RunMonitorWindow(
         lambda cancellation: object(), task_name="JXC", autostart=False
     )
-    assert window._jxc_progress is not None
+    assert window._info_page is not None
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
     window._append_output(
         "  number of TAU(I,J)'s to be calculated: 89\n",
         "out",
     )
-    assert window._jxc_progress.last_info.text() == (
+    assert window._info_page.last_info.text() == (
         "Calculating 89 TAU(I,J) pairs"
     )
     window._append_output(
         "results written to file:Fe_JXC_XCPLTEN_Jij.dat\n",
         "out",
     )
-    assert "JXC results written" in window._jxc_progress.last_info.text()
+    assert "JXC results written" in window._info_page.last_info.text()
     assert "number of TAU(I,J)" in window._output.toPlainText()
     window.close()
 
@@ -237,20 +237,20 @@ def test_dos_monitor_uses_structured_progress_and_preserves_raw_output():
     window = RunMonitorWindow(
         lambda cancellation: object(), task_name="DOS", autostart=False
     )
-    assert window._dos_progress is not None
+    assert window._info_page is not None
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
-    assert window._dos_progress.progress.isHidden()
+    assert window._info_page.progress.isHidden()
 
     window._append_output("13/300 do", "out")
-    assert window._dos_progress.last_info.text() == "Preparing DOS calculation..."
+    assert window._info_page.last_info.text() == "Preparing DOS calculation..."
     window._append_output("ne.\n14/300 done.\n", "out")
-    assert window._dos_progress.last_info.text() == "14/300 done."
-    assert window._dos_progress.progress.maximum() == 300
-    assert window._dos_progress.progress.value() == 14
+    assert window._info_page.last_info.text() == "14/300 done."
+    assert window._info_page.progress.maximum() == 300
+    assert window._info_page.progress.value() == 14
     assert window._output.toPlainText() == "13/300 done.\n14/300 done.\n"
 
     window._append_output("15/300 done.\n", "stderr")
-    assert window._dos_progress.progress.value() == 14
+    assert window._info_page.progress.value() == 14
     window.close()
 
 
@@ -328,16 +328,16 @@ def test_dos_info_native_energy_blocks_count_points_not_atomic_components():
     )
     window._append_output("13 E= 0.4061 0.0100 IT= 1 Ti\n", "out")
     window._append_output("13 E= 0.4061 0.0100 IT= 2 Co\n", "out")
-    assert window._dos_progress.last_info.text() == "Calculating density of states..."
-    assert window._dos_progress.progress.isHidden()
+    assert window._info_page.last_info.text() == "Calculating density of states..."
+    assert window._info_page.progress.isHidden()
 
     window._append_output("14 E= 0.4081 0.0100 IT= 1 Ti\n", "out")
-    assert window._dos_progress.last_info.text() == "13/300 done."
-    assert window._dos_progress.progress.maximum() == 300
-    assert window._dos_progress.progress.value() == 13
-    assert not window._dos_progress.progress.isHidden()
+    assert window._info_page.last_info.text() == "13/300 done."
+    assert window._info_page.progress.maximum() == 300
+    assert window._info_page.progress.value() == 13
+    assert not window._info_page.progress.isHidden()
     window._append_output("14 E= 0.4081 0.0100 IT= 2 Co\n", "out")
-    assert window._dos_progress.progress.value() == 13
+    assert window._info_page.progress.value() == 13
     window.close()
 
 
@@ -348,8 +348,8 @@ def test_dos_info_unknown_total_does_not_show_percentage():
     )
     window._append_output("13 E= 0.4061 0.0100 IT= 1 Ti\n", "out")
     window._append_output("14 E= 0.4081 0.0100 IT= 1 Ti\n", "out")
-    assert window._dos_progress.last_info.text() == "13 energy points done."
-    assert window._dos_progress.progress.isHidden()
+    assert window._info_page.last_info.text() == "13 energy points done."
+    assert window._info_page.progress.isHidden()
     window.close()
 
 

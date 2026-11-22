@@ -79,7 +79,7 @@ def test_scf_run_has_info_page_and_raw_output_is_preserved():
 
     window._append_output(_completed_line(6), "out")
     assert window._output.toPlainText().strip() == _completed_line(6).strip()
-    progress = window._scf_progress
+    progress = window._info_page
     assert progress.tracker.iterations[0].fermi_energy == 0.76199
     assert "Iteration" in progress.last_info.text()
     assert "RMS(V)" in progress.last_info.text()
@@ -96,8 +96,8 @@ def test_scf_run_has_info_page_and_raw_output_is_preserved():
 def test_non_scf_run_keeps_original_output_only_layout():
     app = QApplication.instance() or QApplication([])
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
-    assert window._scf_progress is None
-    assert not hasattr(window, "_tabs")
+    assert window._info_page is None
+    assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == ["Output"]
     window.close()
 
 
@@ -109,10 +109,10 @@ def test_new_scf_calculation_enables_info_page_before_start():
         )
     )
     window = SprkkrRunWindow(request)
-    assert window._scf_progress is not None
-    assert window._scf_progress.tracker.target_error == 1e-7
-    assert window._scf_progress.last_info.text() == "Preparing first iteration..."
-    lower, upper = window._scf_progress.error_axis.get_ylim()
+    assert window._info_page is not None
+    assert window._info_page.tracker.target_error == 1e-7
+    assert window._info_page.last_info.text() == "Preparing first iteration..."
+    lower, upper = window._info_page.error_axis.get_ylim()
     assert lower < 1e-7 < upper
     window.close()
 

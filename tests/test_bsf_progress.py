@@ -15,8 +15,8 @@ def test_bsf_ek_info_reports_energy_indices_without_fabricated_progress():
     )
     assert isinstance(window._tabs, QTabWidget)
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
-    assert window._bsf_progress is not None
-    assert window._bsf_progress.progress.isHidden()
+    assert window._info_page is not None
+    assert window._info_page.progress.isHidden()
 
     stdout = (
         "MPI calculation with NPROCS = 4\n"
@@ -27,11 +27,11 @@ def test_bsf_ek_info_reports_energy_indices_without_fabricated_progress():
     )
     window._append_output(stdout[:51], "out")
     window._append_output(stdout[51:], "out")
-    assert "energy loop 25/50" in window._bsf_progress.last_info.text()
-    assert "NE=200" in window._bsf_progress.events.toPlainText()
-    assert window._bsf_progress.progress.maximum() == 50
-    assert window._bsf_progress.progress.value() == 24
-    assert not window._bsf_progress.progress.isHidden()
+    assert "energy loop 25/50" in window._info_page.last_info.text()
+    assert "NE=200" in window._info_page.events.toPlainText()
+    assert window._info_page.progress.maximum() == 50
+    assert window._info_page.progress.value() == 24
+    assert not window._info_page.progress.isHidden()
     assert window._output.toPlainText().strip() == stdout.strip()
     window.close()
 
@@ -51,7 +51,7 @@ def test_bsf_kk_info_shows_mesh_and_aggregates_native_warnings():
         + "finished in subroutine <BLOCHSF>\n"
     )
     window._append_output(stdout, "out")
-    progress = window._bsf_progress
+    progress = window._info_page
     assert progress.parser.mode == "KK"
     assert progress.progress.isHidden()
     assert progress.parser.negative_warnings == 101

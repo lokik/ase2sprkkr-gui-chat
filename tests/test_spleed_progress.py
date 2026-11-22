@@ -22,15 +22,13 @@ def test_spleed_info_tab_tracks_native_diagram_without_percentages():
         lambda cancellation: object(), task_name="SPLEED", autostart=False
     )
     assert [window._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
-    assert window._spleed_progress is not None
-    assert window._scf_progress is None
-    assert window._bsf_progress is None
+    assert window._info_page is not None
 
     output = diagram([(11., 2.), (12., 3.)])
     window._append_output(output[:11], "stdout")
     window._append_output(output[11:], "stdout")
     window._append_output("end of table\nprogram stopped regularly via STOP_REGULAR\n", "stdout")
-    page = window._spleed_progress
+    page = window._info_page
 
     assert page.last_info.text() == "SPLEED calculation finished"
     assert "SPLEED i(e)-diagram: 1 point read" in page.events.toPlainText()
@@ -46,7 +44,7 @@ def test_spleed_info_ignores_stderr_lines():
         lambda cancellation: object(), task_name="spleed", autostart=False
     )
     window._append_output(diagram([(11., 2.)]), "stderr")
-    assert window._spleed_progress.last_info.text() == "Preparing SPLEED calculation..."
+    assert window._info_page.last_info.text() == "Preparing SPLEED calculation..."
     window.close()
 
 
@@ -61,7 +59,7 @@ def test_spleed_info_without_nout1_header_accepts_native_six_column_stdout():
     assert len(row) == 82
     window._append_output(row[:30], "stdout")
     window._append_output(row[30:] + "\nnext output section\n", "stdout")
-    page = window._spleed_progress
+    page = window._info_page
     assert "spectral output" in page.events.toPlainText()
     assert "E = 11 eV" in page.events.toPlainText()
     assert "spectral output: 1 point read" in page.events.toPlainText()

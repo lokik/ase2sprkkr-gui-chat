@@ -17,7 +17,7 @@ def test_live_mpi_dos_estimate_is_visibly_approximate():
         autostart=False,
     )
     assert [dialog._tabs.tabText(i) for i in range(2)] == ["INFO", "Output"]
-    page = dialog._dos_progress
+    page = dialog._info_page
     assert page is not None
 
     dialog._append_output("MPI calculation with NPROCS = 4\n", "stdout")
@@ -45,7 +45,7 @@ def test_native_serial_dos_progress_remains_exact():
     )
     dialog._append_output(" 1 E= 0.40 0.01 IT= 1 Fe\n", "stdout")
     dialog._append_output(" 2 E= 0.41 0.01 IT= 1 Fe\n", "stdout")
-    page = dialog._dos_progress
+    page = dialog._info_page
     assert page.progress.value() == 1
     assert page.progress.format() == "%p%"
     assert "1/10 done." in page.last_info.text()
