@@ -20,7 +20,8 @@ from ase2sprkkr_gui.gui.application.historical_state import (
 from ase2sprkkr_gui.gui.application.operation_results import EmptySpheresResult
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 from ase2sprkkr_gui.gui.application.result_loading import (
-    LoadedResult, PotentialVersionChanged, require_potential_version_current,
+    LoadedResult, PotentialVersionChanged, require_output_version_current,
+    require_potential_version_current,
 )
 from ase2sprkkr_gui.gui.application.result_store import ResultRecord, ResultStore
 from ase2sprkkr_gui.gui.application.workspace import (
@@ -842,7 +843,7 @@ class WorkspaceController(QObject):
         # Worker and GUI publication are separate phases: neither the
         # parsed stdout nor its structure dependencies may have changed.
         if loaded.parsed_output_version is not None:
-            require_potential_version_current(loaded.parsed_output_version)
+            require_output_version_current(loaded.parsed_output_version)
         for version in (
             (loaded.parsed_potential_version,) + loaded.source_versions
         ):
