@@ -166,3 +166,28 @@ def test_historical_result_uses_known_current_result_with_clear_warning(tmp_path
     action_button.click()
     assert seen == ["new:new current contents"]
     widget.close()
+
+
+def test_missing_native_output_preserves_only_folder_navigation(tmp_path):
+    from ase2sprkkr.outputs.task_result import TaskResult
+
+    source = tmp_path / "historical.dos"
+    source.write_text("previous run", encoding="utf-8")
+    result = TaskResult(None, None, str(tmp_path), task_name="DOS")
+    value = result.files.add_file("DOS", str(source), "dos")
+    store = ResultStore()
+    record = store.add_result(
+        result,
+        structure_id=None, input_state_id=None,
+        input_parameters=None, directory=str(tmp_path),
+    )
+    assert "open" in value.actions()
+    source.unlink()
+
+    presentation = present_result_record(
+        store, record, current_structure_id=None, current_state_id=None,
+    )
+    native = next(item for item in presentation.values if item.value is value)
+    assert native.warning is not None
+    assert native.actions == ("open_directory",)
+    assert native.name.endswith("⚠")

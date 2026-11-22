@@ -69,7 +69,7 @@ def test_gui_adoption_preserves_historical_auxiliary_file_identity(tmp_path):
     assert record.result_files["curve"] == versions[1]
     assert record.result_files["potential"] == versions[2]
     assert record.result_files["curve"].state().value == "overwritten"
-    assert result.files["curve"].actions() == ()
+    assert result.files["curve"].actions() == ("open_directory",)
 
 
 def test_unavailable_execution_keeps_local_history_visible(tmp_path):
