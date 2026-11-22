@@ -169,6 +169,7 @@ def test_companion_loading_delegates_to_backend_without_rereading_potential(
     assert len(parses) == 1
     assert seen == [selected.result]
 
+
 def test_explicit_load_shares_one_loader_but_next_load_starts_fresh(
     tmp_path, monkeypatch,
 ):
