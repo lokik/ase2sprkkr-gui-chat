@@ -170,13 +170,50 @@ def test_attached_monitor_stop_button_describes_observation_only():
     assert window._cancellation._observation_only
 
 
+def test_monitor_header_aligns_two_label_value_groups_per_row():
+    app = QApplication.instance() or QApplication([])
+    window = RunMonitorWindow(
+        lambda _cancellation: object(),
+        header_fields=(
+            ("Directory", "/tmp/Project/New"),
+            ("Execution", "Local execution · direct"),
+            ("Executables", "/home/user/kkr/bin"),
+            ("MPI", "automatic"),
+        ),
+        initial_status="Running",
+        autostart=False,
+    )
+    grid = window._header_grid
+    assert [grid.itemAtPosition(0, col).widget().text() for col in range(4)] == [
+        "Directory:", "/tmp/Project/New",
+        "Execution:", "Local execution · direct",
+    ]
+    assert [grid.itemAtPosition(1, col).widget().text() for col in range(4)] == [
+        "Executables:", "/home/user/kkr/bin", "MPI:", "automatic",
+    ]
+    assert [grid.itemAtPosition(2, col).widget().text() for col in range(4)] == [
+        "Job ID:", "", "Status:", "Running",
+    ]
+    assert grid.itemAtPosition(0, 1).widget().wordWrap()
+    assert window._job_id_title.isHidden()
+    window.set_job_id("run-123")
+    assert not window._job_id_title.isHidden()
+    assert window._job_id_label.text() == "run-123"
+    window._set_status("Finished")
+    assert window._status.text() == "Finished"
+    window.close()
+
+
 def test_attached_monitor_displays_selectable_persistent_job_id():
     app = QApplication.instance() or QApplication([])
     job = _job()
     window = create_attached_run_monitor_window(job, _Source(None), autostart=False)
 
-    assert window._job_id_label.text() == f"Job ID: {job.id}"
+    assert window._job_id_label.text() == job.id
     assert not window._job_id_label.isHidden()
+    grid = window._header_grid
+    assert grid.itemAtPosition(0, 0).widget().text() == "Directory:"
+    assert grid.itemAtPosition(0, 2).widget().text() == "Execution:"
     window.close()
 
 
@@ -188,7 +225,7 @@ def test_new_run_displays_job_id_when_persistent_id_arrives():
 
     assert window._job_id_label.isHidden()
     window._persistent_job_changed_received("run-17")
-    assert window._job_id_label.text() == "Job ID: run-17"
+    assert window._job_id_label.text() == "run-17"
     assert not window._job_id_label.isHidden()
     assert ids == ["run-17"]
     window.close()
