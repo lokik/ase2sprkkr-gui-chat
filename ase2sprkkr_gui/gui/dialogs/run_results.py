@@ -171,9 +171,9 @@ def _filename_for_entry(entry: Any) -> tuple[str, str]:
 
 
 class CompletedRunPages(QObject):
-    """After completion, show full execution files and scientific result tabs.
+    """After completion, show all managed files and scientific result tabs.
 
-    Execution uses the same result-list widget as the main window, with every
+    The overview uses the same result-list widget as the main window, with every
     managed output. File-named plot tabs use only task-declared result_values.
     """
 
@@ -204,7 +204,7 @@ class CompletedRunPages(QObject):
             )
             widget.set_result(full_presentation)
             self.execution_widget = widget
-            self._tabs.addTab(widget, "Execution")
+            self._tabs.addTab(widget, "Result Overview")
 
         presentation = present_result(result, result_only=True)
         if presentation is None:

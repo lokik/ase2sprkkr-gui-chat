@@ -394,7 +394,7 @@ def test_finished_monitor_adds_file_named_tabs_and_renders_selected_plot(_qt_app
     window._on_finished(SimpleNamespace(result=result))
 
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Execution", "example.dos"
+        "Output", "Result Overview", "example.dos"
     ]
     page = window._tabs.widget(2)
     assert isinstance(page, ResultFilePage)
@@ -434,7 +434,7 @@ def test_finished_monitor_keeps_non_plottable_outputs_as_file_tabs(_qt_applicati
         output_values={"output": value}, result_values={"output": value}
     ))
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Execution", "example.out"
+        "Output", "Result Overview", "example.out"
     ]
     page = window._tabs.widget(2)
     assert isinstance(page, ResultFilePage)
@@ -479,7 +479,7 @@ def test_all_output_files_get_one_tab_only_after_completion(_qt_application):
     result.result_values = result.output_values
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "INFO", "Output", "Execution", "first.agr", "second.dat", "third.log"
+        "INFO", "Output", "Result Overview", "first.agr", "second.dat", "third.log"
     ]
     assert window._tabs.tabText(window._tabs.currentIndex()) == "first.agr"
     assert all(isinstance(window._tabs.widget(i), ResultFilePage) for i in (3, 4, 5))
@@ -535,7 +535,7 @@ def test_task_metadata_selects_meaningful_result_tabs_only(_qt_application):
     window = RunMonitorWindow(lambda _: object(), autostart=False)
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Execution", "Fe_DOS.dos"
+        "Output", "Result Overview", "Fe_DOS.dos"
     ]
     assert window._tabs.tabText(window._tabs.currentIndex()) == "Fe_DOS.dos"
     all_files = window._completed_pages.execution_widget._current_presentation
@@ -567,7 +567,7 @@ def test_task_with_auxiliary_outputs_only_gets_no_result_tabs(_qt_application):
     window = RunMonitorWindow(lambda _: object(), autostart=False)
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Execution"
+        "Output", "Result Overview"
     ]
     assert window._completed_pages.execution_widget is not None
     window.close()
@@ -591,7 +591,7 @@ def test_no_result_role_does_not_fallback_to_auxiliary_files(_qt_application):
     window = RunMonitorWindow(lambda _: object(), autostart=False)
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "Output", "Execution"
+        "Output", "Result Overview"
     ]
     assert window._completed_pages.execution_widget._row_count == 1
     window.close()
