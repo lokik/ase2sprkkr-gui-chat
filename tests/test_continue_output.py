@@ -101,6 +101,12 @@ def test_workflow_keeps_semantic_scf_action_after_continue_and_restart(
         return on_success(value) if on_success is not None else value
 
     monkeypatch.setattr(file_flows, "run_modal_task", run_inline)
+
+    def unexpected_dialog(_parent, title, message, *_args, **_kwargs):
+        raise AssertionError(f"Unexpected {title} dialog: {message}")
+
+    monkeypatch.setattr(file_flows.QMessageBox, "critical", unexpected_dialog)
+    monkeypatch.setattr(file_flows.QMessageBox, "warning", unexpected_dialog)
     output = tmp_path / "SCF.out"
     output.write_text("calculation", encoding="utf-8")
     loaded = _loaded_scf(output)
