@@ -61,8 +61,10 @@ def kind_label(kind: str) -> str:
     }.get(kind, kind)
 
 
-def profile_description(name: str | None, *, configuration: Any | None = None) -> str:
-    """Return a short user-facing description of one resolved profile."""
+def _profile_presentation(
+    name: str | None, *, configuration: Any | None = None
+) -> tuple[str, str, str]:
+    """Resolve execution location, MPI mode and executable path once."""
     profile = resolve_sprkkr_profile(name, configuration=configuration)
     kind = backend_kind(profile)
     if kind == "local":
@@ -98,7 +100,33 @@ def profile_description(name: str | None, *, configuration: Any | None = None) -
     executable = profile.executable_dir or "PATH"
     if profile.executable_suffix:
         executable = f"{executable} (suffix {profile.executable_suffix})"
+    return where, mpi_text, executable
+
+
+def profile_description(name: str | None, *, configuration: Any | None = None) -> str:
+    """Return the existing short text description of a resolved profile."""
+    where, mpi_text, executable = _profile_presentation(
+        name, configuration=configuration
+    )
     return f"{where} · {mpi_text}\nExecutables: {executable}"
+
+
+def profile_summary_fields(
+    name: str | None, *, configuration: Any | None = None
+) -> tuple[tuple[str, str], ...]:
+    """Structured monitor metadata, without parsing display strings."""
+    where, mpi_text, executable = _profile_presentation(
+        name, configuration=configuration
+    )
+    if mpi_text.startswith("MPI: "):
+        mpi_value = mpi_text[len("MPI: "):]
+    else:
+        mpi_value = mpi_text.removeprefix("MPI ")
+    return (
+        ("Execution", where),
+        ("Executables", executable),
+        ("MPI", mpi_value),
+    )
 
 
 class ExecutionProfileStore:
