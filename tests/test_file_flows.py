@@ -504,7 +504,7 @@ def test_reopening_unchanged_result_reuses_parsed_output(tmp_path, monkeypatch):
     reads = []
     monkeypatch.setattr(
         file_flows, "load_result_file",
-        lambda path, *, cache=None: reads.append(path) or loaded,
+        lambda path, **_kwargs: reads.append(path) or loaded,
     )
     controller = WorkspaceController()
     history = RecentFiles(tmp_path / "recent.json")

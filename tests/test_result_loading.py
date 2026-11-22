@@ -216,7 +216,7 @@ def test_result_loading_resolves_relative_artifacts_from_result_directory(
             "potential": fallback_potential.name,
         },
         directory=str(run_directory),
-        potential_filename="ignored.pot",
+        potential_filename=converged.name,
         input_parameters=parameters,
     )
     result.path_to = lambda key: result.files[key]
@@ -265,11 +265,11 @@ def test_result_loading_keeps_input_parameter_parse_failure_nonfatal(tmp_path):
 @pytest.mark.parametrize(
     ("files", "potential_filename", "expected_name"),
     [
-        ({"potential": "registered.pot"}, "filename.pot", "registered.pot"),
+        ({"potential": "registered.pot"}, "filename.pot", "filename.pot"),
         ({}, "filename.pot", "filename.pot"),
     ],
 )
-def test_result_loading_uses_potential_fallbacks_and_fallback_directory(
+def test_result_loading_uses_result_potential_and_fallback_directory(
     tmp_path, monkeypatch, files, potential_filename, expected_name
 ):
     potential = tmp_path / expected_name
@@ -322,6 +322,7 @@ def test_result_loading_reports_a_potential_path_that_is_not_a_file(tmp_path):
     result = SimpleNamespace(
         files={"potential": potential_directory.name},
         directory=str(tmp_path),
+        potential_filename=potential_directory.name,
     )
     result.path_to = lambda key: result.files[key]
 
@@ -358,11 +359,12 @@ def test_missing_referenced_potential_is_nonfatal_and_does_not_replace_workspace
         files={"output": output.name, "converged": missing.name},
         directory=str(tmp_path),
         produces_potential=True,
+        potential_filename=missing.name,
     )
     result.path_to = lambda key: result.files[key]
     monkeypatch.setattr(
         result_loading_module.TaskResult,
-        "from_file",
+        "_parse_file",
         staticmethod(lambda _path, **_kwargs: result),
     )
     original_atoms = Atoms("Cu")
@@ -393,7 +395,7 @@ def test_result_parse_failure_has_no_workspace_side_effects(tmp_path, monkeypatc
     project_generation = controller.active_project_generation
     monkeypatch.setattr(
         result_loading_module.TaskResult,
-        "from_file",
+        "_parse_file",
         staticmethod(lambda _path, **_kwargs: (_ for _ in ()).throw(ValueError("broken output"))),
     )
 
@@ -428,6 +430,7 @@ def test_native_cluster_result_requires_and_reuses_original_host(tmp_path, monke
     result = SimpleNamespace(
         files={"converged": cluster_path.name},
         directory=str(tmp_path),
+        potential_filename=cluster_path.name,
         input_parameters=None,
     )
     result.path_to = lambda key: result.files[key]
@@ -541,6 +544,29 @@ def test_imported_embedded_result_uses_recorded_host_version(tmp_path, native_em
     assert loaded.source_versions[0] is host_version
 
 
+
+def test_result_rejects_primary_potential_rewritten_during_loading(tmp_path, monkeypatch):
+    """A parsed structure must never outlive the file version it came from."""
+    from ase2sprkkr.outputs.task_result import TaskResult
+
+    potential = tmp_path / "input.pot"
+    potential.write_text("before", encoding="utf-8")
+    result = TaskResult(None, None, tmp_path, task_name="DOS")
+    result.files.add_file("potential", potential)
+
+    def changed_atoms(*, loader=None):
+        potential.write_text("after modification", encoding="utf-8")
+        return Atoms("Fe")
+
+    monkeypatch.setattr(result, "get_atoms", changed_atoms)
+    loaded = load_result(result, fallback_directory=tmp_path)
+
+    assert loaded.atoms is None
+    assert isinstance(
+        loaded.potential_error, result_loading_module.PotentialVersionChanged
+    )
+    assert loaded.parsed_potential_version is None
+
 def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     tmp_path, monkeypatch,
 ):
@@ -559,23 +585,26 @@ def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     cache = result_loading.ResultImportCache()
     seen = []
 
-    def fake_result(path, *, input_cache=None):
-        assert input_cache is cache.inputs
+    def fake_result(path, *, on_files_parsed=None):
+        assert callable(on_files_parsed)
         result = TaskResult(
             None, None, str(tmp_path), output_file=path.name, task_name="DOS"
         )
         result.files.add_file("potential", pot.name)
-        result._input_cache = input_cache
         return result
 
-    def fake_potential(path, *, embedding_host=None):
-        seen.append(path)
-        return Atoms("Fe", cell=(3, 3, 3), pbc=True), None
+    def fake_potential(_cls, path, *, atoms, check_file_unchanged, host=None):
+        assert atoms is False
+        assert check_file_unchanged
+        seen.append(Path(path).resolve())
+        return SimpleNamespace(atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True))
 
     monkeypatch.setattr(
-        result_loading.TaskResult, "from_file", staticmethod(fake_result)
+        result_loading.TaskResult, "_parse_file", staticmethod(fake_result)
     )
-    monkeypatch.setattr(result_loading, "_load_potential", fake_potential)
+    monkeypatch.setattr(
+        result_loading.Potential, "from_file", classmethod(fake_potential)
+    )
 
     a = result_loading.load_result_file(first, cache=cache)
     b = result_loading.load_result_file(second, cache=cache)
@@ -649,29 +678,37 @@ def test_batch_embedded_cache_parses_host_and_clupot_once_without_atoms(
 def test_embedded_scf_convergence_does_not_change_shared_clupot(
     tmp_path, native_embedded_potentials,
 ):
+    from shutil import copyfile
+    from pathlib import Path
+
     from ase2sprkkr import InputParameters
     from ase2sprkkr.outputs.readers.dos import DosResult
+    from ase2sprkkr.outputs.readers.scf import ScfResult
     from ase2sprkkr_gui.gui.application.result_loading import ResultImportCache
+    import ase2sprkkr
 
     host, cluster = native_embedded_potentials
+    produced = tmp_path / (cluster.name + "_new")
+    examples = Path(ase2sprkkr.__file__).parent / "potentials" / "examples"
+    copyfile(examples / "Fe3CoFe3.clu.iterating.pot", produced)
+
     params = InputParameters.for_task("DOS")
     params.CONTROL.CLUTYPE = "embedded"
     params.CONTROL.POTFIL = host.name
-    params.CONTROL.POTFIL_CLU = cluster.name
+    params.CONTROL.POTFIL_CLU = produced.name
     cache = ResultImportCache()
     dos_result = DosResult(params, None, tmp_path, task_name="dos")
     dos = load_result(dos_result, fallback_directory=tmp_path, import_cache=cache)
     assert dos.potential_error is None
+    assert dos.atoms.potential.SCF_INFO.SCFSTATUS() == "ITERATING"
 
-    # Simulate a CLUPOT left as ITERATING despite a converged SCF stdout.
-    dos.atoms.potential.SCF_INFO.SCFSTATUS = "ITERATING"
-    scf_result = SimpleNamespace(
-        task_name="scf", produces_potential=True, is_embedded=True,
-        return_code=0, iterations=(object(),), converged=True,
-        host_potential_filename=str(host),
-        potential_filename=str(cluster),
-        files={}, input_parameters=None,
-    )
+    scf_parameters = InputParameters.for_task("SCF")
+    scf_parameters.CONTROL.CLUTYPE = "embedded"
+    scf_parameters.CONTROL.POTFIL = host.name
+    scf_parameters.CONTROL.POTFIL_CLU = cluster.name
+    scf_result = ScfResult(scf_parameters, None, tmp_path)
+    scf_result.return_code = 0
+    scf_result.iterations = [{"converged": lambda: True}]
     scf = load_result(scf_result, fallback_directory=tmp_path, import_cache=cache)
 
     assert scf.potential_error is None
@@ -679,6 +716,7 @@ def test_embedded_scf_convergence_does_not_change_shared_clupot(
     assert scf.atoms.potential.SCF_INFO.SCFSTATUS() == "CONVERGED"
     assert scf.atoms.info["sprkkr_embedding_scf_status"] == "CONVERGED"
     assert dos.atoms.potential.SCF_INFO.SCFSTATUS() == "ITERATING"
+    assert cache.loader.potential(produced, host=host).atoms is dos.atoms
 
 
 def test_gui_disambiguation_consumes_per_file_association(tmp_path):
@@ -746,13 +784,13 @@ def test_standalone_scf_import_assigns_current_potential_to_newest_output(
         def potential_filename(self):
             return str(potential)
 
-    def parsed(path, *, input_cache=None):
+    def parsed(path, *, on_files_parsed=None):
         return FakeSCF(None, None, tmp_path, output_file=path, task_name="SCF")
 
-    monkeypatch.setattr(result_loading_module.TaskResult, "from_file", staticmethod(parsed))
+    monkeypatch.setattr(result_loading_module.TaskResult, "_parse_file", staticmethod(parsed))
     monkeypatch.setattr(
-        result_loading_module, "_load_potential",
-        lambda *args, **kwargs: (Atoms("Fe"), None),
+        FakeSCF, "_read_potential",
+        lambda self, filename: SimpleNamespace(atoms=Atoms("Fe")),
     )
     older, newer = load_result_file(first), load_result_file(second)
     assert older.atoms is None
@@ -813,8 +851,8 @@ def test_recent_batch_checks_newer_scf_even_when_not_imported(tmp_path, monkeypa
             return str(potential)
 
     monkeypatch.setattr(
-        TaskResult, "from_file",
-        staticmethod(lambda path, *, input_cache=None:
+        TaskResult, "_parse_file",
+        staticmethod(lambda path, *, on_files_parsed=None:
                      FakeSCF(None, None, tmp_path, output_file=path, task_name="SCF")),
     )
     cache = ResultImportCache()

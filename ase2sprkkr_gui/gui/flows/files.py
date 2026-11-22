@@ -570,8 +570,9 @@ def _read_output(
     def read():
         if cached_loaded is not None:
             return cached_loaded, None
-        # One short-lived import scope for the primary output and its SCF:
-        # reuse ResultLoader's directory, input and SCF-probe caches.
+        # One short-lived loader for the selected result and its companion.
+        # Parsed native potentials are reused without storing a batch cache in
+        # either TaskResult or the GUI's persistent result history.
         cache = ResultImportCache()
         loaded = load_result_file(file_path, cache=cache)
         companion = None
