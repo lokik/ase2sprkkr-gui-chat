@@ -428,7 +428,13 @@ def test_finished_monitor_adds_file_named_tabs_and_renders_selected_plot(_qt_app
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
         "Output"
     ]
-    window._on_finished(SimpleNamespace(result=result))
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
+
+    loaded = LoadedResult(
+        result=result, output_path=None, potential_path=None, atoms=None,
+        potential_error=None, directory=None,
+    )
+    window._on_finished(loaded)
 
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
         "Output", "Result Overview", "example.dos"
@@ -447,6 +453,14 @@ def test_finished_monitor_adds_file_named_tabs_and_renders_selected_plot(_qt_app
     _qt_application.processEvents()
     assert calls == [False]  # a second selection must not regenerate the plot
     window.close()
+
+
+def test_monitor_formats_native_run_state_and_history_label():
+    from kkrunner import RunState
+    from ase2sprkkr_gui.gui.dialogs.run_monitor import state_label
+
+    assert state_label(RunState.POSTPROCESSING) == "Postprocessing"
+    assert state_label("imported") == "Imported"
 
 
 def test_finished_monitor_keeps_non_plottable_outputs_as_file_tabs(_qt_application):
