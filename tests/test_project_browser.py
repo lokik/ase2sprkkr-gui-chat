@@ -119,12 +119,12 @@ def test_project_browser_paints_loading_state_before_repository_read_finishes(tm
     events = []
 
     class SlowProjects(ProjectRepository):
-        def projects(self):
+        def refresh(self):
             events.append("repository read")
             started.set()
             if not release.wait(5):
                 raise RuntimeError("Timed out waiting for the test to release loading")
-            return super().projects()
+            return super().refresh()
 
     class RecordingBrowser(ProjectBrowserDialog):
         def paintEvent(self, event):
@@ -172,11 +172,11 @@ def test_project_browser_reloads_changes_during_initial_load(tmp_path):
     release = Event()
 
     class SlowProjects(ProjectRepository):
-        def projects(self):
+        def refresh(self):
             started.set()
             if not release.wait(5):
                 raise RuntimeError("Timed out waiting for the test to release loading")
-            return super().projects()
+            return super().refresh()
 
     repository = SlowProjects(tmp_path / "projects")
     repository.create("First")
