@@ -173,7 +173,8 @@ def test_edit_current_structure_reads_published_structure_and_commits_replacemen
 
     def edit(atoms, *, parent):
         assert parent is None
-        assert atoms is not original
+        # The editor owns its detached result; the flow supplies the published source.
+        assert atoms is original
         assert atoms.get_chemical_symbols() == original.get_chemical_symbols()
         edited = atoms.copy()
         edited.symbols = "Cu"
@@ -202,12 +203,13 @@ def test_edit_current_input_parameters_commits_accepted_copy(monkeypatch):
         )
     )
 
-    def edit(parameters, *, parent, show_changed_only, atoms):
+    def edit(parameters, *, parent, show_changed_only, atoms, directory):
         assert parent is None
         assert not show_changed_only
         assert parameters is not original_parameters
         assert parameters.name == "original-copy"
         assert atoms is original_atoms
+        assert directory == controller.directory
         return edited_parameters
 
     monkeypatch.setattr(

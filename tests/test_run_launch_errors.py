@@ -39,14 +39,14 @@ def test_missing_executable_shows_error_then_reopens_same_run_setup(monkeypatch,
     def select_profile(_parent, **kwargs):
         selected.append(kwargs)
         if len(selected) == 1:
-            return True, "broken-profile", identification, str(tmp_path), None
+            return True, "broken-profile", identification, str(tmp_path), None, False, False
         assert errors, "Show the concrete error before reopening setup"
         assert kwargs["selected_profile_name"] == "broken-profile"
         assert kwargs["initial_identification"] == identification
         assert kwargs["directory"] == str(tmp_path)
         assert kwargs["directory_is_explicit"] is True
         loop.quit()
-        return False, None, None, None, None
+        return False, None, None, None, None, False, False
 
     class Calculator:
         def create_run(self, **_kwargs):
@@ -69,7 +69,7 @@ def test_missing_executable_shows_error_then_reopens_same_run_setup(monkeypatch,
         errors.append(message)
 
     monkeypatch.setattr(calculation, "_select_profile", select_profile)
-    monkeypatch.setattr(calculation, "profile_description", lambda _name: "Broken profile")
+    monkeypatch.setattr(calculation, "profile_summary_fields", lambda _name: (("Profile", "Broken profile"),))
     monkeypatch.setattr(sprkkr_execution, "SPRKKR", lambda **_kwargs: Calculator())
     monkeypatch.setattr(QMessageBox, "critical", show_error)
     window = calculation.run_calculation(

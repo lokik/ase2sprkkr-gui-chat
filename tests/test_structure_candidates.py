@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from ase import Atoms
+from ase2sprkkr.sprkkr import build as backend_build
 import pytest
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -160,7 +161,7 @@ def test_build_2d_preview_handles_backend_value_error(monkeypatch):
     def fail_build(*_args, **_kwargs):
         raise error
 
-    monkeypatch.setattr(build_2d_dialog, "semiinfinite_system", fail_build)
+    monkeypatch.setattr(backend_build, "semiinfinite_system", fail_build)
 
     build_2d_dialog.Build2DStructureDialog._update_result_preview(dialog)
 
@@ -176,7 +177,7 @@ def test_build_2d_preview_does_not_hide_backend_programming_errors(monkeypatch):
     def fail_build(*_args, **_kwargs):
         raise RuntimeError("backend bug")
 
-    monkeypatch.setattr(build_2d_dialog, "semiinfinite_system", fail_build)
+    monkeypatch.setattr(backend_build, "semiinfinite_system", fail_build)
 
     with pytest.raises(RuntimeError, match="backend bug"):
         build_2d_dialog.Build2DStructureDialog._update_result_preview(dialog)
@@ -186,7 +187,7 @@ def test_build_2d_preview_does_not_hide_plotting_errors(monkeypatch):
     dialog, _statuses, preview_errors, ok_states = _build_2d_preview_dialog()
     semi = object()
     monkeypatch.setattr(
-        build_2d_dialog,
+        backend_build,
         "semiinfinite_system",
         lambda *_args, **_kwargs: semi,
     )

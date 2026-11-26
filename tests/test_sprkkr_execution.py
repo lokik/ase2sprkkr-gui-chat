@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from ase import Atoms
 from types import SimpleNamespace
 import pytest
-from kkrunner import ExecutionOutcome
+from kkrunner import ExecutionOutcome, ExecutionSpec
 
 from ase2sprkkr_gui.gui.application import sprkkr_execution as execution_module
 from ase2sprkkr_gui.gui.application.execution_cancellation import ExecutionCancelled
@@ -582,7 +582,8 @@ def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_lau
     events = []
 
     class Runner:
-        spec = SimpleNamespace(
+        spec = ExecutionSpec(
+            argv=("unused-test-executable",),
             directory=str(tmp_path),
             input_file=str(tmp_path / "Fe_SCF.inp"),
         )
