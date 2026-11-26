@@ -8,11 +8,22 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
 from ase2sprkkr_gui.gui.misc.modal_task import _ModalTaskDialog
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
+
+import pytest
 
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob
 from ase2sprkkr_gui.gui.controllers.persistent_jobs import PersistentJobsController
 from ase2sprkkr_gui.gui.widgets.persistent_jobs import PersistentJobsWidget
+
+
+@pytest.fixture(autouse=True)
+def _fail_on_warning(monkeypatch):
+    """Turn unexpected modal errors into test failures, not blocked dialogs."""
+    def fail(_parent, title, message, *_args, **_kwargs):
+        pytest.fail(f"{title}: {message}")
+
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(fail))
 
 
 def _job(job_id: str, updated: str = "2026-11-13T10:00:00+00:00") -> PersistentJob:
@@ -254,14 +265,18 @@ def test_persistent_load_and_refresh_present_before_working_disappears(monkeypat
     source = _Source()
     source.release.set()
     events = []
+    observations = []
     view = PersistentJobsWidget(lambda *_: None, auto_load_results=False)
 
     def check(label):
         from PyQt6.QtCore import QThread
 
-        assert QThread.currentThread() is app.thread()
-        dialog = view.findChild(_ModalTaskDialog)
-        assert dialog is not None and dialog.isVisible()
+        # Earlier modal tasks may leave hidden children until Qt destroys them.
+        # Observe the currently visible dialog and assert outside Qt slots.
+        observations.append((
+            QThread.currentThread() is app.thread(),
+            any(dialog.isVisible() for dialog in view.findChildren(_ModalTaskDialog)),
+        ))
         events.append(label)
 
     controller = PersistentJobsController(
@@ -278,12 +293,15 @@ def test_persistent_load_and_refresh_present_before_working_disappears(monkeypat
     monkeypatch.setattr(view, "set_result", set_result)
     controller._load_result_requested(view, "first")
     assert "adopt" in events and "opened" in events and "present" in events
+    assert all(on_gui and visible for on_gui, visible in observations)
     assert source.calls[0][1] != get_ident()
 
     events.clear()
+    observations.clear()
     controller._refresh_result_requested(view, "first")
     assert "present" in events
     assert "adopt" not in events
+    assert all(on_gui and visible for on_gui, visible in observations)
     assert [job for job, _thread in source.calls].count("first") == 2
     view.close()
     controller._executor.shutdown(wait=True, cancel_futures=True)
