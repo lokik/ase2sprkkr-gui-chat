@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from ase import Atoms
+from ase2sprkkr import InputParameters
 
 from ase2sprkkr_gui.gui.application import result_store as result_store_module
 from ase2sprkkr_gui.gui.application.result_store import ResultStore
@@ -23,10 +24,16 @@ class _Parameters:
         return _Parameters(self.task_name, self.value)
 
 
-class _FailingParameters:
-    def copy(self, *, copy_values: bool):
+@pytest.fixture
+def failing_parameters(monkeypatch):
+    parameters = InputParameters.create("DOS")
+
+    def fail_copy(self, *, copy_values):
         assert copy_values
         raise ValueError("parameter snapshot failed")
+
+    monkeypatch.setattr(type(parameters), "copy", fail_copy)
+    return parameters
 
 
 def _result(task_name: str, *, produces_potential: bool = False):
@@ -116,7 +123,7 @@ def test_add_result_rejects_cross_structure_input_state_atomically():
     assert record.id == 1
 
 
-def test_add_result_snapshot_failure_does_not_commit_state_or_result():
+def test_add_result_snapshot_failure_does_not_commit_state_or_result(failing_parameters):
     store = ResultStore()
     structure_id, state_id = store.new_structure_state(
         Atoms("Fe"), potential_path=None
@@ -128,7 +135,7 @@ def test_add_result_snapshot_failure_does_not_commit_state_or_result():
             result,
             structure_id=structure_id,
             input_state_id=state_id,
-            input_parameters=_FailingParameters(),
+            input_parameters=failing_parameters,
             directory=None,
             output_atoms=Atoms("Fe"),
         )
@@ -152,14 +159,14 @@ def test_add_result_snapshot_failure_does_not_commit_state_or_result():
     assert store.result(record.id) is record
 
 
-def test_add_external_result_snapshot_failure_does_not_commit_structure():
+def test_add_external_result_snapshot_failure_does_not_commit_structure(failing_parameters):
     store = ResultStore()
 
     with pytest.raises(ValueError, match="parameter snapshot failed"):
         store.add_external_result(
             _result("dos"),
             atoms=Atoms("Fe"),
-            input_parameters=_FailingParameters(),
+            input_parameters=failing_parameters,
             directory=None,
             output_path=None,
             potential_path=None,

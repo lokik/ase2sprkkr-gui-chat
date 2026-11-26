@@ -25,7 +25,7 @@ def _meaningful_help(option: Any, label: str) -> str:
     """Return the text printed by ``Option.help()``, if it adds useful detail."""
     definition = option._definition
     explicit_info = (definition.info(False) or "").strip()
-    detailed_description = getattr(definition, "_description", None)
+    detailed_description = definition._description
     type_description = (
         definition.additional_data_description() or ""
     ).strip()

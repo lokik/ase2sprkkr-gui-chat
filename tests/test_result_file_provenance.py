@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from types import SimpleNamespace
+from ase2sprkkr.outputs import TaskResult
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -18,28 +18,6 @@ from ase2sprkkr_gui.gui.application.result_store import ResultStore
 from ase2sprkkr_gui.gui.widgets.result_actions import ResultActionsWidget
 
 
-class _FileValue:
-    name = "dos"
-    display_name = "Density of states (DOS)"
-    info = "DOS data"
-
-    def __init__(self, path: Path, context: str):
-        self._path = path
-        self._context = context
-
-    def path(self) -> str:
-        return str(self._path)
-
-    def value_label(self) -> str:
-        return "<dos file>"
-
-    def actions(self):
-        return ("data",)
-
-    def data(self) -> str:
-        return f"{self._context}:{self._path.read_text()}"
-
-
 def _add_result(store: ResultStore, path: Path, context: str):
     if not store.structures:
         structure_id, state_id = store.new_structure_state(
@@ -50,13 +28,8 @@ def _add_result(store: ResultStore, path: Path, context: str):
         state_id = store.results[-1].input_state_id
         assert state_id is not None
 
-    value = _FileValue(path, context)
-    result = SimpleNamespace(
-        task_name="dos",
-        produces_potential=False,
-        output_file=f"{context}.out",
-        output_values={"dos": value},
-    )
+    result = TaskResult(None, None, path.parent, task_name="DOS")
+    value = result.files.add_file("dos", str(path), "dos")
     record = store.add_result(
         result,
         structure_id=structure_id,
@@ -106,7 +79,7 @@ def test_missing_historical_result_file_disables_value_actions(tmp_path):
     assert "no longer available" in presentation.file_warning.lower()
     assert len(presentation.values) == 1
     value = presentation.values[0]
-    assert value.actions == ()
+    assert value.actions == ("open_directory",)
     assert value.warning is not None
     assert "no longer exists" in value.warning.lower()
 
@@ -116,10 +89,10 @@ def test_historical_result_uses_known_current_result_with_clear_warning(tmp_path
     path = tmp_path / "Fe.dos"
     path.write_text("historical")
     store, old_record, old_value = _result_store(path)
-    seen: list[str] = []
+    seen = []
 
     widget = ResultActionsWidget(
-        lambda value, action: seen.append(getattr(value, action)()),
+        lambda value, action: seen.append((value, action)),
         show_values_without_actions=True,
     )
     widget.set_model(
@@ -164,13 +137,12 @@ def test_historical_result_uses_known_current_result_with_clear_warning(tmp_path
     assert action_button is not None
     assert "current contents" in action_button.toolTip().lower()
     action_button.click()
-    assert seen == ["new:new current contents"]
+    assert len(seen) == 1
+    assert seen[0][0] is new_value
     widget.close()
 
 
 def test_missing_native_output_preserves_only_folder_navigation(tmp_path):
-    from ase2sprkkr.outputs.task_result import TaskResult
-
     source = tmp_path / "historical.dos"
     source.write_text("previous run", encoding="utf-8")
     result = TaskResult(None, None, str(tmp_path), task_name="DOS")

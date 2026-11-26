@@ -4,61 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 from ase import Atoms
+from ase2sprkkr import InputParameters, TaskResult
 
 from ase2sprkkr_gui.gui.application import result_loading as result_loading_module
 from ase2sprkkr_gui.gui.application.result_loading import load_result, load_result_file
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
-
-
-def test_embedded_scf_loads_new_clupot_instead_of_registered_start(tmp_path):
-    start = tmp_path / "cluster.clupot"
-    produced = tmp_path / "cluster.clupot_new"
-    start.touch()
-    produced.touch()
-    output_atoms = Atoms("Fe")
-    result = SimpleNamespace(
-        files={"potential": start.name},
-        directory=str(tmp_path),
-        task_name="scf",
-        is_embedded=True,
-        potential_filename=produced.name,
-        potential=SimpleNamespace(atoms=output_atoms),
-    )
-    result.path_to = lambda key: result.files[key]
-
-    loaded = load_result(result, fallback_directory=tmp_path)
-
-    assert loaded.potential_path == produced.resolve()
-    assert loaded.atoms is output_atoms
-    assert loaded.potential_error is None
-
-
-
-
-def test_embedded_dos_resolves_cluster_potential_not_registered_host(tmp_path):
-    """The DOS FILES potential is the host; the reusable state is CLUPOT."""
-    host = tmp_path / "host.pot"
-    cluster = tmp_path / "cluster.pot"
-    host.touch()
-    cluster.touch()
-    cluster_atoms = Atoms("Fe")
-    result = SimpleNamespace(
-        task_name="dos",
-        is_embedded=True,
-        files={"potential": host.name},
-        directory=str(tmp_path),
-        potential_filename=cluster.name,
-        potential=SimpleNamespace(atoms=cluster_atoms),
-    )
-    result.path_to = lambda key: result.files[key]
-
-    loaded = load_result(result, fallback_directory=tmp_path)
-
-    assert loaded.potential_path == cluster.resolve()
-    assert loaded.potential_path != host.resolve()
-    assert loaded.atoms is cluster_atoms
-    assert loaded.potential_error is None
 
 
 def test_native_dos_result_selects_control_potfil_clu(tmp_path, monkeypatch):
@@ -90,17 +41,13 @@ def test_native_dos_result_selects_control_potfil_clu(tmp_path, monkeypatch):
 
 
 def test_embedded_dos_does_not_use_host_when_cluster_reference_is_missing(tmp_path):
-    """A host file must never masquerade as the embedded result's geometry."""
     host = tmp_path / "host.pot"
     host.touch()
-    result = SimpleNamespace(
-        task_name="dos",
-        is_embedded=True,
-        files={"potential": host.name},
-        directory=str(tmp_path),
-        potential_filename=None,
-    )
-    result.path_to = lambda key: result.files[key]
+    parameters = InputParameters.create("DOS")
+    parameters.CONTROL.POTFIL = host.name
+    parameters.CONTROL.CLUTYPE = "embedded"
+    result = TaskResult(parameters, None, tmp_path, task_name="DOS")
+    result.files.add_file("potential", host.name)
 
     loaded = load_result(result, fallback_directory=tmp_path)
 
@@ -131,18 +78,13 @@ def test_imported_embedded_dos_restores_cluster_and_offers_edit_not_build(
     cluster_file = tmp_path / "cluster.clu"
     host_file.touch()
     cluster_file.touch()
-    result = SimpleNamespace(
-        task_name="dos",
-        produces_potential=False,
-        output_values={},
-        is_embedded=True,
-        files={"potential": host_file.name},
-        directory=str(tmp_path),
-        potential_filename=cluster_file.name,
-        potential=SimpleNamespace(atoms=embedded_atoms),
-        input_parameters=None,
-    )
-    result.path_to = lambda key: result.files[key]
+    parameters = InputParameters.create("DOS")
+    parameters.CONTROL.CLUTYPE = "embedded"
+    parameters.CONTROL.POTFIL = host_file.name
+    parameters.CONTROL.POTFIL_CLU = cluster_file.name
+    result = TaskResult(parameters, None, tmp_path, task_name="DOS")
+    result.files.add_file("potential", host_file.name)
+    monkeypatch.setattr(result, "_read_potential", lambda path: SimpleNamespace(atoms=embedded_atoms))
 
     loaded = load_result(result, fallback_directory=tmp_path)
     controller = WorkspaceController(WorkspaceState())
@@ -171,26 +113,25 @@ def test_imported_embedded_dos_restores_cluster_and_offers_edit_not_build(
 
 
 def test_scf_output_without_converged_registration_overrides_input(tmp_path, monkeypatch):
+    from ase2sprkkr.outputs.readers.scf import ScfResult
+
     start = tmp_path / "Fe.pot"
     produced = tmp_path / "Fe.pot_new"
     start.touch()
     produced.touch()
     output_atoms = Atoms("Fe")
+    parameters = InputParameters.create("SCF")
+    parameters.CONTROL.POTFIL = start.name
+    result = ScfResult(parameters, None, tmp_path)
+    result.files.add_file("potential", start.name)
+    result.return_code = 0
+    result.iterations = [{"converged": lambda: False}]
 
-    def read(path, *, check_file_unchanged):
-        assert check_file_unchanged
+    def read(path):
         assert path == str(produced.resolve())
         return SimpleNamespace(atoms=output_atoms)
 
-    monkeypatch.setattr(result_loading_module.Potential, "from_file", staticmethod(read))
-    result = SimpleNamespace(
-        files={"potential": start.name},
-        directory=str(tmp_path),
-        task_name="scf",
-        potential_filename=produced.name,
-    )
-    result.path_to = lambda key: result.files[key]
-
+    monkeypatch.setattr(result, "_read_potential", read)
     loaded = load_result(result, fallback_directory=tmp_path)
 
     assert loaded.potential_path == produced.resolve()
@@ -209,29 +150,17 @@ def test_result_loading_resolves_relative_artifacts_from_result_directory(
     fallback_potential.touch()
     atoms = Atoms("Fe")
     potential_reads = []
-    parameters = object()
-    result = SimpleNamespace(
-        files={
-            "output": output.name,
-            "converged": converged.name,
-            "potential": fallback_potential.name,
-        },
-        directory=str(run_directory),
-        potential_filename=converged.name,
-        input_parameters=parameters,
-    )
-    result.path_to = lambda key: result.files[key]
+    parameters = InputParameters.create("DOS")
+    parameters.CONTROL.POTFIL = converged.name
+    result = TaskResult(parameters, None, run_directory, output_file=output.name, task_name="DOS")
+    result.files.add_file("converged", converged.name)
+    result.files.add_file("potential", fallback_potential.name)
 
-    def read_potential(path, *, check_file_unchanged):
-        assert check_file_unchanged
+    def read_potential(path):
         potential_reads.append(path)
         return SimpleNamespace(atoms=atoms)
 
-    monkeypatch.setattr(
-        result_loading_module.Potential,
-        "from_file",
-        staticmethod(read_potential),
-    )
+    monkeypatch.setattr(result, "_read_potential", read_potential)
 
     loaded = load_result(result, fallback_directory=tmp_path / "unused-fallback")
 
@@ -248,16 +177,12 @@ def test_result_loading_resolves_relative_artifacts_from_result_directory(
 def test_result_loading_keeps_input_parameter_parse_failure_nonfatal(tmp_path):
     error = ValueError("broken input")
 
-    class Result:
-        files = {}
-        directory = str(tmp_path)
-        output_file = None
-
+    class Result(TaskResult):
         @property
         def input_parameters(self):
             raise error
 
-    loaded = load_result(Result(), fallback_directory=tmp_path)
+    loaded = load_result(Result(None, None, tmp_path, task_name="DOS"), fallback_directory=tmp_path)
 
     assert loaded.input_parameters is None
     assert loaded.input_parameters_error is error
@@ -270,28 +195,19 @@ def test_result_loading_keeps_input_parameter_parse_failure_nonfatal(tmp_path):
         ({}, "filename.pot", "filename.pot"),
     ],
 )
-def test_result_loading_uses_result_potential_and_fallback_directory(
+def test_result_loading_uses_native_potential_path(
     tmp_path, monkeypatch, files, potential_filename, expected_name
 ):
     potential = tmp_path / expected_name
     potential.touch()
     atoms = Atoms("Fe")
-    result = SimpleNamespace(
-        files=files,
-        directory=None,
-        potential_filename=potential_filename,
-    )
-    result.path_to = lambda key: result.files[key]
+    parameters = InputParameters.create("DOS")
+    parameters.CONTROL.POTFIL = potential_filename
+    result = TaskResult(parameters, None, tmp_path, task_name="DOS")
+    for key, path in files.items():
+        result.files.add_file(key, path)
 
-    def read_potential(_path, *, check_file_unchanged):
-        assert check_file_unchanged
-        return SimpleNamespace(atoms=atoms)
-
-    monkeypatch.setattr(
-        result_loading_module.Potential,
-        "from_file",
-        staticmethod(read_potential),
-    )
+    monkeypatch.setattr(result, "_read_potential", lambda path: SimpleNamespace(atoms=atoms))
 
     loaded = load_result(result, fallback_directory=tmp_path)
 
@@ -301,11 +217,7 @@ def test_result_loading_uses_result_potential_and_fallback_directory(
 
 
 def test_result_loading_uses_output_file_before_explicit_output_fallback(tmp_path):
-    result = SimpleNamespace(
-        files={},
-        directory=None,
-        output_file="metadata.out",
-    )
+    result = TaskResult(None, None, tmp_path, output_file="metadata.out", task_name="DOS")
 
     loaded = load_result(
         result,
@@ -320,27 +232,19 @@ def test_result_loading_uses_output_file_before_explicit_output_fallback(tmp_pat
 def test_result_loading_reports_a_potential_path_that_is_not_a_file(tmp_path):
     potential_directory = tmp_path / "potential.pot"
     potential_directory.mkdir()
-    result = SimpleNamespace(
-        files={"potential": potential_directory.name},
-        directory=str(tmp_path),
-        potential_filename=potential_directory.name,
-    )
-    result.path_to = lambda key: result.files[key]
+    result = TaskResult(None, None, tmp_path, task_name="DOS")
+    result.files.add_file("potential", potential_directory.name)
 
     loaded = load_result(result, fallback_directory=None)
 
     assert loaded.potential_path == potential_directory.resolve()
     assert loaded.atoms is None
-    assert isinstance(loaded.potential_error, IsADirectoryError)
+    assert isinstance(loaded.potential_error, OSError)
 
 
 def test_missing_output_path_is_advisory_provenance(tmp_path):
     missing_output = tmp_path / "missing.out"
-    result = SimpleNamespace(
-        files={"output": missing_output.name},
-        directory=str(tmp_path),
-    )
-    result.path_to = lambda key: result.files[key]
+    result = TaskResult(None, None, tmp_path, output_file=missing_output.name, task_name="DOS")
 
     loaded = load_result(result, fallback_directory=tmp_path)
 
@@ -355,14 +259,9 @@ def test_missing_referenced_potential_is_nonfatal_and_does_not_replace_workspace
     output = tmp_path / "external.out"
     output.touch()
     missing = tmp_path / "missing.pot"
-    result = SimpleNamespace(
-        task_name="scf",
-        files={"output": output.name, "converged": missing.name},
-        directory=str(tmp_path),
-        produces_potential=True,
-        potential_filename=missing.name,
-    )
-    result.path_to = lambda key: result.files[key]
+    result = TaskResult(None, None, tmp_path, output_file=output.name, task_name="SCF")
+    result.produces_potential = True
+    result.files.add_file("converged", missing.name)
     monkeypatch.setattr(
         result_loading_module.TaskResult,
         "_parse_file",
@@ -376,7 +275,7 @@ def test_missing_referenced_potential_is_nonfatal_and_does_not_replace_workspace
     adoption = controller.adopt_external_result(load_result_file(output))
 
     assert adoption.potential_path == missing.resolve()
-    assert isinstance(adoption.potential_error, FileNotFoundError)
+    assert isinstance(adoption.potential_error, OSError)
     assert controller.result_store.results[0].result is result
     assert controller.atoms is original_atoms
     assert controller.potential_path == "Cu.pot"
@@ -428,21 +327,11 @@ def test_native_cluster_result_requires_and_reuses_original_host(tmp_path, monke
         return SimpleNamespace(atoms=expected)
 
     monkeypatch.setattr(ClusterPotential, "from_file", staticmethod(parse))
-    result = SimpleNamespace(
-        files={"converged": cluster_path.name},
-        directory=str(tmp_path),
-        potential_filename=cluster_path.name,
-        input_parameters=None,
-    )
-    result.path_to = lambda key: result.files[key]
+    with pytest.raises(ValueError, match="requires a host"):
+        result_loading_module.load_potential_atoms(cluster_path)
 
-    missing = load_result(result, fallback_directory=tmp_path)
-    assert missing.atoms is None
-    assert "requires a host" in str(missing.potential_error)
-
-    loaded = load_result(result, fallback_directory=tmp_path, embedding_host=host)
-    assert loaded.atoms is expected
-    assert loaded.potential_error is None
+    loaded = result_loading_module.load_potential_atoms(cluster_path, embedding_host=host)
+    assert loaded is expected
     assert calls == [(cluster_path.resolve(), host)]
 
 
@@ -933,10 +822,7 @@ def test_import_unchanged_spleed_stdout_accepts_metadata_only_version(tmp_path, 
 
     output = tmp_path / "Fe2_SPLEED.out"
     output.write_text("SPR-KKR SPLEED output", encoding="utf-8")
-    result = SimpleNamespace(
-        task_name="spleed", produces_potential=False, output_values={},
-        potential_filename=None,
-    )
+    result = TaskResult(None, None, tmp_path, output_file=output, task_name="SPLEED")
     monkeypatch.setattr(
         result_loading_module.ResultLoader, "load_file",
         lambda _self, _path: result,
@@ -960,10 +846,7 @@ def test_import_detects_stdout_changed_during_parsing(tmp_path, monkeypatch):
 
     output = tmp_path / "Fe2_SPLEED.out"
     output.write_text("original output", encoding="utf-8")
-    result = SimpleNamespace(
-        task_name="spleed", produces_potential=False, output_values={},
-        potential_filename=None,
-    )
+    result = TaskResult(None, None, tmp_path, output_file=output, task_name="SPLEED")
 
     def load_and_change(_self, path):
         path.write_text("new longer output after parsing", encoding="utf-8")

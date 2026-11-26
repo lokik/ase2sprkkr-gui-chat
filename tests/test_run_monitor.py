@@ -534,7 +534,7 @@ def test_finished_without_output_values_does_not_create_results_tab(_qt_applicat
     from types import SimpleNamespace
 
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
-    window._on_finished(SimpleNamespace(output_values={}))
+    window._on_finished(SimpleNamespace(output_values={}, result_values={}))
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
         "Output"
     ]
@@ -610,21 +610,12 @@ def test_task_with_auxiliary_outputs_only_gets_no_result_tabs(_qt_application):
     window.close()
 
 
-def test_no_result_role_does_not_fallback_to_auxiliary_files(_qt_application):
-    from types import SimpleNamespace
+def test_native_auxiliary_files_are_not_scientific_result_tabs(_qt_application, tmp_path):
+    from ase2sprkkr import TaskResult
 
-    class File:
-        name = "potential"
-        display_name = "Potential file"
-        info = ""
-
-        def value_label(self):
-            return "Fe.pot_new"
-
-        def actions(self):
-            return ("open",)
-
-    result = SimpleNamespace(output_values={"potential": File()})
+    (tmp_path / "Fe.pot_new").touch()
+    result = TaskResult(None, None, tmp_path, task_name="SCF")
+    result.files.add_file("converged", "Fe.pot_new")
     window = RunMonitorWindow(lambda _: object(), autostart=False)
     window._on_finished(result)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
@@ -653,7 +644,7 @@ def test_saved_result_window_reuses_completed_run_pages(_qt_application):
 
     value = OutputFile()
     result = SimpleNamespace(
-        output_values={"DOS": value},
+        task_name="unknown", output_values={"DOS": value},
         result_values={"DOS": value},
     )
     window = CompletedResultWindow(result, title="Saved DOS results")
@@ -680,16 +671,14 @@ def test_reopened_spleed_result_restores_info_and_stdout(tmp_path, _qt_applicati
         "program stopped regularly via STOP_REGULAR\n",
         encoding="utf-8",
     )
-    result = SimpleNamespace(
-        task_name="spleed", output_file=str(output),
-        output_values={}, result_values={},
-    )
+    from ase2sprkkr import TaskResult
+    result = TaskResult(None, None, tmp_path, output_file=output, task_name="SPLEED")
     saved_output = read_saved_output(result)
     assert saved_output.warning is None
 
     window = CompletedResultWindow(result, saved_output=saved_output)
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "INFO", "Output",
+        "INFO", "Output", "Result Overview",
     ]
     assert "SPLEED calculation finished" in window._info_page.last_info.text()
     assert "spectral output" in window._info_page.events.toPlainText()
@@ -703,13 +692,11 @@ def test_reopened_spleed_shows_warning_instead_of_replaying_missing_output(
     from ase2sprkkr_gui.gui.application.saved_output import read_saved_output
     from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
 
-    result = SimpleNamespace(
-        task_name="spleed", output_file=str(tmp_path / "missing.out"),
-        output_values={}, result_values={},
-    )
+    from ase2sprkkr import TaskResult
+    result = TaskResult(None, None, tmp_path, output_file="missing.out", task_name="SPLEED")
     window = CompletedResultWindow(result, saved_output=read_saved_output(result))
     assert [window._tabs.tabText(i) for i in range(window._tabs.count())] == [
-        "INFO", "Output",
+        "INFO", "Output", "Result Overview",
     ]
     assert "unavailable" in window._info_page.text()
     assert "unavailable" in window._output.toPlainText()
@@ -819,6 +806,27 @@ def test_saved_dos_partial_output_displays_info_warning(_qt_application):
     window.close()
 
 
+def test_closing_monitor_cancels_pending_plot_render(_qt_application, monkeypatch):
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    from ase2sprkkr.outputs import TaskResult
+    from ase2sprkkr_gui.gui.dialogs.run_results import ResultFilePage
+
+    result = TaskResult(None, None, None, task_name="DOS")
+    result.files.add_file("DOS", "plot.dos", "dos")
+    value = result.files["DOS"]
+    monkeypatch.setattr(value, "actions", lambda: ("plot",))
+    monkeypatch.setattr(TaskResult, "result_values", property(lambda self: {"DOS": value}))
+    calls = []
+    monkeypatch.setattr(ResultFilePage, "render", lambda self: calls.append(self))
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window._on_finished(result)
+    assert window._tabs.tabText(window._tabs.currentIndex()) == "plot.dos"
+    window.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    _qt_application.processEvents()
+    assert not calls
+
+
 def test_closing_result_window_cancels_pending_plot(_qt_application):
     from PyQt6.QtCore import QCoreApplication, QEvent
     from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
@@ -845,7 +853,7 @@ def test_closing_result_window_cancels_pending_plot(_qt_application):
 
     value = PlotFile()
     window = CompletedResultWindow(SimpleNamespace(
-        output_values={"DOS": value}, result_values={"DOS": value},
+        task_name="unknown", output_values={"DOS": value}, result_values={"DOS": value},
     ))
     window.close()
     QCoreApplication.sendPostedEvents(window, QEvent.Type.DeferredDelete)

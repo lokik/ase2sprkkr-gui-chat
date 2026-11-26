@@ -19,10 +19,7 @@ def filename_component(value: str) -> str:
 def _structure_name(atoms: Any) -> str:
     if atoms is None:
         return "case"
-    try:
-        name = atoms.get_chemical_formula()
-    except (AttributeError, TypeError, ValueError):
-        return "case"
+    name = atoms.get_chemical_formula()
     return filename_component(name) or "case"
 
 
@@ -62,13 +59,12 @@ def apply_default_dataset(
 
 def dataset_value(parameters: Any) -> str | None:
     """Return an explicitly set DATASET without materializing its default."""
-    try:
-        option = parameters.CONTROL.DATASET
-        if not option.is_set():
-            return None
-        value = option()
-    except (AttributeError, TypeError):
+    if parameters is None or "CONTROL" not in parameters or "DATASET" not in parameters.CONTROL:
         return None
+    option = parameters.CONTROL.DATASET
+    if not option.is_set():
+        return None
+    value = option()
     if value is None:
         return None
     text = str(value)

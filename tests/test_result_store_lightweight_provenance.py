@@ -99,11 +99,8 @@ def test_output_file_version_reuses_already_captured_digest(tmp_path, monkeypatc
 
     stdout = tmp_path / "Fe_SCF.out"
     stdout.write_text("some stdout")
-    result = SimpleNamespace(
-        task_name="dos",
-        produces_potential=False,
-        output_values={"output": SimpleNamespace(path=lambda: str(stdout))},
-    )
+    from ase2sprkkr.outputs import TaskResult
+    result = TaskResult(None, None, tmp_path, output_file=stdout, task_name="DOS")
     def repeated_capture(*_args, **_kwargs):
         raise AssertionError("stdout digest should be reused, not captured twice")
 

@@ -39,15 +39,15 @@ def startup_selection(args):
     choices = [
         (kind, value)
         for kind, value in (
-            ("auto", getattr(args, "file", None)),
-            ("structure", getattr(args, "structure", None)),
-            ("input", getattr(args, "input", None)),
-            ("output", getattr(args, "output", None)),
-            ("job", getattr(args, "job", None)),
+            ("auto", args.file),
+            ("structure", args.structure),
+            ("input", args.input),
+            ("output", args.output),
+            ("job", args.job),
         )
         if value is not None
     ]
-    if getattr(args, "open_last", False):
+    if args.open_last:
         choices.append(("last", None))
     if len(choices) > 1:
         raise ValueError(

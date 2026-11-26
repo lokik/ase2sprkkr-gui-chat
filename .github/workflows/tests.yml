@@ -48,13 +48,6 @@ jobs:
       - name: Check Python 3.9 source compatibility
         run: python tests/test_python39_compat.py
 
-      - name: Checkout KKRunner
-        uses: actions/checkout@v7
-        with:
-          repository: lokik/kkrunner-chat
-          ref: 27a8ca94385cbdf2dbebb9516a88a2b8d8cae56f
-          path: .ci/kkrunner
-
       # The embedding and editor branches use the native cluster backend,
       # including its DATASET and ADSI validation and filename escaping.
       - name: Checkout ASE2SPRKKR
@@ -74,11 +67,12 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          # Resolve all three local projects in one transaction. Otherwise
+          # Resolve both local projects in one transaction, using their declared
+          # KKRunner dependency from PyPI. Otherwise
           # pip may look on PyPI for the not-yet-published backend beta7 when
           # installing the GUI, despite its local editable installation.
           # Package identity tests also need setuptools at runtime.
-          python -m pip install -e ./.ci/kkrunner -e ./.ci/ase2sprkkr -e . pytest 'setuptools>=61'
+          python -m pip install -e ./.ci/ase2sprkkr -e . pytest 'setuptools>=61'
 
       - name: Run tests
         run: python -m pytest -v --tb=short

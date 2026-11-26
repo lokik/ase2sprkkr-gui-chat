@@ -348,3 +348,12 @@ def test_composite_fixed_array_draft_components_are_leaf_editors(application, mo
     assert result[1].count == 3 and result[1].energy == 4.0
     assert dialog.session.undo_stack.count() == 1
     dialog.close()
+
+
+def test_expert_flag_is_taken_from_native_option_definition(application):
+    parameters = InputParameters.create("SCF")
+    assert parameters.TAU.NLOUT._definition.is_expert
+    dialog = InputParametersDialog(parameters)
+    item = _option(dialog, ("TAU", "NLOUT"))
+    assert item.parent().text(0) == "expert"
+    dialog.close()

@@ -60,9 +60,12 @@ def test_runtime_tracks_option_rows_bidirectionally(application):
     tree.close()
 
 
-def test_runtime_registers_editor_dependencies(application):
+@pytest.mark.parametrize("extra_dependencies", [False, True])
+def test_runtime_registers_editor_dependencies(application, extra_dependencies):
     tree, _root, child = make_tree()
-    editor = make_editor(tree, (("ENERGY", "GRID"),))
+    editor = RealEditor(nullable=True, parent=tree)
+    if extra_dependencies:
+        editor.dependencies = (("ENERGY", "GRID"),)
     tree.setItemWidget(child, 2, editor)
     placement = FieldPlacement(("ENERGY", "NE"), "NE")
     runtime = ExpertTreeRuntime(tree)
@@ -70,7 +73,8 @@ def test_runtime_registers_editor_dependencies(application):
     runtime.register_editor(editor, child, placement)
 
     assert runtime.editors_depending_on((("ENERGY", "NE"),))[0].editor is editor
-    assert runtime.editors_depending_on((("ENERGY", "GRID"),))[0].editor is editor
+    grid_editors = runtime.editors_depending_on((("ENERGY", "GRID"),))
+    assert tuple(item.editor for item in grid_editors) == ((editor,) if extra_dependencies else ())
     assert runtime.editors_depending_on((("SCF", "NITER"),)) == ()
     tree.close()
 

@@ -95,7 +95,7 @@ class ExpertTreeRuntime:
         placement: FieldPlacement,
     ) -> None:
         dependencies = set(placement.paths)
-        dependencies.update(getattr(editor, "dependencies", ()))
+        dependencies.update(editor.dependencies)
         self._editors[id(editor)] = EditorRegistration(
             editor,
             item,

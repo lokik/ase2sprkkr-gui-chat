@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from ase2sprkkr.common.grammar_types import Array, SetOf, String, Table
+from ase2sprkkr.common.grammar_types import Array, String, Table
 from ase2sprkkr.common.grammar_types import Sequence as GrammarSequence
 
 
@@ -65,8 +65,8 @@ def describe_value(
 
     if _array_children(grammar):
         values = value_items(value)
-        minimum = getattr(grammar, "min_length", None)
-        maximum = getattr(grammar, "max_length", None)
+        minimum = grammar.min_length
+        maximum = grammar.max_length
         fixed = minimum is not None and minimum == maximum
         display = list(values)
         if fixed:
@@ -205,7 +205,7 @@ def _describe_table(grammar: Table, value: Any) -> ValueShape:
 
 
 def _array_children(grammar: Any) -> bool:
-    return isinstance(grammar, (Array, SetOf)) and getattr(grammar, "array_access", False)
+    return isinstance(grammar, Array) and grammar.array_access
 
 
 def _children_contain_draft(children) -> bool:

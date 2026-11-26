@@ -503,7 +503,7 @@ def test_persistent_job_observer_failure_does_not_fail_calculation(
     assert execution.run() is not None
 
 
-def test_embedded_execution_forwards_original_host_to_result_reader(
+def test_embedded_execution_uses_native_result_interpretation(
     monkeypatch, tmp_path
 ):
     from ase2sprkkr import SPRKKRAtoms
@@ -543,8 +543,7 @@ def test_embedded_execution_forwards_original_host_to_result_reader(
 
     monkeypatch.setattr(execution_module, "load_result", read_result)
     execution.run()
-    assert calls[0]["embedding_host"] is host
-    assert calls[0]["fallback_directory"] == str(tmp_path)
+    assert calls == [{"fallback_directory": str(tmp_path), "persistent_ref": None}]
 
 
 def test_prepare_only_uses_save_input_without_creating_a_runner(monkeypatch, tmp_path):
