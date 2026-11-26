@@ -14,7 +14,6 @@ class EmptySpheresCount:
     name: ClassVar[str] = "empty_spheres"
     display_name: ClassVar[str] = "Empty spheres found"
     info: ClassVar[str] = "Number of empty spheres found by the empty-sphere search."
-    show_in_summary: ClassVar[bool] = True
 
     def value_label(self) -> str:
         return str(self.count)

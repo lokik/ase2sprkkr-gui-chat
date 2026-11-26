@@ -8,6 +8,9 @@ from typing import Any
 
 from ase2sprkkr import TaskResult
 from ase2sprkkr.outputs import OutputOnlyResult
+from ase2sprkkr.outputs.result_options import OutputFileOption
+
+from ase2sprkkr_gui.gui.application.operation_results import EmptySpheresCount
 
 from ase2sprkkr_gui.gui.application.result_action_policy import (
     ResultActionAvailability,
@@ -33,7 +36,6 @@ class ResultValuePresentation:
     summary: str
     actions: tuple[str, ...] = ()
     warning: str | None = None
-    show_in_summary: bool = False
     always_visible: bool = False
 
 
@@ -116,7 +118,6 @@ def _present_value(
         raw_info = value.info
         info = str(raw_info) if raw_info else ""
         summary = str(value.value_label())
-        show_in_summary = bool(getattr(value, "show_in_summary", False))
     except Exception as exc:
         logger.exception("Failed to display output value %r", key)
         return _error_value(f"{key}: unavailable", exc)
@@ -137,7 +138,6 @@ def _present_value(
             summary=summary,
             actions=(),
             warning="\n\n".join(part for part in (warning, action_warning) if part),
-            show_in_summary=show_in_summary,
             always_visible=True,
         )
 
@@ -150,7 +150,7 @@ def _present_value(
         summary=summary,
         actions=actions,
         warning=warning,
-        show_in_summary=show_in_summary,
+        always_visible=isinstance(value, (OutputFileOption, EmptySpheresCount)),
     )
 
 

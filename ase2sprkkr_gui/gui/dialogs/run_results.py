@@ -135,7 +135,7 @@ class ResultFilePage(QWidget):
                 button = QToolButton(self)
                 button.setAutoRaise(True)
                 button.setIcon(result_action_icon(self.style(), action))
-                button.setToolTip(result_action_tooltip(entry.value, action))
+                button.setToolTip(result_action_tooltip(action, entry.info))
                 button.clicked.connect(
                     lambda _checked=False, v=entry.value, a=action:
                         execute_value_action(v, a, action_parent)

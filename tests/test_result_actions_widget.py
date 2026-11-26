@@ -11,7 +11,7 @@ from ase import Atoms
 from ase2sprkkr.outputs.task_result import TaskResult
 from PyQt6.QtWidgets import QApplication, QToolButton
 
-from ase2sprkkr_gui.gui.application.operation_results import EmptySpheresResult
+from ase2sprkkr_gui.gui.application.operation_results import EmptySpheresCount, EmptySpheresResult
 from ase2sprkkr_gui.gui.application.result_presentation import (
     ResultPresentation,
     ResultValuePresentation,
@@ -178,9 +178,7 @@ def test_result_directory_import_is_independent_of_result_selection():
 def test_show_all_values_toggle_preserves_result_and_restores_summary_filter():
     _application = QApplication.instance() or QApplication([])
     widget = _widget(show_values_without_actions=False)
-    summary = _Value()
-    summary.show_in_summary = True
-    result = _Result({"ordinary": _Value(), "summary": summary})
+    result = _Result({"ordinary": _Value(), "summary": EmptySpheresCount(7)})
     widget.set_result(result)
     assert not widget.show_all_values_checkbox.isChecked()
     assert widget._row_count == 1
@@ -218,9 +216,7 @@ def test_show_all_values_is_disabled_when_no_extra_values_can_be_shown():
 
     already_visible = (
         value("action", actions=("open",)),
-        value("summary", show_in_summary=True),
         value("notice", always_visible=True),
-        value("file", value=SimpleNamespace(path=lambda: "/tmp/Fe.pot")),
     )
     widget.set_result(ResultPresentation(result_id=1, values=already_visible))
     assert widget._row_count == len(already_visible)
@@ -307,20 +303,6 @@ def test_broken_actions_keep_value_visible_without_buttons(caplog):
     assert "Readable value" in summary.toolTip()
     assert "broken actions" in summary.toolTip()
     assert "Failed to load actions for output value 'bad'" in caplog.text
-    widget.close()
-
-
-def test_summary_opt_in_does_not_expose_all_actionless_values():
-    _application = QApplication.instance() or QApplication([])
-    widget = _widget(show_values_without_actions=False)
-    ordinary = _Value()
-    summary = _Value()
-    summary.show_in_summary = True
-
-    widget.set_result(_Result({"ordinary": ordinary, "summary": summary}))
-
-    assert widget._row_count == 1
-    assert widget._grid.itemAtPosition(0, 0).widget().text() == "Display value"
     widget.close()
 
 
@@ -477,20 +459,16 @@ def test_empty_spheres_is_not_presented_as_recomputable_task():
     widget.close()
 
 
-def test_file_without_available_actions_is_still_shown_in_main_result_list():
-    application = QApplication.instance() or QApplication([])
-
-    class FileValue(_Value):
-        def path(self):
-            return "/tmp/Fe.pot_new"
-
+def test_file_without_available_actions_is_still_shown_in_main_result_list(tmp_path):
+    _application = QApplication.instance() or QApplication([])
+    result = TaskResult(None, None, tmp_path, task_name="DOS")
+    missing = result.files.add_file("auxiliary", "missing/Fe.pot_new")
+    assert missing.actions() == ()
     widget = _widget(show_values_without_actions=False)
-    widget.set_result(_Result({
-        "auxiliary": FileValue(),
-        "inert scalar": _Value(),
-    }))
+    widget.set_result(result)
     assert widget._row_count == 1
-    assert widget._grid.itemAtPosition(0, 0).widget().text() == "Display value"
+    assert widget._grid.itemAtPosition(0, 0).widget().text() == missing.display_name
+    assert not widget.show_all_values_checkbox.isEnabled()
     widget.close()
 
 
