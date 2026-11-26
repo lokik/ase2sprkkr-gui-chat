@@ -6,7 +6,7 @@ import logging
 from threading import Lock, Thread
 from typing import Any, Protocol
 
-from kkrunner import ExecutionOutcome
+from kkrunner import ExecutionOutcome, Run
 
 
 logger = logging.getLogger(__name__)
@@ -22,10 +22,10 @@ class Cancellation(Protocol):
     @property
     def requested(self) -> bool: ...
 
-    def register(self, runner: Any) -> bool: ...
+    def register(self, runner: Run) -> bool: ...
 
 
-def register_runner(cancellation: Cancellation, runner: Any) -> None:
+def register_runner(cancellation: Cancellation, runner: Run) -> None:
     """Register a runner or cancel it when cancellation was already latched."""
     if cancellation.register(runner):
         return
@@ -33,7 +33,7 @@ def register_runner(cancellation: Cancellation, runner: Any) -> None:
     raise ExecutionCancelled
 
 
-def wait_for_runner(cancellation: Cancellation, runner: Any) -> Any:
+def wait_for_runner(cancellation: Cancellation, runner: Run) -> Any:
     """Wait for an interpreted result, reporting raw failures before adoption."""
     try:
         result = runner.wait()
@@ -54,7 +54,7 @@ def wait_for_runner(cancellation: Cancellation, runner: Any) -> Any:
             f"SPR-KKR execution failed (exit code {code})." if code not in (None, 0)
             else "SPR-KKR execution ended without a parsed calculation result."
         )
-        reason = getattr(runner, "failure_message", None)
+        reason = runner.failure_message
         if reason:
             message += f"\n{reason}"
         for label, path in (("Output", result.output_file), ("Error output", result.error_file)):
@@ -71,7 +71,7 @@ class RunCancellation:
         self._observation_only = observation_only
         self._lock = Lock()
         self._requested = False
-        self._runner: Any | None = None
+        self._runner: Run | None = None
 
     @property
     def requested(self) -> bool:
@@ -79,11 +79,16 @@ class RunCancellation:
             return self._requested
 
     @property
+    def observation_only(self) -> bool:
+        with self._lock:
+            return self._observation_only
+
+    @property
     def runner(self) -> Any | None:
         with self._lock:
             return self._runner
 
-    def register(self, runner: Any) -> bool:
+    def register(self, runner: Run) -> bool:
         """Register the runner unless cancellation was already requested."""
         with self._lock:
             if self._requested:
@@ -91,7 +96,7 @@ class RunCancellation:
             self._runner = runner
             return True
 
-    def _cancel_runner(self, runner: Any) -> None:
+    def _cancel_runner(self, runner: Run) -> None:
         try:
             if self._observation_only:
                 runner.stop_observation()
@@ -103,13 +108,15 @@ class RunCancellation:
                 else "Failed to cancel calculation"
             )
 
-    def request(self) -> None:
-        """Latch cancellation and cancel an already-registered runner off-thread."""
+    def request(self, *, shutdown=False) -> None:
+        """Latch cancellation; on shutdown only observe-stop detached jobs."""
         with self._lock:
             if self._requested:
                 return
             self._requested = True
             runner = self._runner
+            if shutdown and runner is not None and runner.detached:
+                self._observation_only = True
 
         if runner is not None:
             Thread(

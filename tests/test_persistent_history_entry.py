@@ -13,13 +13,7 @@ from ase2sprkkr_gui.main import GuiApplication
 
 
 class _JobSource:
-    available = True
-    unavailable_reason = None
-    supports_refresh = False
-    supports_results = False
-    supports_attach = False
-    supports_retry_download = False
-    supports_result_file_check = False
+    history_warning = None
 
     def __init__(self) -> None:
         self._listeners = []

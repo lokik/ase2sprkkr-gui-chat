@@ -53,13 +53,7 @@ def _job(
 
 
 class _Source:
-    available = True
-    unavailable_reason = None
-    supports_refresh = True
-    supports_results = True
-    supports_attach = True
-    supports_retry_download = False
-    supports_result_file_check = False
+    history_warning = None
 
     def __init__(self, jobs):
         self._jobs = tuple(jobs)
@@ -98,6 +92,9 @@ class _Source:
     def attach(self, job_id, *, callback=None, output_listener=None):
         self.attach_calls.append(job_id)
         return self.runners.setdefault(job_id, object())
+
+    def check_result_files(self, job_id):
+        return self.job(job_id)
 
     def load_result(self, job_id):
         self.loaded.append(job_id)
@@ -203,7 +200,6 @@ def test_selected_final_job_verifies_result_files():
     )
 
     class Source(_Source):
-        supports_result_file_check = True
 
         def __init__(self, jobs):
             super().__init__(jobs)
@@ -297,24 +293,3 @@ def test_empty_backend_shows_empty_state():
     assert view.tree.topLevelItemCount() == 0
     dialog.close()
 
-
-def test_unavailable_backend_is_an_empty_nonfatal_history():
-    _application = QApplication.instance() or QApplication([])
-
-    class Source(_Source):
-        available = False
-        unavailable_reason = "Persistent jobs are not available yet."
-        supports_refresh = False
-        supports_results = False
-        supports_attach = False
-        supports_retry_download = False
-        supports_result_file_check = False
-
-    dialog = _dialog(Source(()))
-    view = _view(dialog)
-
-    assert not view.backend_notice.isHidden()
-    assert view.backend_notice.text() == "Persistent jobs are not available yet."
-    assert not view.refresh_button.isEnabled()
-    assert view.tree.topLevelItemCount() == 0
-    dialog.close()

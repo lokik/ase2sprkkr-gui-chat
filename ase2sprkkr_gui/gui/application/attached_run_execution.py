@@ -1,15 +1,18 @@
 """Backend execution service for attaching to one persistent calculation."""
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import (
     Cancellation,
-    ExecutionCancelled,
     wait_for_runner,
 )
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
+
+
+logger = logging.getLogger(__name__)
 
 
 class AttachedRunExecution:
@@ -39,10 +42,20 @@ class AttachedRunExecution:
         # including when Stop was requested before registration finished.
         if not self._cancellation.register(runner):
             runner.stop_observation()
-            raise ExecutionCancelled
+            # The observer was already started by attach(); do not leave it
+            # running after the Qt worker has exited.
+            return runner
         self._attached(runner)
         return runner
 
     def run(self) -> Any:
         """Attach, wait for completion, and return the backend result."""
-        return wait_for_runner(self._cancellation, self._attach())
+        try:
+            return wait_for_runner(self._cancellation, self._attach())
+        finally:
+            # Refresh after every observer outcome, including failed attach,
+            # failed transfer, and a stopped observation.
+            try:
+                self._source.job_changed(self._job_id)
+            except (OSError, RuntimeError, ValueError):
+                logger.exception("Cannot refresh observed run %s", self._job_id)

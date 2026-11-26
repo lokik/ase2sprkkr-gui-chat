@@ -90,7 +90,7 @@ def test_execution_forwards_restart_scf_to_create_run(monkeypatch, tmp_path):
     seen = {}
 
     class Runner:
-        reference = None
+        record = None
         id = "test-run"
 
         def submit(self):

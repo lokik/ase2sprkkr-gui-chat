@@ -69,3 +69,12 @@ def test_persistent_jobs_controller_is_the_monitor_orchestration_boundary():
 
     widget_tree = _tree("widgets/persistent_jobs.py")
     assert "ase2sprkkr_gui.gui.controllers.persistent_jobs" not in _imports(widget_tree)
+
+
+def test_application_owns_one_job_source_and_controller():
+    tree = ast.parse((ROOT / "ase2sprkkr_gui" / "main.py").read_text())
+    for name in ("PersistentJobSource", "PersistentJobsController"):
+        calls = [node for node in ast.walk(tree)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                 and node.func.id == name]
+        assert len(calls) == 1

@@ -9,13 +9,13 @@ from PyQt6.QtWidgets import QMessageBox
 from kkrunner import RunState
 from kkrunner.backends.contracts import SubmissionNotStarted
 from kkrunner.runs import DuplicateSubmissionError
-from kkrunner.runs.conflicts import submission_conflicts
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import (
     ExecutionCancelled,
     RunCancellation,
 )
 from ase2sprkkr_gui.gui.application.sprkkr_execution import SprkkrExecution
+from ase2sprkkr_gui.gui.application.persistent_jobs import job_id_for_record
 from ase2sprkkr_gui.gui.application.workspace_controller import CalculationRequest
 from ase2sprkkr_gui.gui.dialogs.run_display import info_page_settings
 from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow, RunMonitorWorker
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class _SprkkrRunWorker(RunMonitorWorker):
     """Qt signal adapter around the backend-only :class:`SprkkrExecution`."""
 
-    persistentJobChanged = pyqtSignal(str)
+    persistentJobChanged = pyqtSignal(object)
     submitted = pyqtSignal(object)
     conflict = pyqtSignal(object)
     submissionRejected = pyqtSignal(str)
@@ -43,6 +43,7 @@ class _SprkkrRunWorker(RunMonitorWorker):
         project_id: str | None = None,
     ) -> None:
         super().__init__()
+        self._cancellation = cancellation
         self._execution = SprkkrExecution(
             request,
             cancellation,
@@ -57,7 +58,7 @@ class _SprkkrRunWorker(RunMonitorWorker):
         )
 
     def _emit_cancelled(self) -> None:
-        self.status.emit("Cancelled")
+        self.status.emit("Monitoring stopped" if self._cancellation.observation_only else "Cancelled")
         self.cancelled.emit()
 
     @pyqtSlot()
@@ -69,11 +70,17 @@ class _SprkkrRunWorker(RunMonitorWorker):
         except DuplicateSubmissionError as exc:
             # This is a rejected preflight reservation, not a backend failure.
             # Preserve the RunRecords and per-file collisions for the UI.
-            self.conflict.emit(exc)
-            self.cancelled.emit()
+            if self._cancellation.requested:
+                self._emit_cancelled()
+            else:
+                self.conflict.emit(exc)
+                self.cancelled.emit()
         except SubmissionNotStarted as exc:
-            self.submissionRejected.emit(str(exc))
-            self.cancelled.emit()
+            if self._cancellation.requested:
+                self._emit_cancelled()
+            else:
+                self.submissionRejected.emit(str(exc))
+                self.cancelled.emit()
         except Exception as exc:  # noqa: BLE001 - worker/backend boundary
             logger.exception("SPR-KKR calculation or result loading failed")
             self.error.emit(str(exc))
@@ -83,6 +90,7 @@ class SprkkrRunWindow(RunMonitorWindow):
     """Create an SPR-KKR runner and display it in the generic run monitor."""
 
     persistentJobChanged = pyqtSignal(str)
+    conflictJobChanged = pyqtSignal(object)
     conflictActionFinished = pyqtSignal(object)
 
     def __init__(
@@ -174,10 +182,10 @@ class SprkkrRunWindow(RunMonitorWindow):
         if self._submitted_callback is not None:
             self._submitted_callback(input_path)
 
-    @pyqtSlot(str)
-    def _persistent_job_changed_received(self, job_id: str) -> None:
-        self.set_job_id(job_id)
-        self.persistentJobChanged.emit(job_id)
+    @pyqtSlot(object)
+    def _persistent_job_changed_received(self, record) -> None:
+        self.set_job_id(record.id)
+        self.persistentJobChanged.emit(job_id_for_record(record))
 
     def _return_to_setup(self) -> None:
         """Return control to the original run picker after a rejected submission."""
@@ -206,7 +214,7 @@ class SprkkrRunWindow(RunMonitorWindow):
 
     def _show_submission_error(self) -> None:
         message = self._submission_error
-        if message is None or self._close_requested:
+        if message is None or self._close_requested or self._cancellation.requested:
             return
         self._submission_error = None
         QMessageBox.critical(self, "Could Not Start Calculation", message)
@@ -215,6 +223,8 @@ class SprkkrRunWindow(RunMonitorWindow):
     @pyqtSlot(object)
     def _on_conflict(self, conflict: DuplicateSubmissionError) -> None:
         """Keep the resolution dialog available while any conflict remains."""
+        if self._cancellation.requested:
+            return
         self._set_status("New calculation not started — files are in use")
         dialog = SubmissionConflictDialog(conflict, parent=self)
         self._conflict_dialog = dialog
@@ -245,14 +255,15 @@ class SprkkrRunWindow(RunMonitorWindow):
             return
         self._conflict_cancellation_pending = True
         proposed = self._conflict_dialog.proposed_record
+        records = self._conflict_dialog.conflicting_records
         self._background_thread_factory(
-            target=lambda: self._resolve_conflict_action(action, tuple(selected), proposed),
+            target=lambda: self._resolve_conflict_action(action, tuple(selected), proposed, records),
             name="resolve-conflicting-runs",
             daemon=True,
         ).start()
 
     def _resolve_conflict_action(
-        self, action: str, selected: tuple[str, ...], proposed
+        self, action: str, selected: tuple, proposed, records
     ) -> None:
         """Resolve only selected records, then recheck the global reservations.
 
@@ -260,24 +271,27 @@ class SprkkrRunWindow(RunMonitorWindow):
         native process. User confirmation for these operations belongs to the
         dialog, and the actual new submission still goes through reserve().
         """
-        errors: dict[str, str] = {}
+        errors: dict[tuple | str, str] = {}
         updated = False
         conflicts = None
         try:
             manager = self._conflict_manager()
             if action == "refresh":
                 try:
-                    manager.refresh()
+                    for refreshed in manager.refresh(manager.conflicts(proposed)):
+                        self.conflictJobChanged.emit(refreshed)
                 except Exception as exc:  # noqa: BLE001 - backend status query
                     logger.exception("Failed to refresh conflicting job statuses")
                     errors["Refresh"] = str(exc)
             elif action in ("stop", "fail", "delete"):
-                for run_id in selected:
+                by_key = {record.key: record for record in records}
+                for key in selected:
+                    record = by_key[key]
                     try:
-                        record = manager.store.get(run_id)
+                        record = record.store.get(record.id)
                         if action == "stop":
                             if not record.state.is_terminal:
-                                manager.cancel(run_id)
+                                manager.cancel(record)
                         elif action == "fail":
                             if not record.state.is_terminal:
                                 result = manager.transition(
@@ -295,28 +309,24 @@ class SprkkrRunWindow(RunMonitorWindow):
                                     )
                                 updated = True
                         else:
-                            manager.forget(run_id, force=True)
+                            manager.forget(record, force=True)
                             updated = True
-                        self.persistentJobChanged.emit(run_id)
+                        self.conflictJobChanged.emit(record)
                     except FileNotFoundError:
                         # The record was removed concurrently; verify the
                         # complete active set below rather than assume success.
-                        self.persistentJobChanged.emit(run_id)
+                        self.conflictJobChanged.emit(record)
                     except Exception as exc:  # noqa: BLE001 - backend/store boundary
                         logger.exception(
-                            "Could not %s conflicting job %s", action, run_id
+                            "Could not %s conflicting job %s", action, record.id
                         )
-                        errors[run_id] = str(exc)
+                        errors[key] = str(exc)
             else:
                 errors["Action"] = f"Unsupported conflict action: {action}"
 
             # Use the same collision predicate and global store as reserve().
             # Do not assume that the initial conflict list remains complete.
-            active = (
-                record for record in manager.store.runs(active=True)
-                if record.id != proposed.id and submission_conflicts(proposed, record)
-            )
-            conflicts = DuplicateSubmissionError(proposed, tuple(active))
+            conflicts = DuplicateSubmissionError(proposed, manager.conflicts(proposed))
         except Exception as exc:  # noqa: BLE001 - manager/storage boundary
             logger.exception("Could not check run reservation conflicts")
             errors["Reservation check"] = str(exc)

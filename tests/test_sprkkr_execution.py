@@ -210,6 +210,7 @@ def test_execution_constructs_sprkkr_with_selected_profile(monkeypatch, tmp_path
             return Runner()
 
     class Runner:
+        record = None
         id = "run-1"
 
         def submit(self):
@@ -265,6 +266,7 @@ def test_execution_requests_persistent_backend_run(monkeypatch, tmp_path):
     captured = {}
 
     class Runner:
+        record = None
         id = "run-1"
 
         def submit(self):
@@ -341,6 +343,7 @@ def test_cancel_before_registration_never_submits(monkeypatch, tmp_path):
     events = []
 
     class Runner:
+        record = None
         def cancel(self):
             events.append("cancel")
 
@@ -369,6 +372,7 @@ def test_cancel_racing_with_submit_is_not_cancelled_twice(monkeypatch, tmp_path)
     events = []
 
     class Runner:
+        record = None
         def submit(self):
             events.append("submit")
             cancellation.requested = True
@@ -377,7 +381,7 @@ def test_cancel_racing_with_submit_is_not_cancelled_twice(monkeypatch, tmp_path)
         def cancel(self):
             events.append("cancel")
 
-        def wait(self):  # pragma: no cover - cancellation stops before wait
+        def wait(self):
             events.append("wait")
 
     class Calculator:
@@ -394,7 +398,7 @@ def test_cancel_racing_with_submit_is_not_cancelled_twice(monkeypatch, tmp_path)
     else:  # pragma: no cover - assertion helper
         raise AssertionError("cancelled execution must not continue")
 
-    assert events == ["submit", "cancel"]
+    assert events == ["submit", "cancel", "wait"]
 
 
 def test_persistent_reference_is_forwarded_to_result_loader(monkeypatch, tmp_path):
@@ -403,6 +407,7 @@ def test_persistent_reference_is_forwarded_to_result_loader(monkeypatch, tmp_pat
     calls = []
 
     class Runner:
+        record = None
         id = "persistent-run-42"
 
         def submit(self):
@@ -432,13 +437,18 @@ def test_execution_notifies_persistent_job_id_after_submit_and_completion(
 ):
     changes = []
 
+    from kkrunner import MemoryRunStore, RunManager, RunState
+    manager = RunManager(MemoryRunStore())
+
     class Runner:
-        id = "persistent-run-17"
+        record = manager.new_record(directory=tmp_path)
+        id = record.id
 
         def submit(self):
-            pass
+            self.record = manager.transition(self.record, state=RunState.RUNNING)
 
         def wait(self):
+            self.record = manager.transition(self.record, state=RunState.FINISHED)
             return object()
 
     class Calculator:
@@ -455,19 +465,24 @@ def test_execution_notifies_persistent_job_id_after_submit_and_completion(
 
     execution.run()
 
-    assert changes == []
+    assert [record.state for record in changes] == [RunState.RUNNING, RunState.FINISHED]
 
 
 def test_persistent_job_observer_failure_does_not_fail_calculation(
     monkeypatch, tmp_path
 ):
+    from kkrunner import MemoryRunStore, RunManager, RunState
+    manager = RunManager(MemoryRunStore())
+
     class Runner:
-        id = "persistent-run-17"
+        record = manager.new_record(directory=tmp_path)
+        id = record.id
 
         def submit(self):
-            pass
+            self.record = manager.transition(self.record, state=RunState.RUNNING)
 
         def wait(self):
+            self.record = manager.transition(self.record, state=RunState.FINISHED)
             return object()
 
     class Calculator:
@@ -504,6 +519,7 @@ def test_embedded_execution_forwards_original_host_to_result_reader(
     calls = []
 
     class Runner:
+        record = None
         id = "cluster-run"
 
         def submit(self):
@@ -582,6 +598,7 @@ def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_lau
     events = []
 
     class Runner:
+        record = None
         spec = ExecutionSpec(
             argv=("unused-test-executable",),
             directory=str(tmp_path),
@@ -639,3 +656,24 @@ def test_run_monitor_forwards_worker_submit_signal_on_gui_thread(tmp_path):
     app.processEvents()
     assert observed == [str(tmp_path / "Fe_SCF.inp")]
     window.close()
+
+
+def test_unassigned_gui_run_uses_session_manager(tmp_path):
+    from kkrunner import MemoryRunStore, RunManager
+    manager = RunManager(MemoryRunStore())
+    execution = SprkkrExecution(_request(tmp_path), _Cancellation(), execution_manager=manager)
+    assert execution._project_context() is manager
+    clean = SprkkrExecution(_request(tmp_path, clear_cache=True), _Cancellation(), execution_manager=manager)
+    assert clean._project_context() is manager
+
+
+def test_execution_notifies_with_authoritative_run_record(tmp_path):
+    from kkrunner import MemoryRunStore, RunManager
+    manager = RunManager(MemoryRunStore())
+    record = manager.transition(manager.new_record(directory=tmp_path), state="running")
+    changes = []
+    execution = SprkkrExecution(_request(tmp_path), _Cancellation(),
+                                persistent_job_changed=changes.append)
+    execution._notify_persistent_job_changed(SimpleNamespace(id=record.id, record=record))
+    assert changes == [record]
+    assert changes[0].store is manager.store

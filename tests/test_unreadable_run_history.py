@@ -10,7 +10,7 @@ from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
 
 @pytest.mark.parametrize("component", ("backend", "transport"))
 @pytest.mark.parametrize("state", (RunState.NEW, RunState.RUNNING, RunState.SUBMITTING))
-def test_gui_keeps_unsupported_execution_visible_without_controls(tmp_path, caplog, component, state):
+def test_gui_keeps_unsupported_execution_visible_without_controls(tmp_path, caplog, component, state, make_job_source):
     store = RunStore(tmp_path / "history")
     manager = RunManager(store, submitting_grace=0)
     for run_id in ("good", "obsolete"):
@@ -33,7 +33,7 @@ def test_gui_keeps_unsupported_execution_visible_without_controls(tmp_path, capl
     path.write_text(json.dumps(data))
     unchanged = path.read_bytes()
 
-    source = PersistentJobSource(manager)
+    source = make_job_source(manager)
     assert sorted(job.id for job in source.jobs()) == ["good", "obsolete"]
     job = source.job_changed("obsolete")
     assert job is not None
@@ -51,7 +51,7 @@ def test_gui_keeps_unsupported_execution_visible_without_controls(tmp_path, capl
     assert path.read_bytes() == unchanged
 
 
-def test_gui_loads_healthy_runs_and_warns_about_corrupt_record(tmp_path, caplog):
+def test_gui_loads_healthy_runs_and_warns_about_corrupt_record(tmp_path, caplog, make_job_source):
     store = RunStore(tmp_path / "history")
     manager = RunManager(store)
     for run_id in ("good", "obsolete"):
@@ -68,7 +68,7 @@ def test_gui_loads_healthy_runs_and_warns_about_corrupt_record(tmp_path, caplog)
     path.write_text(json.dumps(data))
     unchanged = path.read_bytes()
 
-    source = PersistentJobSource(manager)
+    source = make_job_source(manager)
     assert [job.id for job in source.jobs()] == ["good"]
     assert source.history_warning is not None
     assert "1 stored run record" in source.history_warning

@@ -20,11 +20,13 @@ from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow
 
 
 class _Source:
-    supports_attach = True
 
     def __init__(self, result):
         self.result = result
         self.attach_calls = []
+
+    def job_changed(self, job_id):
+        pass
 
     def attach(self, job_id, *, callback=None, output_listener=None):
         self.attach_calls.append(job_id)
@@ -221,7 +223,7 @@ def test_new_run_displays_job_id_when_persistent_id_arrives():
     window.persistentJobChanged.connect(ids.append)
 
     assert window._job_id_label.isHidden()
-    window._persistent_job_changed_received("run-17")
+    window._persistent_job_changed_received(SimpleNamespace(id="run-17", store=None))
     assert window._job_id_label.text() == "run-17"
     assert not window._job_id_label.isHidden()
     assert ids == ["run-17"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import posixpath
+from kkrunner.runs import RunManager, RunRecord
 from typing import Any
 
 from kkrunner.runs.conflicts import (
@@ -21,10 +22,15 @@ from ase2sprkkr_gui.gui.application.run_file_deletion import (
 )
 
 logger = logging.getLogger(__name__)
-_FINAL_STATES = frozenset({"finished", "failed", "cancelled"})
 
 
-def referenced_file_deletion(manager: Any, projects: Any, job_id: str, job: Any) -> FileDeletionPlan:
+def _run_records(manager):
+    """Include process-local reservations in the same file-reference scope."""
+    for store in (manager.store, *manager.conflict_stores):
+        yield from store.runs()
+
+
+def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, job: Any) -> FileDeletionPlan:
     """Preview explicit local-file cleanup using authoritative persisted refs.
 
     Other saved records are detected regardless of project or application.
@@ -37,8 +43,8 @@ def referenced_file_deletion(manager: Any, projects: Any, job_id: str, job: Any)
     if not job.is_final:
         raise RuntimeError("Files of active or unknown calculations cannot be deleted")
 
-    runs = tuple(manager.store.runs())
-    imported = assignments(projects) if projects is not None else {}
+    runs = tuple(_run_records(manager))
+    imported = assignments(projects)
     remote: tuple[str, ...] = ()
     if job.imported_path is not None:
         if job.imported_key not in imported:
@@ -46,10 +52,10 @@ def referenced_file_deletion(manager: Any, projects: Any, job_id: str, job: Any)
         candidates = (job.imported_path,)
         candidate_kinds = {job.imported_path: "file"}
         ignored_key = job.imported_key
-        ignored_run_id = None
+        ignored_run_key = None
     else:
         record = manager.store.get(job_id)
-        if str(getattr(record.state, "value", record.state)) not in _FINAL_STATES:
+        if not record.state.is_terminal:
             raise RuntimeError("The calculation is no longer in a final state")
         directory = str(record.execution.directory.local)
         candidates = referenced_local_paths(record.files, directory)
@@ -59,17 +65,17 @@ def referenced_file_deletion(manager: Any, projects: Any, job_id: str, job: Any)
             if not record.execution.transport.is_local else ()
         )
         ignored_key = None
-        ignored_run_id = job_id
+        ignored_run_key = record.key
 
     other_paths: list[str] = []
     reference_details: dict[str, set[str]] = {}
     for record in runs:
-        if str(record.id) == ignored_run_id:
+        if record.key == ignored_run_key:
             continue
         metadata = record.metadata.get("ase2sprkkr", {})
         label = (
             f"Run {record.id} ({metadata.get('dataset') or 'unknown dataset'}, "
-            f"project {getattr(record, 'project_id', None) or 'unassigned'})"
+            f"project {record.project_id or 'unassigned'})"
         )
         for path in referenced_local_paths(
             record.files, str(record.execution.directory.local)
@@ -91,12 +97,12 @@ def referenced_file_deletion(manager: Any, projects: Any, job_id: str, job: Any)
     )
 
 
-def _remote_reference_details(manager: Any, record: Any) -> dict[str, tuple[str, ...]]:
+def _remote_reference_details(manager: RunManager, record: RunRecord) -> dict[str, tuple[str, ...]]:
     """Other persisted runs referencing the same execution filesystem."""
     references: dict[str, set[str]] = {}
-    for other in manager.store.runs():
+    for other in _run_records(manager):
         if (
-            str(other.id) == str(record.id)
+            other.key == record.key
             or other.execution.transport.is_local
             or filesystem_namespace(other) != filesystem_namespace(record)
         ):
@@ -104,14 +110,14 @@ def _remote_reference_details(manager: Any, record: Any) -> dict[str, tuple[str,
         metadata = other.metadata.get("ase2sprkkr", {})
         label = (
             f"Run {other.id} ({metadata.get('dataset') or 'unknown dataset'}, "
-            f"project {getattr(other, 'project_id', None) or 'unassigned'})"
+            f"project {other.project_id or 'unassigned'})"
         )
         for path in referenced_paths(other):
             references.setdefault(posixpath.normpath(path), set()).add(label)
     return {path: tuple(sorted(labels)) for path, labels in references.items()}
 
 
-def remote_file_review(manager: Any, job_id: str, job: Any) -> RemoteFileReview:
+def remote_file_review(manager: RunManager, job_id: str, job: Any) -> RemoteFileReview:
     """Inspect remote files; the caller runs blocking SSH work off the GUI thread."""
     if job is None or job.imported_path is not None or not job.is_final:
         raise ValueError("Remote deletion is available only for finished tracked SSH runs")
@@ -149,7 +155,7 @@ def remote_file_review(manager: Any, job_id: str, job: Any) -> RemoteFileReview:
     )
 
 
-def capture_remote_cleanup(manager: Any, job_id: str, job: Any) -> Any:
+def capture_remote_cleanup(manager: RunManager, job_id: str, job: Any) -> Any:
     """Keep the run's connection and manifest after its history is removed."""
     if job is None or not job.is_final or job.imported_path is not None:
         raise ValueError("Remote cleanup requires a finished persisted run")
@@ -160,7 +166,7 @@ def capture_remote_cleanup(manager: Any, job_id: str, job: Any) -> Any:
 
 
 def cleanup_remote_files(
-    manager: Any, record: Any, review: RemoteFileReview,
+    manager: RunManager, record: RunRecord, review: RemoteFileReview,
     selected_files: tuple[str, ...],
 ) -> tuple[dict, ...]:
     """Best-effort *post-forget* SSH cleanup; never used by local-file deletion.
@@ -224,7 +230,7 @@ def cleanup_remote_files(
 
 
 def delete_confirmed_local_files(
-    manager: Any, projects: Any, job_id: str, job: Any, *,
+    manager: RunManager, projects: Any, job_id: str, job: Any, *,
     expected_files: tuple[str, ...] | None,
     expected_file_snapshots: tuple | None,
     expected_shared_files: tuple[str, ...],

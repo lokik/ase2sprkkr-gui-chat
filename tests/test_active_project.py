@@ -16,13 +16,7 @@ from ase2sprkkr_gui.main import GuiApplication
 
 
 class _JobSource:
-    available = True
-    unavailable_reason = None
-    supports_refresh = False
-    supports_results = False
-    supports_attach = False
-    supports_retry_download = False
-    supports_result_file_check = False
+    history_warning = None
 
     def __init__(self):
         self.changed = []
@@ -50,6 +44,7 @@ class _JobSource:
 
 class _LaunchWindow(QWidget):
     persistentJobChanged = pyqtSignal(str)
+    conflictJobChanged = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -175,6 +170,7 @@ def test_monitor_respects_explicit_unassigned_selection(tmp_path):
     monitor = _LaunchWindow()
     monitor.launch_project_id = None
     gui._track_launch_monitor(monitor)
-    assert monitor.execution_context == (gui.execution_manager, None)
+    assert monitor.execution_context == (gui.session_manager, None)
+    assert monitor in gui.persistent_jobs_controller.monitor_windows()
     assert gui.active_project_id == active.id
     monitor.close()

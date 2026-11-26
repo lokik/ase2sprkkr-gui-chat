@@ -92,6 +92,7 @@ def run_modal_task(
     title: str = "Please Wait",
     label: str = "Working…",
     on_success: Callable[[_T], Any] | None = None,
+    modality: Qt.WindowModality = Qt.WindowModality.WindowModal,
 ) -> Any:
     """Run ``operation`` in a worker while showing a responsive modal wait.
 
@@ -107,7 +108,7 @@ def run_modal_task(
     dialog = _ModalTaskDialog(parent)
     dialog.setWindowTitle(title)
     dialog.setLabelText(label)
-    dialog.setWindowModality(Qt.WindowModality.WindowModal)
+    dialog.setWindowModality(modality)
     dialog.setRange(0, 0)
     dialog.setMinimumDuration(0)
     dialog.setAutoClose(False)
