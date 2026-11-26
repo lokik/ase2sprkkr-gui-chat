@@ -4,6 +4,8 @@ from threading import Thread
 from pathlib import Path
 from typing import Any, Callable
 
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_HOST
+
 from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPalette, QResizeEvent
 from PyQt6.QtWidgets import (
@@ -757,7 +759,7 @@ class WorkflowWindow(QMainWindow):
         self._sync_header_modes()
 
     def _sync_header_modes(self) -> None:
-        if getattr(self, "_syncing_headers", False):
+        if self._syncing_headers:
             return
         self._syncing_headers = True
         try:
@@ -891,7 +893,7 @@ class WorkflowWindow(QMainWindow):
         # Formula, dimensionality and SCF state belong to the structure panel.
         # Keep onboarding and diagnostic messages in the structure column.
         invalid_cluster = (
-            kind == "0d" and getattr(atoms, "embedding_host", None) is None
+            kind == "0d" and atoms.info.get(EMBEDDING_HOST) is None
         )
         self._structure_title.setText(
             "Structure" if atoms is not None else "Start with..."

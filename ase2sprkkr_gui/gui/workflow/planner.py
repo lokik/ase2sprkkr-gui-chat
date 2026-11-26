@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ase2sprkkr import InputParameters
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_HOST
 from ase2sprkkr_gui.gui.input_parameters.task_preferences import (
     all_task_names, displayed_tasks, supported_task_names,
 )
@@ -71,6 +72,9 @@ class WorkflowWorkspace(Protocol):
 
     @property
     def atoms(self) -> Any: ...
+
+    @property
+    def unresolved_cluster_path(self) -> Path | None: ...
 
     def structure_kind(self) -> StructureKind | None: ...
 
@@ -328,7 +332,7 @@ class WorkflowPlanner:
     ) -> WorkflowPlan:
         atoms = workspace.atoms
         if atoms is None:
-            path = getattr(workspace, "unresolved_cluster_path", None)
+            path = workspace.unresolved_cluster_path
             return self.initial_plan(
                 recent,
                 read_only_cluster=str(path) if path is not None else None,
@@ -344,11 +348,10 @@ class WorkflowPlanner:
         calculate: list[AvailableAction] = []
 
         is_cluster = workspace.structure_kind() == "0d"
-        invalid_cluster = is_cluster and getattr(atoms, "embedding_host", None) is None
-        host_status = (
-            getattr(workspace, "embedding_host_scf_status", lambda: None)()
-            if is_cluster and not invalid_cluster else None
-        )
+        invalid_cluster = is_cluster and atoms.info.get(EMBEDDING_HOST) is None
+        has_cluster_host = is_cluster and not invalid_cluster
+        missing_native_host = has_cluster_host and not workspace.can_run_embedding()
+        host_status = workspace.embedding_host_scf_status() if has_cluster_host else None
         host_needs_initial_scf = host_status == "START"
         host_not_converged = host_status not in (None, "START", "CONVERGED")
         if not is_cluster and not converged and not workspace.structure_change_requires_scf_restart():
@@ -417,7 +420,7 @@ class WorkflowPlanner:
                     )
                 elif workspace.structure_kind() == "2d":
                     description = "Converge bulk region(s), then the interaction zone"
-            if is_cluster and not getattr(workspace, "can_run_embedding", lambda: False)():
+            if missing_native_host:
                 description += " (requires a matching host POTFIL)"
             elif host_not_converged:
                 description += " (warning: host SCF has not converged; results may be unreliable)"
@@ -494,8 +497,7 @@ class WorkflowPlanner:
                     ActionIcon.INTERFACE,
                 ),
             ))
-        # Some test/third-party workspace adapters predate this capability.
-        if not invalid_cluster and getattr(workspace, "can_build_embedding", lambda: False)():
+        if not invalid_cluster and workspace.can_build_embedding():
             derived.append(_action(
                 BuildEmbedding(),
                 "Edit Embedded Cluster" if is_cluster else "Build Embedded Cluster",
@@ -503,10 +505,6 @@ class WorkflowPlanner:
                 "structure",
                 ActionIcon.EMBEDDING,
             ))
-        missing_native_host = (
-            is_cluster and not invalid_cluster
-            and not getattr(workspace, "can_run_embedding", lambda: False)()
-        )
         if missing_native_host:
             derived[:0] = [
                 _action(
