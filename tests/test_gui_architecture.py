@@ -390,7 +390,7 @@ def test_element_rows_use_callbacks_without_a_parent_dialog():
     )
     row.rows[0]["pick"].click()
     app.processEvents()
-    assert parents == [row]
+    assert parents == [row.occupation_editor]
     assert row.rows[0]["elem"].text() == "Co"
     row.add_row()
     row.rows[1]["elem"].setText("Fe")

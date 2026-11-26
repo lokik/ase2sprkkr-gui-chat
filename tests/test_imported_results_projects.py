@@ -96,34 +96,43 @@ def test_directory_import_skips_unparseable_files_and_keeps_workspace(
     history = RecentFiles(tmp_path / "recent.json")
     folder = tmp_path / "results"
     folder.mkdir()
-    for name in ("b.out", "a.out", "notes.log"):
+    for name in ("b.out", "a.out", "broken.out", "notes.log"):
         (folder / name).write_text(name)
     seen = []
 
-    def fake_load(path):
+    def fake_load(path, *, cache=None):
         seen.append(path.name)
-        if path.name == "notes.log":
+        if path.name == "broken.out":
             raise ValueError("not an SPR-KKR output")
-        return SimpleNamespace(path=path)
+        return LoadedResult(
+            result=SimpleNamespace(), output_path=path, potential_path=None,
+            atoms=None, potential_error=None, directory=str(folder),
+        )
 
     adopted = []
     monkeypatch.setattr(file_flows, "load_result_file", fake_load)
     monkeypatch.setattr(
         file_flows, "run_modal_task",
-        lambda parent, task, **kwargs: task(),
+        lambda parent, task, **kwargs: kwargs["on_success"](task()),
     )
-    monkeypatch.setattr(
-        controller, "adopt_external_result",
-        lambda loaded, *, select_result: adopted.append((loaded.path.name, select_result)),
-    )
-    monkeypatch.setattr(file_flows.QMessageBox, "warning", lambda *a, **kw: None)
+
+    def adopt(loaded, *, select_result):
+        adopted.append((loaded.output_path.name, select_result))
+        return SimpleNamespace(potential_path=None, potential_error=None)
+
+    monkeypatch.setattr(controller, "adopt_external_result", adopt)
+    warnings = []
+    monkeypatch.setattr(file_flows.QMessageBox, "warning",
+                        lambda _parent, _title, detail: warnings.append(detail))
     monkeypatch.setattr(file_flows.QMessageBox, "information", lambda *a, **kw: None)
     directory_before = controller.directory
 
     imported = file_flows.load_output_directory(controller, history, folder, None)
 
     assert [path.name for path in imported] == ["a.out", "b.out"]
-    assert seen == ["a.out", "b.out", "notes.log"]
+    assert seen == ["a.out", "b.out", "broken.out"]
+    assert len(warnings) == 1 and "broken.out" in warnings[0]
+    assert "notes.log" not in warnings[0]
     assert adopted == [("a.out", False), ("b.out", True)]
     assert controller.directory == directory_before
 

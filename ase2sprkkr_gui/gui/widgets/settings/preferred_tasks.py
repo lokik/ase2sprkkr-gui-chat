@@ -11,9 +11,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
-from ase2sprkkr_gui.gui.dialogs.task_chooser import (
-    TaskChoice, order_choices, task_choices,
-)
+from ase2sprkkr_gui.gui.input_parameters.task_choices import order_choices, task_choices
 from ase2sprkkr_gui.gui.input_parameters.task_preferences import default_preferred_task_names
 from ase2sprkkr_gui.gui.misc.icons import task_icon
 

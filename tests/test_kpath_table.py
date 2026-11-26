@@ -120,14 +120,14 @@ def test_paste_limits_and_invalid_input_are_non_mutating(dialog):
 
 
 @pytest.mark.filterwarnings(
-    r"ignore:ENERGY\.NE selects BSF-(EK|KK), but BSF-(EK|KK) was requested:"
+    r"ignore:ENERGY\.NE selects BSF-(EK|KK), although BSF-(EK|KK) was requested:"
     r"ase2sprkkr.common.warnings.DataValidityWarning"
 )
 def test_mode_switch_and_default_origin(dialog):
     widget = geometry(dialog)
     mode = dialog.editors_for(("ENERGY", "NE"))[0]
     original = widget._rows()
-    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-KK, but BSF-EK was requested"):
+    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-KK, although BSF-EK was requested"):
         mode.control.mode_combo.setCurrentIndex(mode.control.mode_combo.findData("KK"))
     assert widget.table.columnCount() == 3 and widget.table.rowCount() == 1
     widget.clear_origin()

@@ -35,7 +35,7 @@ def switch_mode(dialog, mode):
 
 
 @pytest.mark.filterwarnings(
-    r"ignore:ENERGY\.NE selects BSF-(EK|KK), but BSF-(EK|KK) was requested:"
+    r"ignore:ENERGY\.NE selects BSF-(EK|KK), although BSF-(EK|KK) was requested:"
     r"ase2sprkkr.common.warnings.DataValidityWarning"
 )
 def test_bsf_rules_update_mirrors_labels_and_conditional_errors(application):
@@ -49,7 +49,7 @@ def test_bsf_rules_update_mirrors_labels_and_conditional_errors(application):
     dialog.session.set_value(("TASK", "K1"), None)
     assert ("TASK", "K1") in dialog.form.errors
 
-    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-EK, but BSF-KK was requested"):
+    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-EK, although BSF-KK was requested"):
         switch_mode(dialog, "EK")
     assert {editor.accessibleName() for editor in emin} == {"Minimum energy"}
     assert all(not editor.isHidden() for editor in emax)

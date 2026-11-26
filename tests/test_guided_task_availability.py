@@ -190,12 +190,19 @@ def test_cluster_guided_task_requests_native_host_before_committing(monkeypatch,
     from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
     from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 
-    controller = WorkspaceController(WorkspaceState(atoms=Atoms("Fe", pbc=False)))
-    # 0D atoms without an embedding host are not a valid cluster; this verifies
-    # that the Guided boundary refuses the host preparation before starting.
+    from ase2sprkkr_gui.ase.embedding import EmbeddingDraft
+
+    host = Atoms("Fe", cell=(3, 3, 3), pbc=True)
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    controller = WorkspaceController(WorkspaceState(atoms=draft.to_atoms()))
+    # Only an actual embedded structure with a geometry-only host belongs
+    # to this workflow; isolated nonperiodic atoms are an unsupported kind.
+    assert controller.structure_kind() == "0d"
+    assert not controller.can_run_embedding()
     request = []
     monkeypatch.setattr(calculation_flow, "select_guided_input_parameters",
-                        lambda *_args, **_kwargs: object())
+                        lambda *_args, **_kwargs: InputParameters.create("scf"))
     monkeypatch.setattr(file_flows, "ensure_embedded_host_potential",
                         lambda ctrl, parent: request.append((ctrl, parent)) or False)
     assert calculation_flow.configure_and_run_task(

@@ -363,7 +363,7 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
     )
     assert history.last_kind == "output"
     assert len(notices) == 1
-    assert "skipped 1" in notices[0][1]
+    assert "Skipped 1 file(s)" in notices[0][1]
 
 
 
@@ -534,7 +534,7 @@ def test_reopening_unchanged_result_reuses_parsed_output(tmp_path, monkeypatch):
 def test_directory_import_keeps_colliding_scf_outputs_without_false_pot_provenance(
     tmp_path, monkeypatch,
 ):
-    from ase2sprkkr.outputs import FileAssociation
+    from ase2sprkkr.outputs import FileAttribution
     from ase2sprkkr.outputs.task_result import TaskResult
     from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
 
@@ -553,12 +553,12 @@ def test_directory_import_keeps_colliding_scf_outputs_without_false_pot_provenan
         result = TaskResult(None, None, tmp_path, output_file=path, task_name="SCF")
         result.produces_potential = True
         result.files.add_file("converged", common)
-        result.files["converged"].set_association(
-            FileAssociation.NOT_THIS_RESULT if path == outputs[0]
-            else FileAssociation.LIKELY,
+        result.files["converged"].set_attribution(
+            FileAttribution.NOT_THIS_RESULT if path == outputs[0]
+            else FileAttribution.LIKELY,
             evidence="newer_scf_stdout" if path == outputs[0]
             else "newest_scf_stdout",
-            associated_with=outputs[1] if path == outputs[0] else None,
+            attributed_to=outputs[1] if path == outputs[0] else None,
         )
         return LoadedResult(
             result=result,
