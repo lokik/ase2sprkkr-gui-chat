@@ -664,17 +664,23 @@ def test_batch_embedded_cache_parses_host_and_clupot_once_without_atoms(
     assert len(parsed) == 2  # host and CLUPOT, each parsed without Atoms
     assert set(path for path, _ in parsed) == {str(host), str(cluster)}
 
-    # Even if CLUPOT is unchanged, replacing the host invalidates the
-    # reconstructed cluster and the cached host parser.
+    # Touching a file without changing its bytes preserves its identity.
     stat = host.stat()
     os.utime(host, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    touched = read()
+    assert touched.potential_error is None
+    assert touched.atoms is second.atoms
+    assert len(parsed) == 2
+
+    # A real byte change invalidates the host and the derived cluster.
+    # Trailing whitespace changes the version without changing the geometry.
+    host.write_bytes(host.read_bytes() + b"\n")
     third = read()
     assert third.potential_error is None
     assert third.atoms is not second.atoms
     assert len(parsed) == 4
 
-    stat = cluster.stat()
-    os.utime(cluster, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    cluster.write_bytes(cluster.read_bytes() + b"\n")
     fourth = read()
     assert fourth.potential_error is None
     assert fourth.atoms is not third.atoms
