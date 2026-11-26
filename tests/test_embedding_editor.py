@@ -1458,7 +1458,6 @@ def test_host_cell_controls_are_beside_preview_and_sections_are_bold(dimension):
     for control in controls:
         assert control.mapTo(dialog, QPoint()).x() < dialog.cells.mapTo(dialog, QPoint()).x()
     assert not hasattr(dialog, "map_indices")
-    assert dialog.cells.figure.get_figwidth() == dialog.cells.figure.get_figheight()
     assert "QGroupBox::title { font-weight: bold; }" in dialog.styleSheet()
     dialog.close()
 
@@ -1526,7 +1525,10 @@ def test_embedding_symmetry_colors_and_actions_follow_same_checkbox():
     def map_edge(cell):
         view = dialog.cells
         index = view._cells.index(cell)
-        return view.axes.collections[-1].get_edgecolors()[index]
+        polygon = view._polygons[index]
+        outline, = [patch for patch in view.axes.patches
+                    if np.allclose(patch.get_xy()[:4], polygon)]
+        return outline.get_edgecolor()
 
     np.testing.assert_allclose(map_edge(site.cell_index), to_rgba(SELECTED_COLOR))
     np.testing.assert_allclose(

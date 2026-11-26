@@ -144,12 +144,19 @@ def test_completed_embedded_scf_output_unlocks_post_scf_tasks_when_clupot_still_
     parameters.CONTROL.POTFIL_CLU = "cluster.pot"
     result = ScfResult(parameters, None, tmp_path)
     result.iterations = [{"converged": lambda: True}]
+    # Real dependency paths are required by the GUI provenance check, even
+    # when the backend potential parser itself is mocked.
+    (tmp_path / "host.pot").write_bytes(b"host fixture")
+    (tmp_path / "cluster.pot_new").write_bytes(b"cluster fixture")
     result.require_current_file = lambda _path: None
     result._read_potential = lambda _path: native_cluster
 
     loaded = load_result(result, fallback_directory=tmp_path)
-    assert loaded.atoms is cluster
     assert loaded.potential_error is None
+    assert loaded.atoms is not None
+    assert loaded.atoms is not cluster
+    assert not cluster.sprkkr_is_scf_converged()
+    assert native_cluster.SCF_INFO.SCFSTATUS() == "ITERATING"
     assert loaded.atoms.sprkkr_is_scf_converged()
     assert loaded.atoms.info["sprkkr_embedding_scf_status"] == "CONVERGED"
     assert loaded.atoms.embedding_host is host

@@ -72,8 +72,13 @@ def test_fullscreen_copy_refits_the_same_marker_diameters_on_resize():
     preview.set_view(90, -90)
     _set_atoms(preview, [2500., 4900.], [1., 3.])
 
+    from PyQt6.QtWidgets import QApplication
+
     fullscreen = preview._fullscreen_copy()
-    fullscreen.canvas.resize(440, 260)
+    fullscreen.show()
+    QApplication.processEvents()
+    fullscreen.resize(600, 300)
+    QApplication.processEvents()
     fullscreen._fit()
     assert fullscreen._fit_padding() == pytest.approx(preview._fit_padding())
     _assert_markers_inside_canvas(fullscreen)

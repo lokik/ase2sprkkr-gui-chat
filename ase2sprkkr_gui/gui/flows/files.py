@@ -286,7 +286,11 @@ def load_input_parameters(
     input_generation = controller.input_parameters_generation
     directory_generation = controller.directory_generation
     path = Path(file_path).resolve()
+    publishing = False
+
     def apply_loaded_parameters(parameters):
+        nonlocal publishing
+        publishing = True
         change = controller.replace_input_parameters(
             parameters,
             directory=str(path.parent),
@@ -308,6 +312,8 @@ def load_input_parameters(
             on_success=apply_loaded_parameters,
         )
     except Exception as exc:  # noqa: BLE001 - parser errors are presented
+        if publishing:
+            raise
         QMessageBox.critical(
             parent,
             "Load Error",
@@ -587,14 +593,23 @@ def _read_output(
                 pass
         return loaded, companion
 
+    publishing = False
+
+    def publish(pair):
+        nonlocal publishing
+        publishing = True
+        return on_success(*pair)
+
     try:
         return run_modal_task(
             parent, read,
             title="Loading Result",
             label="Parsing SPR-KKR output…",
-            on_success=lambda pair: on_success(*pair),
+            on_success=publish,
         )
-    except Exception as exc:  # noqa: BLE001 - parser and adoption errors
+    except Exception as exc:  # noqa: BLE001 - parser errors are presented
+        if publishing:
+            raise
         QMessageBox.critical(
             parent,
             "Load Error",

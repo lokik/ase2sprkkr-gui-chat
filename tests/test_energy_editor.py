@@ -186,7 +186,7 @@ def test_arpes_absolute_bounds_and_relative_defaults(application, expert):
 
 
 @pytest.mark.filterwarnings(
-    r"ignore:ENERGY\.NE selects BSF-(EK|KK), but BSF-(EK|KK) was requested:"
+    r"ignore:ENERGY\.NE selects BSF-(EK|KK), although BSF-(EK|KK) was requested:"
     r"ase2sprkkr.common.warnings.DataValidityWarning"
 )
 def test_bsf_relative_kk_import_can_switch_to_ek_and_edit_both_references(application):
@@ -194,7 +194,7 @@ def test_bsf_relative_kk_import_can_switch_to_ek_and_edit_both_references(applic
     parameters.ENERGY.EMINEV.set(0.)
     dialog = GuidedInputParametersDialog('bsf', parameters)
     mode = dialog.editors_for(('ENERGY', 'NE'))[0]
-    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-EK, but BSF-KK was requested"):
+    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-EK, although BSF-KK was requested"):
         mode.control.mode_combo.setCurrentIndex(mode.control.mode_combo.findData('EK'))
     for name in ('EMIN', 'EMAX'):
         editor = dialog.editors_for(('ENERGY', name))[-1].control

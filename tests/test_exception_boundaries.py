@@ -3,10 +3,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 import pytest
+from ase import Atoms
+from types import SimpleNamespace
 from ase2sprkkr.common.warnings import DataValidityError
 from ase2sprkkr.input_parameters.input_parameters import InputParameters
 from PyQt6.QtWidgets import QApplication
 
+from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.dialogs import guided_input
 from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
 from ase2sprkkr_gui.gui.flows import files as workspace_file_flows
@@ -86,7 +89,7 @@ def test_wrong_task_is_a_user_facing_load_error(
     assert not input_parameter_flows.load_input_parameters(
         session, tmp_path / "dos.inp", None
     )
-    assert "Expected SCF input parameters, got DOS." in messages[0]
+    assert "Expected SCF input-parameter schema, got DOS." in messages[0]
 
 
 def test_text_editor_flow_does_not_hide_dialog_error(monkeypatch, application):
@@ -129,7 +132,7 @@ def test_workspace_structure_load_does_not_hide_controller_error(
         def replace_structure(self, *_args, **_kwargs):
             raise RuntimeError("controller invariant")
 
-    monkeypatch.setattr(workspace_file_flows, "ase_read", lambda _path: object())
+    monkeypatch.setattr(workspace_file_flows, "ase_read", lambda _path: Atoms("Fe"))
     messages = []
     monkeypatch.setattr(
         workspace_file_flows.QMessageBox,
@@ -178,16 +181,15 @@ def test_workspace_input_load_does_not_hide_controller_error(
 def test_workspace_output_load_does_not_hide_controller_error(
     monkeypatch, tmp_path, application
 ):
-    loaded = object()
-
-    class Controller:
-        generation = 1
-
-        def adopt_external_result(self, *_args, **_kwargs):
-            raise RuntimeError("controller invariant")
+    loaded = SimpleNamespace(potential_path=None, output_path=None)
+    controller = WorkspaceController()
+    monkeypatch.setattr(
+        controller, "adopt_external_result",
+        lambda *_args, **_kwargs: _raise(RuntimeError("controller invariant")),
+    )
 
     monkeypatch.setattr(
-        workspace_file_flows, "load_result_file", lambda _path: loaded
+        workspace_file_flows, "load_result_file", lambda _path, **_kwargs: loaded
     )
     messages = []
     monkeypatch.setattr(
@@ -198,7 +200,7 @@ def test_workspace_output_load_does_not_hide_controller_error(
 
     with pytest.raises(RuntimeError, match="controller invariant"):
         workspace_file_flows.load_output(
-            Controller(), object(), tmp_path / "Fe.out", None
+            controller, object(), tmp_path / "Fe.out", None
         )
     assert messages == []
 
@@ -233,11 +235,7 @@ def test_workspace_structure_save_does_not_hide_controller_error(
 def test_workspace_file_loads_still_report_backend_errors(
     monkeypatch, tmp_path, application
 ):
-    controller = type("Controller", (), {
-        "structure_generation": object(),
-        "input_parameters_generation": object(),
-        "directory_generation": object(),
-    })()
+    controller = WorkspaceController()
     messages = []
     monkeypatch.setattr(
         workspace_file_flows.QMessageBox,
@@ -266,7 +264,7 @@ def test_workspace_file_loads_still_report_backend_errors(
     monkeypatch.setattr(
         workspace_file_flows,
         "load_result_file",
-        lambda _path: _raise(RuntimeError("output parse")),
+        lambda _path, **_kwargs: _raise(RuntimeError("output parse")),
     )
     assert not workspace_file_flows.load_output(
         controller, object(), tmp_path / "Fe.out", None
