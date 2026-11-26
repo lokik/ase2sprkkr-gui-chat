@@ -65,7 +65,7 @@ def test_ase_viewer_always_uses_isolated_child(monkeypatch):
     atoms = Atoms("Fe")
     launched = []
     monkeypatch.setattr(visualization, "launch_ase_gui", lambda value: launched.append(value))
-    monkeypatch.setattr(visualization, "ase_view", lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("unexpected ASE launcher")))
+    monkeypatch.setattr("ase.visualize.view", lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("unexpected ASE launcher")))
     visualization._open_viewer(atoms, "ase")
     assert launched == [atoms]
 
@@ -73,7 +73,7 @@ def test_ase_viewer_always_uses_isolated_child(monkeypatch):
 def test_other_viewers_keep_ase_dispatch(monkeypatch):
     atoms = Atoms("Fe")
     calls = []
-    monkeypatch.setattr(visualization, "ase_view", lambda value, *, viewer: calls.append((value, viewer)))
+    monkeypatch.setattr("ase.visualize.view", lambda value, *, viewer: calls.append((value, viewer)))
     monkeypatch.setattr(visualization, "launch_ase_gui", lambda _atoms: (_ for _ in ()).throw(AssertionError("unexpected Tk child")))
     visualization._open_viewer(atoms, "vmd")
     assert calls == [(atoms, "vmd")]
