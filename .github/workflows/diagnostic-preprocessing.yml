@@ -1,0 +1,36 @@
+name: preprocessing integration (diagnostic)
+on:
+  push:
+    branches: [chatgpt-preprocessing-integration-check]
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+      - uses: actions/checkout@v7
+        with:
+          repository: lokik/kkrunner-chat
+          ref: 4a27deb8836b9aebd863628c3d7e2431d18bf446
+          path: .ci/kkrunner
+      - uses: actions/checkout@v7
+        with:
+          repository: lokik/ase2sprkkr-chat
+          ref: 8dff50456a45c0e06c7ffab0c30b7b2578268995
+          path: .ci/ase2sprkkr
+      - name: Test candidate dependency set without changing published requirements
+        run: |
+          python -m pip install -e ./.ci/kkrunner -e ./.ci/ase2sprkkr -e . pytest 'setuptools>=61'
+      - name: Test execution and conflict workflows
+        run: python -m pytest -q tests/test_sprkkr_execution.py tests/test_run_conflict_dialog.py tests/test_run_session.py tests/test_project_execution_workflow.py tests/test_custom_calculation.py
