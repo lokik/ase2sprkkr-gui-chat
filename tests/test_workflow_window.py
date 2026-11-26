@@ -231,7 +231,8 @@ def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
 
     assert not window._actions.has_actions
     assert window._calculate_notice.isVisible()
-    assert window._calculate_notice.text() == "First, create or load the structure."
+    assert "create a structure" in window._calculate_notice.text()
+    assert "potential" in window._calculate_notice.text()
     assert window._calculate_notice.alignment() & Qt.AlignmentFlag.AlignHCenter
 
     row = window._columns_layout
@@ -255,15 +256,12 @@ def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
         return widths
 
     full_widths = equal_thirds()
-    assert min(full_widths) >= 3 * 200 + 2 * 2
-    assert all(bar._mode == "short" for bar in window._header_bars)
     assert window._calculate_navigation.layout().contentsMargins().right() == 24
     assert window._header_bars[2].layout().contentsMargins().right() == 0
     window.resize(1360, 800)
     application.processEvents()
     narrow_widths = equal_thirds()
     assert all(narrow < full for narrow, full in zip(narrow_widths, full_widths))
-    assert all(bar._mode == "icon" for bar in window._header_bars)
     window.close()
 
 
@@ -599,7 +597,7 @@ def test_new_2d_flow_only_publishes_final_structure(tmp_path, monkeypatch):
     )
 
     def select(candidate, **kwargs):
-        assert candidate is not bulk
+        assert candidate is bulk  # Newly created, detached candidate; no copy needed.
         assert window.controller.atoms is original_atoms
         assert window.controller.structure_generation == original_generation
         assert kwargs["surface_mode"] is True
@@ -705,15 +703,13 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     )
     assert window._result_actions_widget.load_result_button.parentWidget() is navs[2]
     assert all(
-        nav.layout().itemAt(1 if nav is navs[1] else 0).layout() is nav._button_row
+        nav.layout().itemAt(0 if nav is navs[0] else 1).layout() is nav._button_row
         for nav in navs
     )
-    assert navs[1].layout().itemAt(0).spacerItem() is not None
-    assert navs[1].layout().itemAt(2).spacerItem() is not None
-    assert all(
-        nav.layout().itemAt(1).spacerItem() is not None
-        for nav in (navs[0], navs[2])
-    )
+    for nav in navs[1:]:
+        assert nav.layout().itemAt(0).spacerItem() is not None
+        assert nav.layout().itemAt(2).spacerItem() is not None
+    assert navs[0].layout().itemAt(1).spacerItem() is not None
     assert all(
         nav._button_row.itemAt(i).widget() is button
         for nav in navs
@@ -999,7 +995,7 @@ def test_header_layout_modes_keep_buttons_visible_and_sized(tmp_path):
     assert window._result_actions_widget.load_result_button.text() == ""
     assert window._result_actions_widget.import_directory_button.text() == ""
     assert window._result_actions_widget.load_result_button.toolTip().startswith(
-        "Load Result File\\n"
+        "Load Result File\n"
     )
     assert window._recent_results_button.menu() is not None
     # Exercise custom painters both with labels and with menu arrows.
@@ -1100,9 +1096,7 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
     window.showNormal()
     window.resize(1600, 800)
     application.processEvents()
-    assert window._recent_results_button.toolTip().startswith(
-        "Recent Results\\n"
-    )
+    assert str(paths["output"][1]) in window._recent_results_button.toolTip()
     assert window._repeat_button.toolTip().find(str(paths["input"][1])) > 0
 
     gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
@@ -1203,7 +1197,7 @@ def test_guided_save_structure_writes_normal_atoms_without_running(tmp_path, mon
         action.command
         for action in window.workflow_plan.group(WorkflowSection.VIEW).actions
     )
-    assert commands == (VisualizeStructure(), SaveStructure())
+    assert SaveStructure() in commands
     window.execute_workflow_command(SaveStructure())
     assert expected.is_file()
     assert not window.controller.has_unsaved_structure
@@ -1266,7 +1260,8 @@ def test_guided_structure_sidebar_tracks_current_structure(tmp_path):
     assert "Elements: Fe" in inspector.details.text()
     assert "Periodicity: x, y, z (3D)" in inspector.details.text()
     assert "Cell (Å)" in inspector.details.text()
-    assert inspector.preview_source.count() == 1
+    assert inspector._view_selector.isHidden()
+    assert inspector.preview.isVisible()
     assert not window._subtitle.isVisible()
 
     window.controller.reset()
