@@ -1,8 +1,7 @@
 """Marker area and eligibility regression tests."""
-from types import SimpleNamespace
-
 import numpy as np
 from ase import Atoms
+from ase2sprkkr import SPRKKRAtoms
 
 from ase2sprkkr_gui.gui.plots.atom_sizes import (
     AtomAppearance, marker_areas, marker_area_factors_for_occupations,
@@ -10,17 +9,14 @@ from ase2sprkkr_gui.gui.plots.atom_sizes import (
 )
 
 
-def _with_meshes(atoms, radii, status):
-    sites = [
-        SimpleNamespace(site_type=SimpleNamespace(
-            mesh=SimpleNamespace(rws=radius), occupation={},
-        ))
-        for radius in radii
-    ]
-    atoms.set_array("sprkkr_sites_data", np.asarray(sites, dtype=object))
-    atoms._potential = SimpleNamespace(
-        SCF_INFO=SimpleNamespace(SCFSTATUS=lambda: status)
+def _with_meshes(radii, status):
+    atoms = SPRKKRAtoms(
+        "CAu", positions=[[0, 0, 0], [1, 1, 1]],
+        cell=[3, 3, 3], pbc=True, symmetry=False,
     )
+    atoms.potential.SCF_INFO.SCFSTATUS = status
+    for site, radius in zip(atoms.sites, radii):
+        site.mesh.rws = radius
     return atoms
 
 
@@ -39,32 +35,37 @@ def test_static_wsr_and_quadratic_scale():
 
 
 def test_potential_requires_post_start_state_and_enabled_checkbox():
-    atoms = _with_meshes(Atoms("CAu"), [1.0, 4.0], "START")
+    atoms = _with_meshes([1.0, 4.0], "START")
     static = marker_areas(atoms)
     assert np.isclose(static[1] / static[0], (2.98 / 1.66) ** 2)
-    atoms._potential.SCF_INFO.SCFSTATUS = lambda: "ITERATING"
+    atoms.potential.SCF_INFO.SCFSTATUS = "ITR"
     from_potential = marker_areas(atoms)
     assert np.isclose(from_potential[1] / from_potential[0], 16)
     assert np.allclose(
         marker_areas(atoms, appearance=AtomAppearance(potential_radii=False)),
         static,
     )
-    atoms._potential.SCF_INFO.SCFSTATUS = lambda: "CONVERGED"
+    atoms.potential.SCF_INFO.SCFSTATUS = "CONVERGED"
     assert np.allclose(marker_areas(atoms), from_potential)
 
 
 def test_invalid_mesh_radius_falls_back_per_site():
-    atoms = _with_meshes(Atoms("CAu"), [0.0, float("nan")], "CONVERGED")
+    atoms = _with_meshes([0.0, float("nan")], "CONVERGED")
     sizes = marker_areas(atoms)
     assert np.isclose(sizes[1] / sizes[0], (2.98 / 1.66) ** 2)
 
 
-def test_incomplete_site_metadata_falls_back_to_static():
-    atoms = _with_meshes(Atoms("CAu"), [1.0, 4.0], "CONVERGED")
-    atoms.arrays["sprkkr_sites_data"][1] = None
+def test_preview_does_not_initialize_sites_or_potential():
+    atoms = SPRKKRAtoms(
+        "CAu", positions=[[0, 0, 0], [1, 1, 1]],
+        cell=[3, 3, 3], pbc=True,
+    )
+    assert not atoms.are_sites_inited()
+    assert not atoms.has_potential()
     sizes = marker_areas(atoms)
-    assert len(sizes) == 2
-    assert np.all(np.isfinite(sizes))
+    assert np.isclose(sizes[1] / sizes[0], (2.98 / 1.66) ** 2)
+    assert not atoms.are_sites_inited()
+    assert not atoms.has_potential()
 
 
 def test_shared_preference_does_not_modify_structure():

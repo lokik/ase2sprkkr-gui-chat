@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import math
 
 import numpy as np
+from ase2sprkkr import SPRKKRAtoms
 from ase2sprkkr.physics.winger_seitz_radii import winger_seitz_radii
 
 
@@ -53,11 +54,6 @@ def _valid_radius(value):
     return value if math.isfinite(value) and value > 0 else None
 
 
-def _sites(atoms):
-    sites = getattr(atoms, "arrays", {}).get("sprkkr_sites_data")
-    return sites if sites is not None and len(sites) == len(atoms) else None
-
-
 def _occupation_radius(occupation):
     """Return concentration-weighted static WSR, or None for unknown species."""
     if isinstance(occupation, Mapping):
@@ -77,20 +73,16 @@ def _occupation_radius(occupation):
 def _static_radius(atoms, index, sites, symbols):
     occupation = None
     if sites is not None:
-        try:
-            occupation = (
-                (atomic_type.symbol, concentration)
-                for atomic_type, concentration in
-                sites[index].site_type.occupation.items()
-            )
-            radius = _occupation_radius(occupation)
-            if radius is not None:
-                return radius
-        except (AttributeError, TypeError, ValueError):
-            pass
-    kinds = getattr(atoms, "arrays", {}).get("spacegroup_kinds")
+        occupation = (
+            (atomic_type.symbol, concentration)
+            for atomic_type, concentration in sites[index].site_type.occupation.items()
+        )
+        radius = _occupation_radius(occupation)
+        if radius is not None:
+            return radius
+    kinds = atoms.arrays.get("spacegroup_kinds")
     key = kinds[index] if kinds is not None else index
-    values = getattr(atoms, "info", {}).get("occupancy", {})
+    values = atoms.info.get("occupancy", {})
     if isinstance(values, Mapping):
         occupation = values.get(key, values.get(str(key)))
     return (
@@ -121,10 +113,7 @@ def marker_area_factors_for_occupations(occupations, *, appearance=None):
 def _post_start(potential):
     if potential is None:
         return False
-    try:
-        status = potential.SCF_INFO.SCFSTATUS()
-    except (AttributeError, TypeError, ValueError, KeyError):
-        return False
+    status = potential.SCF_INFO.SCFSTATUS()
     status = str(status).strip().upper()
     return status in ("ITERATING", "CONVERGED") or status.startswith("ITR")
 
@@ -143,19 +132,15 @@ def marker_areas(atoms, base_area=48.0, *, potential=None, appearance=None):
     if not appearance.relative_sizes:
         return np.full(n, area, dtype=float)
 
-    sites = _sites(atoms)
+    native = isinstance(atoms, SPRKKRAtoms)
+    sites = atoms.sites if native and atoms.are_sites_inited() else None
     symbols = atoms.get_chemical_symbols()
     radii = np.asarray([_static_radius(atoms, i, sites, symbols) for i in range(n)])
-    if potential is None:
-        potential = getattr(atoms, "_potential", None)
+    if potential is None and native and atoms.has_potential():
+        potential = atoms.potential
     if appearance.potential_radii and sites is not None and _post_start(potential):
         for i, site in enumerate(sites):
-            radius = _valid_radius(
-                getattr(
-                    getattr(getattr(site, "site_type", None), "mesh", None),
-                    "rws", None,
-                )
-            )
+            radius = _valid_radius(site.site_type.mesh.rws)
             if radius is not None:
                 radii[i] = radius
     return area * (radii / np.mean(radii)) ** 2
