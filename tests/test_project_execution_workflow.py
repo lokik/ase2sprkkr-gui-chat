@@ -62,8 +62,8 @@ def test_attach_and_result_loading_delegate_to_backend(monkeypatch):
         retrieve_result_files=lambda *_args: None,
     )
     monkeypatch.setattr(jobs_module, "attach_project_run", lambda _manager, ref, **kwargs: calls.append(("attach", ref)) or runner)
-    monkeypatch.setattr(jobs_module, "load_project_result", lambda _manager, ref: calls.append(("load", ref)) or result)
+    monkeypatch.setattr(jobs_module, "load_project_result", lambda _manager, ref, *, allow_unparsed: calls.append(("load", ref, allow_unparsed)) or result)
     source = PersistentJobSource(manager)
     assert source.attach(item.id) is runner
     assert source.load_result(item.id) is result
-    assert calls == [("attach", item.id), ("load", item.id)]
+    assert calls == [("attach", item.id), ("load", item.id, True)]
