@@ -22,8 +22,10 @@ from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.dialogs import expert_input
 from ase2sprkkr_gui.gui.dialogs import task_chooser
-from ase2sprkkr_gui.gui.dialogs.task_chooser import (
-    TaskChoice, TaskChooserDialog, applicability, order_choices,
+from ase2sprkkr_gui.gui.dialogs.task_chooser import TaskChooserDialog
+from ase2sprkkr_gui.gui.input_parameters import task_choices as task_metadata
+from ase2sprkkr_gui.gui.input_parameters.task_choices import (
+    TaskChoice, applicability, order_choices,
 )
 from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
 from ase2sprkkr_gui.gui.misc.modal_task import _ModalTaskDialog
@@ -101,12 +103,12 @@ def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatc
         info="Short purpose of the calculation.",
         description="Long technical help about this calculation. More limitations.",
     )
-    monkeypatch.setattr(task_chooser.InputParameters, "task_registry", Registry(TEST=task))
+    monkeypatch.setattr(task_metadata.InputParameters, "task_registry", Registry(TEST=task))
     monkeypatch.setattr(
-        task_chooser.InputParameters, "input_parameters_registry",
+        task_metadata.InputParameters, "input_parameters_registry",
         SimpleNamespace(definition_for_task=lambda _task: schema),
     )
-    monkeypatch.setattr(task_chooser, "system_kind_for_atoms", lambda _atoms: "3d")
+    monkeypatch.setattr(task_metadata, "system_kind_for_atoms", lambda _atoms: "3d")
 
     chooser = TaskChooserDialog(object())
     info_col = chooser._fields.index("info")
@@ -133,12 +135,12 @@ def test_info_falls_back_to_first_sentence_when_short_summary_is_missing(monkeyp
     schema = SimpleNamespace(
         info="", description="An informative first sentence. Extended instructions.",
     )
-    monkeypatch.setattr(task_chooser.InputParameters, "task_registry", Registry(TEST=task))
+    monkeypatch.setattr(task_metadata.InputParameters, "task_registry", Registry(TEST=task))
     monkeypatch.setattr(
-        task_chooser.InputParameters, "input_parameters_registry",
+        task_metadata.InputParameters, "input_parameters_registry",
         SimpleNamespace(definition_for_task=lambda _task: schema),
     )
-    rows = task_chooser.task_choices()
+    rows = task_metadata.task_choices()
     assert len(rows) == 1
     assert rows[0].info == "An informative first sentence."
     assert rows[0].details == schema.description
@@ -461,14 +463,14 @@ def test_native_2d_applicability_uses_registered_task_metadata():
 
     bulk = Atoms("Fe", cell=[2.8, 2.8, 2.8], pbc=True)
     layer = semiinfinite_system(bulk, repeat=2)
-    surface_choices = {row.name: row for row in task_chooser.task_choices(layer)}
+    surface_choices = {row.name: row for row in task_metadata.task_choices(layer)}
     for name in ("SCF", "DOS", "JXC", "BSF", "ARPES"):
         assert surface_choices[name].applicable == "Yes"
     for name in ("CHILANDAU", "POSANI", "POSANIPREP", "POSANITAU",
                  "BONDING", "PLOT2DRHO"):
         assert surface_choices[name].applicable == "No"
 
-    bulk_choices = {row.name: row for row in task_chooser.task_choices(bulk)}
+    bulk_choices = {row.name: row for row in task_metadata.task_choices(bulk)}
     assert bulk_choices["CHILANDAU"].applicable == "Yes"
     assert bulk_choices["BONDING"].applicable == "No"
 
