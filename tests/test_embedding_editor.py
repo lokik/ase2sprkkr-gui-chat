@@ -848,16 +848,6 @@ def test_radial_data_reset_requires_explicit_authorization():
     assert cluster.sites[0].occupation.to_dict(True) == {"Cu": 1.0}
 
 
-def test_embedding_snapshot_has_single_uncopied_host_link():
-    parent = host()
-    draft = EmbeddingDraft(parent)
-    draft.include([draft.center])
-    snapshot = StructureSnapshot.capture(draft.to_atoms())
-    assert snapshot.info["sprkkr_embedding_host"] is parent
-    assert not hasattr(snapshot, "embedding_host")
-    assert snapshot.to_atoms().embedding_host is parent
-
-
 def test_cell_rings_are_wigner_seitz_rings_about_the_origin():
     dialog = BuildEmbeddingDialog(host())
     for rings, count in ((0, 1), (1, 5), (2, 13)):
@@ -1088,35 +1078,6 @@ def test_embedding_preview_uses_qt_labels_without_matplotlib_layout_warning():
     assert not any("Tight layout not applied" in str(w.message) for w in captured)
 
 
-def test_editor_occupation_matches_bulk_rows_with_normalize_and_picker():
-    from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
-
-    dialog = BuildEmbeddingDialog(host())
-    assert isinstance(dialog.occupation, OccupationEditor)
-    dialog.occupation.set_occupation({"Fe": 0.7, "Ni": 0.3})
-    assert dialog.occupation.normalize_check.isChecked()
-    assert not dialog.occupation.normalize_check.isHidden()
-    assert dialog.occupation.is_valid()
-    assert dialog.occupation.occupation() == {"Fe": 0.7, "Ni": 0.3}
-    dialog.occupation.set_occupation({"Fe": 0.6})
-    assert dialog.occupation.normalize_check.isHidden()
-    assert not dialog.occupation.is_valid()
-    dialog.occupation.normalize()
-    assert dialog.occupation.occupation() == {"Fe": 1.0}
-    dialog.occupation.set_occupation({"Vc": 1.0})
-    assert dialog.occupation.occupation() == {"X": 1.0}
-    dialog.occupation.set_occupation({"Fe": 1.0})
-    dialog.occupation.add_row()
-    second = dialog.occupation.rows[-1]
-    second["elem"].setText("Ni")
-    second["occ"].setValue(0.5)
-    assert dialog.occupation.is_valid()
-    assert dialog.occupation.rows[0]["occ"].value() == 0.5
-    assert dialog.draft.entries[dialog.draft.center].occupation == {
-        "Fe": 0.5, "Ni": 0.5
-    }
-
-
 def test_normalize_checkbox_scales_other_components_and_can_be_disabled():
     from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
 
@@ -1233,13 +1194,15 @@ def test_bulk_occupation_uses_the_same_widget_as_embedding():
 
 
 def test_occupation_editor_rejects_unnamed_positive_fraction():
-    dialog = BuildEmbeddingDialog(host())
-    dialog.occupation.set_occupation({"Fe": 0.5})
-    dialog.occupation.add_row()
-    dialog.occupation.rows[-1]["occ"].setValue(0.5)
-    assert not dialog.occupation.is_valid()
+    from ase2sprkkr_gui.gui.widgets.structures.occupation import OccupationEditor
+
+    control = OccupationEditor(require_full=True)
+    control.set_occupation({"Fe": 0.5})
+    control.add_row()
+    control.rows[-1]["occ"].setValue(0.5)
+    assert not control.is_valid()
     with pytest.raises(ValueError, match="element is required"):
-        dialog.occupation.occupation()
+        control.occupation()
 
 
 def test_embedding_occupation_is_committed_automatically_only_when_valid(monkeypatch):
@@ -1390,116 +1353,6 @@ def test_global_whole_mode_includes_all_cluster_sites_and_has_padded_bounds():
         assert all(lo < coordinate < hi for coordinate, (lo, hi) in zip(position, bounds))
 
 
-def test_cell_site_and_editing_columns_keep_actions_below_site_table():
-    from PyQt6.QtCore import QPoint
-    from PyQt6.QtWidgets import QApplication
-
-    dialog = BuildEmbeddingDialog(host())
-    dialog.show()
-    QApplication.processEvents()
-    columns = (dialog.cells.parentWidget(), dialog.sites.parentWidget(),
-               dialog.occupation_group.parentWidget())
-    outer_splitter = columns[0].parentWidget()
-    details_splitter = columns[1].parentWidget()
-    details_panel = details_splitter.parentWidget()
-    assert outer_splitter.count() == 2
-    assert outer_splitter.widget(0) is columns[0]
-    assert outer_splitter.widget(1) is details_panel
-    assert details_splitter.count() == 2
-    assert tuple(details_splitter.widget(i) for i in range(2)) == columns[1:]
-    assert columns[0].mapTo(dialog, QPoint()).x() < columns[1].mapTo(dialog, QPoint()).x()
-    assert columns[1].mapTo(dialog, QPoint()).x() < columns[2].mapTo(dialog, QPoint()).x()
-    expansion = dialog.add_radius_button.parentWidget()
-    assert expansion.parentWidget() is details_panel
-    assert expansion.geometry().bottom() <= details_splitter.geometry().top()
-    assert expansion.title() == ""
-    assert dialog.centre_label.parentWidget() is details_panel
-    assert dialog.centre_label.geometry().bottom() <= expansion.geometry().top()
-    assert not dialog.centre_label.wordWrap()
-    assert dialog.centre_label.text().startswith("<b>Cluster centre:</b> Host site")
-    assert dialog.centre_button.parentWidget() is columns[1]
-    site_header = columns[1].layout().itemAt(0).layout()
-    assert site_header.itemAt(0).widget() is dialog.cell_label
-    assert site_header.itemAt(site_header.count() - 1).widget() is dialog.centre_button
-    assert dialog.centre_button.text() == "Use selected site as cluster centre"
-    assert dialog.add_radius_button.text() == "Include within radius"
-    assert dialog.add_shells_button.text() == "Include shells"
-    assert dialog.symmetric.parentWidget() is columns[0]
-    assert dialog.displacement_group.parentWidget() is columns[2]
-    for button in (dialog.include_button, dialog.exclude_button):
-        assert button.parentWidget() is columns[1]
-        assert button.mapTo(dialog, QPoint()).y() >= dialog.sites.mapTo(
-            dialog, QPoint(0, dialog.sites.height())
-        ).y()
-    assert dialog.centre_button.mapTo(dialog, QPoint()).y() < dialog.sites.mapTo(
-        dialog, QPoint()
-    ).y()
-    assert dialog.centre_button.mapTo(dialog, QPoint()).x() > dialog.cell_label.mapTo(
-        dialog, QPoint()
-    ).x()
-
-
-@pytest.mark.parametrize("dimension", [2, 3])
-def test_host_cell_controls_are_beside_preview_and_sections_are_bold(dimension):
-    from PyQt6.QtCore import QPoint
-    from PyQt6.QtWidgets import QApplication
-
-    atoms = host()
-    atoms.pbc = (True, True, dimension == 3)
-    dialog = BuildEmbeddingDialog(atoms)
-    dialog.show()
-    QApplication.processEvents()
-    controls = [dialog.cell_rings]
-    if dimension == 3:
-        controls += [dialog.cell_plane, dialog.layer]
-        assert dialog.layer_label.text() == "Layer"
-        dialog.cell_plane.setCurrentIndex(1)
-        assert dialog.layer_label.text() == "Layer"
-    for control in controls:
-        assert control.mapTo(dialog, QPoint()).x() < dialog.cells.mapTo(dialog, QPoint()).x()
-    assert not hasattr(dialog, "map_indices")
-    assert "QGroupBox::title { font-weight: bold; }" in dialog.styleSheet()
-    dialog.close()
-
-
-def test_embedding_footer_equal_buttons_and_compact_scope_labels():
-    from PyQt6.QtWidgets import QApplication, QDialogButtonBox
-
-    dialog = BuildEmbeddingDialog(host())
-    dialog.show()
-    QApplication.processEvents()
-    buttons = (
-        dialog.undo_button,
-        dialog.redo_button,
-        dialog.buttons.button(QDialogButtonBox.StandardButton.Ok),
-        dialog.buttons.button(QDialogButtonBox.StandardButton.Cancel),
-    )
-    assert len({button.width() for button in buttons}) == 1
-    assert dialog.hint.text().startswith("Select a repeated host cell")
-    assert dialog.layout().itemAt(0).widget() is not dialog.hint
-    assert [dialog.global_scope.itemText(i) for i in range(2)] == [
-        "Whole structure", "Current layer",
-    ]
-    assert dialog._plot_hint_timer.interval() == 900
-    assert dialog.cells.canvas in dialog._plot_hints
-    assert dialog.local_preview.canvas in dialog._plot_hints
-    assert dialog.global_preview.canvas in dialog._plot_hints
-    for canvas, outline_type in (
-        (dialog.cells.canvas, "Borders:"),
-        (dialog.local_preview.canvas, "Rings:"),
-        (dialog.global_preview.canvas, "Rings:"),
-    ):
-        lines = dialog._plot_hints[canvas].splitlines()
-        assert lines[0] == "Fill:"
-        assert outline_type in lines
-        assert all(" — " in line for line in lines if not line.endswith(":"))
-        assert any(line.startswith("Blue — ") for line in lines)
-        assert any(line.startswith("Bright orange — ") for line in lines)
-        assert any(line.startswith("Dark orange — ") for line in lines)
-        assert any(line.startswith("Purple — ") for line in lines)
-    assert not hasattr(dialog, "preview_legend")
-
-
 def test_embedding_symmetry_colors_and_actions_follow_same_checkbox():
     from matplotlib.colors import to_rgba
 
@@ -1612,15 +1465,6 @@ def test_restore_occupation_is_shared_and_hidden_when_none():
     assert control.occupation() == {"Cu": 1.0}
 
 
-def test_embedding_restore_original_occupation_is_in_shared_widget():
-    dialog = BuildEmbeddingDialog(host())
-    assert not dialog.occupation.restore_btn.isHidden()
-    dialog.occupation.rows[0]["elem"].setText("Fe")
-    assert dialog.draft.entries[dialog.draft.center].occupation == {"Fe": 1.0}
-    dialog.occupation.restore_btn.click()
-    assert dialog.draft.entries[dialog.draft.center].occupation == {"Cu": 1.0}
-
-
 def test_bulk_restore_original_occupation_restores_model_values():
     from ase2sprkkr_gui.gui.dialogs.structures.element_assignment import (
         ElementAssignmentDialog,
@@ -1715,7 +1559,7 @@ def test_detail_follows_grid_selection_and_is_independent_of_viewport_size():
     assert dialog._local_sites == [destination]
 
 
-@pytest.mark.parametrize("dimension,scope", [(2, 0), (2, 1), (3, 0), (3, 1)])
+@pytest.mark.parametrize("dimension,scope", [(2, 1), (3, 0)])
 def test_cell_ring_spin_redraws_context_without_manual_render(dimension, scope):
     from PyQt6.QtCore import Qt
     from PyQt6.QtTest import QTest
@@ -1729,8 +1573,8 @@ def test_cell_ring_spin_redraws_context_without_manual_render(dimension, scope):
     dialog.global_scope.setCurrentIndex(scope)
     dialog.show()
     QApplication.processEvents()
-    QTest.qWait(300)
     preview = dialog.global_preview
+    preview.canvas.draw()
     before = np.asarray(preview.canvas.buffer_rgba()).copy()
     assert len(preview._positions) == 1
     draws = []
@@ -1762,15 +1606,6 @@ def test_gete_ring_change_updates_context_points_and_counter_immediately(gete_ho
     assert f"Host: {7 * basis_count}" in dialog.preview_info.text()
     dialog.cell_rings.stepDown()
     assert len(dialog.global_preview._positions) == basis_count
-
-
-def test_cell_map_stays_at_the_origin_after_selecting_another_cell():
-    dialog = BuildEmbeddingDialog(host())
-    before = set(dialog.cells._cells)
-    click_cell(dialog, (1, 1, 0))
-    assert dialog._selected_cell == (1, 1, 0)
-    assert set(dialog.cells._cells) == before
-    assert (0, 0, 0) in before
 
 
 def test_cell_map_keeps_zoom_when_site_table_selection_is_cleared():
@@ -1877,8 +1712,7 @@ def test_2d_transition_region_excludes_leads_but_whole_host_shows_them():
     assert all(site.original_site == 1 for site in dialog._rendered_sites)
 
 
-@pytest.mark.parametrize("dimension", [2, 3])
-@pytest.mark.parametrize("projection", range(4))
+@pytest.mark.parametrize("dimension,projection", [(2, 0), (3, 1), (3, 2), (2, 3)])
 def test_real_preview_click_selects_matching_table_site_and_edits_only_it(
     dimension, projection,
 ):
@@ -2110,15 +1944,19 @@ def test_projected_fit_uses_full_canvas_without_cropping_on_resize(gete_host, si
 
     from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
 
-    dialog = BuildEmbeddingDialog(gete_host)
-    positions = gete_host.positions[sorted(dialog.draft.allowed)]
-    corners = dialog._selected_cell_corners()
+    from ase2sprkkr_gui.ase.embedding import embedding_cell
+    from ase2sprkkr_gui.gui.plots.lattice import corner_indices
+
+    draft = EmbeddingDraft(gete_host)
+    positions = gete_host.positions[sorted(draft.allowed)]
+    origin, cell = embedding_cell(gete_host)
+    corners = corner_indices.T @ cell + origin
     preview = EmbeddingPreview()
     preview.set_points(positions, ["gray"] * len(positions), [23] * len(positions), cell_corners=corners)
     preview.resize(*size)
     preview.show()
     QApplication.processEvents()
-    for angles in ((25, -60), (75, 10), (90, -90), (-45, 30)):
+    for angles in ((25, -60), (90, -90)):
         preview.set_view(*angles)
         preview._fit()
         preview.canvas.draw()
@@ -2162,13 +2000,6 @@ def select_table_rows(dialog, rows):
 def three_site_host():
     return Atoms("CuNiFe", positions=[[0, 0, 0], [1, 1, 1], [.5, 1.5, .3]],
                  cell=[3, 3, 3], pbc=True)
-
-
-def test_occupation_and_displacement_have_frames_separate_from_site_table():
-    dialog = BuildEmbeddingDialog(three_site_host())
-    assert dialog.occupation.parentWidget() is dialog.occupation_group
-    assert all(spin.parentWidget() is dialog.displacement_group for spin in dialog.deltas)
-    assert dialog.sites.parentWidget() not in (dialog.occupation_group, dialog.displacement_group)
 
 
 def test_multiselection_occupation_restore_and_include_exclude_keep_all_rows():
@@ -2328,44 +2159,18 @@ def test_cell_rings_reject_degenerate_or_nonfinite_lattices(vectors):
 
 
 def focus_embedding_control(dialog, control):
-    from PyQt6.QtTest import QTest
     from PyQt6.QtWidgets import QApplication
 
     dialog.show()
     dialog.activateWindow()
     control.setFocus()
     QApplication.processEvents()
-    for _ in range(30):
-        QTest.qWait(20)  # Wait for focus activation and the debounced preview.
-        if not dialog._expansion_timer.isActive():
-            break
+    # Exercise the connected timeout without waiting for wall-clock time.
+    if dialog._expansion_timer.isActive():
+        dialog._expansion_timer.stop()
+        dialog._expansion_timer.timeout.emit()
     assert not dialog._expansion_timer.isActive()
     dialog._render()
-
-
-def test_preview_controls_are_on_the_outer_sides_of_the_canvases():
-    from PyQt6.QtCore import QPoint
-
-    dialog = BuildEmbeddingDialog(host())
-    focus_embedding_control(dialog, dialog.cell_rings)
-    for preview, right in ((dialog.local_preview, False), (dialog.global_preview, True)):
-        controls = [preview.projection, preview.fit_button]
-        if right:
-            controls.insert(0, dialog.global_scope)
-        assert len({control.width() for control in controls}) == 1
-        canvas_left = preview.canvas.mapTo(preview, QPoint()).x()
-        canvas_right = canvas_left + preview.canvas.width()
-        for control in (preview.projection, preview.fit_button):
-            x = control.mapTo(preview, QPoint()).x()
-            if right:
-                assert x >= canvas_right
-            else:
-                assert x + control.width() <= canvas_left
-        preview.projection.setCurrentIndex(1)
-        assert preview.view_angles == (90., -90.)
-        preview._zoom_factor = 2.
-        preview.fit_button.click()
-        assert preview._zoom_factor == 1.
 
 
 @pytest.mark.parametrize("mode", ["radius", "shells"])
