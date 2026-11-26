@@ -82,6 +82,8 @@ def _profile_presentation(
     if kind in {"local", "ssh"}:
         mode = "supervised" if profile.backend_config.name == "kkrunner" else "direct"
         where = f"{where} · {mode}"
+        if mode == "direct" and profile.detached:
+            where += " (detached)"
 
     mpi = profile.mpi
     if mpi is False:

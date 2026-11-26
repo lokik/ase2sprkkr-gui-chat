@@ -383,3 +383,25 @@ def test_kkrunner_supervisor_text_distinguishes_execution_from_persistence():
         "Run directly on another computer connected over SSH."
     )
     form.close()
+
+
+def test_detached_is_a_direct_execution_option_for_local_and_ssh():
+    _application = _app()
+    form = ProfileForm()
+    for kind in ("local", "ssh"):
+        form.load(ProfileDraft("direct", {"executor": kind, "backend": "direct",
+                                          "detached": True}))
+        assert not form.detached.isHidden()
+        assert form.detached.isChecked()
+        assert form.values()["detached"] is True
+        form.supervised.setChecked(True)
+        assert form.detached.isHidden()
+        assert "detached" not in form.values()
+        form.supervised.setChecked(False)
+        assert not form.detached.isHidden()
+        form.detached.setChecked(False)
+        assert "detached" not in form.values()
+    form.load(ProfileDraft("scheduler", {"executor": "psij"}))
+    assert form.detached.isHidden()
+    assert "detached" not in form.values()
+    form.close()
