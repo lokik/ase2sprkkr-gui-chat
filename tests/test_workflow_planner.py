@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 from ase import Atoms
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_HOST
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
@@ -56,12 +57,23 @@ class Workspace:
     build_2d: bool = False
     spheres_action: EmptySpheresAction | None = None
     restart_required: bool = False
+    unresolved_cluster_path: str | None = None
+    host_status: str | None = None
 
     def structure_kind(self):
         return self.kind
 
     def can_build_2d(self):
         return self.build_2d
+
+    def can_build_embedding(self):
+        return False
+
+    def can_run_embedding(self):
+        return False
+
+    def embedding_host_scf_status(self):
+        return self.host_status
 
     def scf_status(self):
         return self.status
@@ -96,6 +108,7 @@ class RecentSnapshot:
 class FormulaAtoms:
     def __init__(self, formula="Fe"):
         self.formula = formula
+        self.info = {}
 
     def get_chemical_formula(self):
         return self.formula
@@ -459,7 +472,7 @@ def test_embedded_structure_plan_offers_cluster_scf_and_save_without_host_potent
             return False
 
     atoms = FormulaAtoms()
-    atoms.embedding_host = object()  # Geometry exists, but POTFIL is not attached.
+    atoms.info[EMBEDDING_HOST] = Atoms("Fe", cell=[2, 2, 2], pbc=True)
     plan = WorkflowPlanner().for_workspace(
         EmbeddingWorkspace(atoms=atoms, kind="0d", build_2d=False)
     )
@@ -497,7 +510,7 @@ def test_native_host_does_not_offer_redundant_attachment():
             return True
 
     atoms = FormulaAtoms()
-    atoms.embedding_host = object()
+    atoms.info[EMBEDDING_HOST] = object()
     plan = WorkflowPlanner().for_workspace(
         ReadyCluster(atoms=atoms, kind="0d")
     )
@@ -531,11 +544,7 @@ def test_cluster_task_filter_requires_explicit_task_support(monkeypatch):
 
 
 def test_read_only_clupot_offers_explicit_attachment_and_replacement():
-    class Hostless(Workspace):
-        unresolved_cluster_path = "/tmp/imported.clu"
-        atoms = None
-
-    workspace = Hostless(atoms=None)
+    workspace = Workspace(atoms=None, unresolved_cluster_path="/tmp/imported.clu")
     plan = WorkflowPlanner().for_workspace(workspace)
     create = _commands(plan, WorkflowSection.CREATE)
     assert create == (AttachHostPotential(), LoadHostPotential(), CreateHostPotential())
