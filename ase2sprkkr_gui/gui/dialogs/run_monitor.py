@@ -8,6 +8,8 @@ from tempfile import SpooledTemporaryFile
 from threading import Event, Thread
 from typing import Any
 
+from ase2sprkkr import TaskResult
+
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QColor, QFont, QIcon, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
@@ -26,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
+from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
 from ase2sprkkr_gui.gui.dialogs.run_display import (
     MAX_LOGICAL_LINE_LENGTH, MAX_OUTPUT_BLOCKS, create_info_page,
 )
@@ -36,9 +39,8 @@ from ase2sprkkr_gui.gui.misc.resources import icon_path
 logger = logging.getLogger(__name__)
 
 
-def state_label(state: Any) -> str:
-    value = getattr(state, "value", state)
-    return str(value).replace("_", " ").capitalize()
+def state_label(state: str) -> str:
+    return state.replace("_", " ").capitalize()
 
 
 class RunMonitorWorker(QObject):
@@ -514,13 +516,13 @@ class RunMonitorWindow(QDialog):
         self._stop_btn.setEnabled(False)
 
     @pyqtSlot(object)
-    def _on_finished(self, result: object) -> None:
+    def _on_finished(self, result: LoadedResult | TaskResult) -> None:
         try:
             if self._finished_callback is not None:
                 self._finished_callback(result)
             # Adoption has completed, so output files and provenance are ready.
-            native_result = getattr(result, "result", result)
-            if hasattr(native_result, "output_values") and not self._close_requested:
+            if not self._close_requested:
+                native_result = result.result if isinstance(result, LoadedResult) else result
                 try:
                     self._completed_pages = CompletedRunPages(self._tabs, self)
                     self._completed_pages.show_result(native_result)
