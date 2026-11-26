@@ -112,7 +112,6 @@ def test_noop_and_cancel_do_not_modify_source():
     editor_module.QDialog.reject(dialog)
     assert source.info["occupancy"] == {"0": {"Fe": 1.0}}
     np.testing.assert_array_equal(source.get_array("spacegroup_kinds"), [0, 0])
-    dialog.close()
 
 
 def test_site_and_lattice_edits_commit_together():
