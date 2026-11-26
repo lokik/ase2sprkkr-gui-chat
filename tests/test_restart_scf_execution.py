@@ -117,7 +117,7 @@ def test_execution_forwards_restart_scf_to_create_run(monkeypatch, tmp_path):
     execution.run()
 
     assert seen["restart_scf"] is True
-    assert seen["atoms"] is execution.request.atoms
-    assert seen["atoms"] is not request.atoms
+    assert execution.request is request
+    assert seen["atoms"] is request.atoms
     assert seen["input_parameters"] is request.input_parameters
     assert submitted == [True]
