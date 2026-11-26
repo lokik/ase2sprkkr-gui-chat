@@ -296,6 +296,11 @@ def test_host_scf_result_updates_a_cluster_edited_while_host_was_running(monkeyp
     np.testing.assert_allclose(controller.atoms.positions, expected_positions)
     assert not controller.is_scf_converged()
 
+    # The result of an embedded calculation is not a valid replacement host.
+    with pytest.raises(TypeError, match="periodic"):
+        controller.replace_embedding_host_if_current(new_host, cluster.potential)
+    assert controller.atoms.embedding_host is new_host
+
     # An independently changed host must not be overwritten by the old run.
     third_host = Potential.from_atoms(host.atoms.copy())
     current = controller.atoms.copy()
