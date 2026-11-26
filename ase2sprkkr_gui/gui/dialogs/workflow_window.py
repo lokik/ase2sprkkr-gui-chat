@@ -335,6 +335,7 @@ class WorkflowWindow(QMainWindow):
         settings: ApplicationSettings,
         track_launch_monitor: calculation_flow.LaunchMonitorTracker,
         project_repository=None,
+        preparation_manager=None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Ase2sprkkr - Workflow")
@@ -347,6 +348,7 @@ class WorkflowWindow(QMainWindow):
         self.settings = settings
         self._track_launch_monitor = track_launch_monitor
         self.project_repository = project_repository
+        self.preparation_manager = preparation_manager
         self._workflow_planner = WorkflowPlanner(settings=settings)
         self._recent_validation_running = False
         self._recent_validation_signals: _RecentValidationSignals | None = None
@@ -929,6 +931,7 @@ class WorkflowWindow(QMainWindow):
                 restart_host_scf=command.restart_scf,
                 track_launch_monitor=self._track_launch_monitor,
                 project_repository=self.project_repository,
+                preparation_manager=self.preparation_manager,
             )
             return
         if isinstance(command, UpdateEmptySpheres):
@@ -978,6 +981,7 @@ class WorkflowWindow(QMainWindow):
                 self.controller, self.recent_history, self, command.path,
                 track_launch_monitor=self._track_launch_monitor,
                 project_repository=self.project_repository,
+                preparation_manager=self.preparation_manager,
             )
             return
         if isinstance(command, VisualizeStructure):
@@ -1100,6 +1104,7 @@ class WorkflowWindow(QMainWindow):
                 self.controller, self.recent_history, self, parameters,
                 track_launch_monitor=self._track_launch_monitor,
                 project_repository=self.project_repository,
+                preparation_manager=self.preparation_manager,
             )
             return
         calculation_flow.configure_and_run_task(
@@ -1111,6 +1116,7 @@ class WorkflowWindow(QMainWindow):
             restart_scf=restart_scf,
             track_launch_monitor=self._track_launch_monitor,
             project_repository=self.project_repository,
+            preparation_manager=self.preparation_manager,
         )
 
     def _update_empty_spheres(self) -> None:
@@ -1156,6 +1162,7 @@ class WorkflowWindow(QMainWindow):
             dataset_default_mode=self.settings.dataset_default_mode,
             track_launch_monitor=self._track_launch_monitor,
             project_repository=self.project_repository,
+            preparation_manager=self.preparation_manager,
         )
 
     def _load_input_file(self) -> None:
@@ -1163,4 +1170,5 @@ class WorkflowWindow(QMainWindow):
             self.controller, self.recent_history, self,
             track_launch_monitor=self._track_launch_monitor,
             project_repository=self.project_repository,
+            preparation_manager=self.preparation_manager,
         )

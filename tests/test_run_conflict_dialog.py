@@ -521,3 +521,27 @@ def test_conflict_action_failure_releases_dialog_and_prevents_calculate(monkeypa
     window._conflict_dialog = None
     window.close()
     assert app is QApplication.instance()
+
+
+def test_preprocessing_conflict_requires_owner_to_finish(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    manager, initial = _conflict(tmp_path)
+    old = initial.conflicts[0]
+    manager.forget(old, force=True)
+    record = manager.new_record(directory=tmp_path, files=initial.record.files)
+    with manager.store.observation_lock(record):
+        preparing = manager.reserve(record, preprocessing=True)
+        conflict = DuplicateSubmissionError(initial.record, (preparing,))
+        window, dialog = _window(tmp_path, manager, conflict)
+        _select(dialog)
+        assert not dialog.stop_button.isEnabled()
+        assert not dialog.failed_button.isEnabled()
+        assert not dialog.delete_button.isEnabled()
+        assert dialog.refresh_button.isEnabled()
+        dialog.refresh_button.click()
+        assert not dialog.calculate_button.isEnabled()
+        assert manager.store.get(record.id).state == RunState.PREPROCESSING
+        manager.complete(preparing, state=RunState.FINISHED)
+    dialog.refresh_button.click()
+    assert dialog.calculate_button.isEnabled()
+    assert app is QApplication.instance()

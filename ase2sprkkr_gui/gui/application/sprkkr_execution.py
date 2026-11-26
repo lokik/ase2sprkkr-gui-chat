@@ -8,10 +8,8 @@ from typing import Any, Callable
 
 from ase2sprkkr import SPRKKR
 from kkrunner.backends.contracts import SubmissionNotStarted
-from kkrunner.files import FileManifest
+from kkrunner import MemoryRunStore
 from kkrunner.runs import MpiNotFoundWarning, Run, RunRecord, RunState
-from kkrunner.projects import ProjectRunManager
-from kkrunner.runs.manager import RunManager
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import (
     Cancellation,
@@ -89,20 +87,12 @@ class SprkkrExecution:
 
     def _project_context(self):
         if self.project_id is None:
-            if isinstance(self.execution_manager, RunManager) and not isinstance(self.execution_manager, ProjectRunManager):
-                return self.execution_manager
-            # Even an unassigned clean-cache run needs the same reservation
-            # store as project runs. Without an injected manager, ASE2SPRKKR
-            # supplies its default persistent manager for clear_cache=True.
-            if not self.request.clear_cache or self.execution_manager is None:
-                return None
-            # ProjectRunManager cannot create unassigned jobs; an ordinary
-            # RunManager can reserve against the very same shared RunStore.
-            return RunManager(
-                self.execution_manager.store,
-                client_pool=self.execution_manager.client_pool,
-                conflict_stores=self.execution_manager.conflict_stores,
-            )
+            # Unassigned runs remain process-local even when clearing a cache.
+            if self.execution_manager is None:
+                return None  # Standalone caller uses the library's default memory manager.
+            if not isinstance(self.execution_manager.store, MemoryRunStore):
+                raise ValueError("Unassigned calculations require the session memory manager")
+            return self.execution_manager
         if self.execution_manager is None:
             return self.project_id
         return self.execution_manager.for_project(self.project_id)
@@ -131,6 +121,9 @@ class SprkkrExecution:
     def prepare_files(self):
         """Write native input/potential files without submitting a runner."""
         input_file, potential_file, _output_file = self.file_names()
+        manager = self.execution_manager
+        if manager is not None and not isinstance(manager.store, MemoryRunStore):
+            raise ValueError("Saving inputs requires the session memory manager")
         return self._calculator().save_input(
             **self._input_source(potential_file),
             input_parameters=self.request.input_parameters,
@@ -140,6 +133,7 @@ class SprkkrExecution:
             empty_spheres=False,
             restart_scf=self.request.restart_scf,
             create_subdirs=True,
+            run_manager=manager,
         )
 
     def _input_source(self, potential_file):
@@ -199,7 +193,7 @@ class SprkkrExecution:
         if self._submitted is not None:
             try:
                 # Exact staged input, not an inferred filename template.
-                path = FileManifest.from_spec(runner.spec).input_file
+                path = runner.files.input_file
                 self._submitted(str(path) if path is not None else None)
             except Exception:  # noqa: BLE001 - observers must not fail a launched job
                 logger.exception("Submission observer failed")

@@ -151,6 +151,7 @@ class GuiApplication(QObject):
                 settings=self.settings,
                 track_launch_monitor=self._track_launch_monitor,
                 project_repository=self.projects,
+                preparation_manager=self.session_manager,
             )
             self._wire_window(self._workflow_window)
         return self._workflow_window
@@ -188,6 +189,7 @@ class GuiApplication(QObject):
                 result_id,
                 track_launch_monitor=self._track_launch_monitor,
                 project_repository=self.projects,
+                preparation_manager=self.session_manager,
             )
         )
         presenter.newCalculationRequested.connect(
@@ -415,6 +417,7 @@ class GuiApplication(QObject):
                 self.controller, self.recent_files, parent, path,
                 track_launch_monitor=self._track_launch_monitor,
                 project_repository=self.projects,
+                preparation_manager=self.session_manager,
             )
         loaders = {
             "structure": file_flows.load_structure,

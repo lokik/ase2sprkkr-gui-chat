@@ -131,6 +131,7 @@ def run_calculation(
     restore_run_directory: bool = False,
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
+    preparation_manager=None,
     request_override: CalculationRequest | None = None,
     on_result_loaded: Callable | None = None,
 ) -> SprkkrRunWindow | None:
@@ -247,6 +248,7 @@ def run_calculation(
     if prepare_only:
         execution = SprkkrExecution(
             request, RunCancellation(), profile_name=profile_name,
+            execution_manager=preparation_manager,
         )
         try:
             written, input_file, host_file, _output_file = execution.prepare_files()
@@ -315,6 +317,7 @@ def run_calculation(
             restore_run_directory=True,
             track_launch_monitor=track_launch_monitor,
             project_repository=project_repository,
+            preparation_manager=preparation_manager,
             request_override=request_override,
             on_result_loaded=on_result_loaded,
         )
@@ -384,6 +387,7 @@ def configure_and_run_task(
     restart_scf: bool = False,
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
+    preparation_manager=None,
 ) -> SprkkrRunWindow | None:
     """Configure and run a one-off Guided task without editing workspace inputs."""
     structure_generation = controller.structure_generation
@@ -438,6 +442,7 @@ def configure_and_run_task(
         position_like_window="guided-input",
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        preparation_manager=preparation_manager,
         request_override=request,
     )
 
@@ -451,6 +456,7 @@ def configure_and_run_host_scf(
     restart_host_scf: bool = False,
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
+    preparation_manager=None,
 ) -> SprkkrRunWindow | None:
     """Run periodic host SCF without replacing the embedded cluster workspace.
 
@@ -542,6 +548,7 @@ def configure_and_run_host_scf(
         position_like_window="guided-input",
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        preparation_manager=preparation_manager,
         request_override=request,
         on_result_loaded=adopt_host_result,
     )
@@ -602,6 +609,7 @@ def recompute_result(
     *,
     track_launch_monitor: LaunchMonitorTracker | None = None,
     project_repository: ProjectRepository | None = None,
+    preparation_manager=None,
 ) -> SprkkrRunWindow | None:
     """Re-run historical settings on the state active in the workspace.
 
@@ -660,5 +668,6 @@ def recompute_result(
         position_like_window=position_like_window,
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        preparation_manager=preparation_manager,
         request_override=request_override,
     )
