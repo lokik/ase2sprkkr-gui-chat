@@ -88,7 +88,7 @@ def test_recent_launch_presentation_owns_grouping_labels_and_empty_state(
     assert presentation.primary == RecentLaunch("output", str(output.resolve()))
     assert tuple(group.title for group in presentation.groups) == (
         "Structures",
-        "Outputs",
+        "Results",
     )
     assert presentation.groups[0].items[0].label == str(Path("structures") / "Fe.cif")
     assert presentation.groups[0].items[0].tooltip == str(structure.resolve())
