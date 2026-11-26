@@ -615,6 +615,8 @@ def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     assert seen == [pot.resolve()]
 
     pot.write_text("changed version, not the same bytes")
+    # A new filesystem observation scope is required after an external edit.
+    cache.loader.file_operations.invalidate()
     c = result_loading.load_result_file(third, cache=cache)
     assert c.potential_error is None
     assert c.atoms is not None and c.atoms is not b.atoms
