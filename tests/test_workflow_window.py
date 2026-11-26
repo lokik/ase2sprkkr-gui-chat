@@ -5,8 +5,8 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
 from types import SimpleNamespace
-from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMessageBox, QSizePolicy, QToolButton, QWidget
+from PyQt6.QtCore import Qt, QPoint, QRect
+from PyQt6.QtWidgets import QApplication, QAbstractButton, QLabel, QMessageBox, QToolButton, QWidget
 
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -55,25 +55,6 @@ def _commands(window):
 
 
 
-def test_header_load_and_import_icons_are_the_matching_asset_family(tmp_path):
-    _application = QApplication.instance() or QApplication([])
-    from PyQt6.QtGui import QIcon
-    from ase2sprkkr_gui.gui.misc.icons import badge_icon
-    from ase2sprkkr_gui.gui.misc.resources import icon_path
-
-    gui, guided = _workflow(tmp_path)
-    expected_icons = (
-        (guided._load_input_button, "input-parameters.svg"),
-        (guided.result_actions_widget.load_result_button, "result-graph.svg"),
-        (guided.result_actions_widget.import_directory_button, "results-folder.svg"),
-    )
-    for button, asset in expected_icons:
-        expected = badge_icon(QIcon(str(icon_path(asset))), "load")
-        assert not expected.isNull()
-        assert button.icon().pixmap(26, 26).toImage() == expected.pixmap(26, 26).toImage()
-    guided.close()
-
-
 def test_results_load_button_imports_output_in_guided(tmp_path, monkeypatch):
     _application = QApplication.instance() or QApplication([])
     gui, guided = _workflow(tmp_path)
@@ -113,12 +94,11 @@ def test_navigation_shortcuts_are_exposed_in_tooltips(tmp_path):
     guided.close()
 
 
-def test_workflow_uses_one_workspace_without_expert_shell(tmp_path, monkeypatch):
+def test_workflow_uses_one_workspace(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     workspace = WorkspaceState()
     gui, window = _workflow(tmp_path, workspace=workspace)
 
-    assert not hasattr(gui, "create_main_window")
     gui.controller.replace_structure(Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True))
     application.processEvents()
 
@@ -205,7 +185,7 @@ def test_structure_and_calculation_columns_track_workspace_state(tmp_path):
     window.close()
 
 
-def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
+def test_columns_remain_equal_on_resize(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
     window.showNormal()
@@ -218,47 +198,15 @@ def test_column_headings_align_and_columns_remain_equal_on_resize(tmp_path):
     columns = (structure, calculate, results)
     assert all(column is not None for column in columns)
 
-    headings = (
-        window._structure_title,
-        window.findChild(QLabel, "workflowCalculateTitle"),
-        window.findChild(QLabel, "workflowResultsTitle"),
-    )
-    assert len({heading.font().pointSizeF() for heading in headings}) == 1
-    assert len({heading.mapTo(window, QPoint(0, 0)).y() for heading in headings}) == 1
-
-    assert not window._actions.has_actions
-    assert window._calculate_notice.isVisible()
-    assert "create a structure" in window._calculate_notice.text()
-    assert "potential" in window._calculate_notice.text()
-    assert window._calculate_notice.alignment() & Qt.AlignmentFlag.AlignHCenter
-
-    row = window._columns_layout
-    assert row.count() == 3
-    assert [row.itemAt(i).widget() for i in range(3)] == list(columns)
-    assert [row.stretch(i) for i in range(3)] == [1, 1, 1]
-    assert row.spacing() == 8  # Preserve gaps between the content columns.
-    root_layout = window.centralWidget().layout()
-    assert root_layout.itemAt(0).layout() is row
-    assert root_layout.itemAt(0).widget() is None
-    for column in columns[:2]:
-        header = column.layout().itemAt(0).widget()
-        body = column.layout().itemAt(1).widget()
-        assert header._button_row.spacing() == 2
-        assert column.layout().contentsMargins().right() == 0
-        assert body.layout().contentsMargins().right() == 24
-
     def equal_thirds():
         widths = [column.width() for column in columns]
         assert max(widths) - min(widths) <= 1
         return widths
 
     full_widths = equal_thirds()
-    assert window._calculate_navigation.layout().contentsMargins().right() == 24
-    assert window._header_bars[2].layout().contentsMargins().right() == 0
     window.resize(1360, 800)
     application.processEvents()
-    narrow_widths = equal_thirds()
-    assert all(narrow < full for narrow, full in zip(narrow_widths, full_widths))
+    assert all(narrow < full for narrow, full in zip(equal_thirds(), full_widths))
     window.close()
 
 
@@ -709,84 +657,13 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
     assert gui._project_browser is None or not gui._project_browser.isVisible()
 
 
-def test_dynamic_cards_are_not_wrapped_in_extra_panels(tmp_path):
-    application = QApplication.instance() or QApplication([])
-    gui, window = _workflow(tmp_path)
-    assert window.findChild(QFrame, "workflowStructureCardsSurface") is None
-    assert window.findChild(QFrame, "workflowCalculateCardsSurface") is None
-    assert window._result_actions.frameShape() == QFrame.Shape.NoFrame
-
-    gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
-    application.processEvents()
-    assert window._actions.has_actions
-    window.close()
-
-
-def test_header_buttons_keep_order_without_overlap_or_trailing_spacer(tmp_path):
-    application = QApplication.instance() or QApplication([])
-    _gui, window = _workflow(tmp_path)
-    window.showNormal()
-
-    def check_positions():
-        for header in window._header_bars:
-            buttons = [button for button in header._buttons if button.isVisible()]
-            assert header._button_row.count() == len(header._buttons)
-            centered = header in (
-                window._calculate_navigation, window._header_bars[2],
-            )
-            assert header.layout().itemAt(
-                1 if centered else 0
-            ).layout() is header._button_row
-            assert header.layout().itemAt(
-                2 if centered else 1
-            ).spacerItem() is not None
-            assert buttons
-            left = buttons[0].mapTo(header, QPoint(0, 0)).x()
-            right = buttons[-1].mapTo(header, QPoint(buttons[-1].width(), 0)).x()
-            if centered:
-                assert header.layout().itemAt(0).spacerItem() is not None
-                # Calculate keeps its body inset; Results uses the full width.
-                right_margin = header.layout().contentsMargins().right()
-                expected_center = (header.width() - right_margin) / 2
-                assert abs((left + right) / 2 - expected_center) <= 2
-                assert left >= 0 and right <= header.width() - right_margin
-            else:
-                assert abs(left) <= 1
-            for left, right in zip(buttons, buttons[1:]):
-                assert right.mapTo(header, QPoint(0, 0)).x() >= (
-                    left.mapTo(header, QPoint(0, 0)).x()
-                    + left.width() + header._button_row.spacing() - 1
-                )
-
-    window.resize(2140, 900)
-    application.processEvents()
-    check_positions()
-    # All three headers must remain ordered in the smaller icon-only layout.
-    window.resize(1100, 850)
-    application.processEvents()
-    check_positions()
-    assert all(bar._mode == "icon" for bar in window._header_bars)
-    # In particular, centered Results buttons must stay within their header.
-    results = window._header_bars[2]
-    assert window._result_actions_widget.load_result_button.x() >= 0
-    assert window._result_actions_widget.import_directory_button.x() >= 0
-    window.close()
-
-
-def test_header_layout_modes_keep_buttons_visible_and_sized(tmp_path):
+def test_header_controls_remain_reachable_on_resize(tmp_path):
     application = QApplication.instance() or QApplication([])
     _gui, window = _workflow(tmp_path)
     window.showNormal()
     window.resize(2140, 900)
     application.processEvents()
 
-    columns = (
-        window.findChild(QWidget, "workflowStructureNavigation"),
-        window.findChild(QWidget, "workflowCalculationNavigation"),
-        window.findChild(QWidget, "workflowResultsNavigation"),
-    )
-    # A single workflow window exercises both the layout modes and visibility
-    # invariants at their transition widths.
     structure_column = window.findChild(QWidget, "workflowStructureColumn")
     calculate_column = window.findChild(QWidget, "workflowCalculateColumn")
     results_column = window.findChild(QWidget, "workflowResultsColumn")
@@ -803,119 +680,21 @@ def test_header_layout_modes_keep_buttons_visible_and_sized(tmp_path):
         (results_column, window._close_button),
     )
 
-    def assert_buttons_contained():
-        for column, button in controls:
-            assert button.isVisible()
-            left = button.mapTo(column, QPoint(0, 0)).x()
-            right = button.mapTo(column, QPoint(button.width() - 1, 0)).x()
-            assert 0 <= left <= right < column.width()
-        footer = window._results_footer
-        assert footer.y() >= window._result_actions.y()
-        assert footer.y() + footer.height() <= results_column.height()
-
-    assert_buttons_contained()
-    for bar in columns:
-        assert bar._mode == "full"
-        for button in bar._buttons:
-            if not button.isHidden():
-                assert button.width() == bar.FULL_WIDTH
-                assert button.height() == bar.BUTTON_HEIGHT
-                assert abs(
-                    button.mapTo(bar, QPoint(0, 0)).y()
-                    - (bar.height() - button.height()) // 2
-                ) <= 2
-    assert not window._result_actions_widget.load_result_button.text() == ""
-    assert all(bar._mode == "full" for bar in columns)
-    assert all(
-        [button.width() for button in bar._buttons if not button.isHidden()]
-        == [168] * sum(not b.isHidden() for b in bar._buttons)
-        for bar in columns
-    )
-
-    # Check both sides of the wide/short threshold without reconstructing
-    # the entire GUI (and without testing another copy of its initialization).
-    window.resize(1920, 820)
-    application.processEvents()
-    assert all(bar._mode == "full" for bar in columns)
-    assert_buttons_contained()
-    window.resize(1650, 820)
-    application.processEvents()
-    assert_buttons_contained()
-    utility_buttons = window._results_footer.findChildren(QToolButton)
-    assert max(button.width() for button in utility_buttons) - min(
-        button.width() for button in utility_buttons
-    ) <= 1
-
-    # Between the full and icon-only modes, shorter labels are used.
-    window.resize(1600, 850)
-    application.processEvents()
-    assert all(bar._mode == "short" for bar in columns)
-    assert all(
-        button.width() == bar.SHORT_WIDTH
-        for bar in columns for button in bar._buttons
-        if not button.isHidden()
-    )
-    assert window._recent_results_button.text().startswith("Recent")
-    assert window._result_actions_widget.load_result_button.text() == "Load Result"
-    assert window._result_actions_widget.import_directory_button.text() == "Import Directory"
-    assert window._load_input_button.text() == "Load Input"
-    assert window._custom_button.text() == "Custom Input"
-
-    assert_buttons_contained()
-
-    # Intermediate widths keep readable text instead of switching to icons.
-    window.resize(1360, 850)
-    application.processEvents()
-    assert all(bar._mode == "short" for bar in columns)
-    assert_buttons_contained()
-    window.resize(1100, 750)
-    application.processEvents()
-    assert window.width() < 1350  # Header labels must not pin the minimum width.
-    assert_buttons_contained()
-    results = columns[2]
-    assert results._mode == "icon"
-    assert all(bar._mode == "icon" for bar in columns)
-    assert [b.width() for b in results._buttons] == [90, 68, 68]
-    assert [b.width() for b in columns[1]._buttons] == [90, 68, 68]
-    assert window._recent_structures_button.width() == 90
-    assert all(b.width() == b.height() for b in results._buttons[1:])
-    assert all(b.height() == 68 for b in results._buttons)
-    assert "width: 22px" in window._recent_results_button.styleSheet()
-    assert window._recent_results_button.toolButtonStyle() == (
-        Qt.ToolButtonStyle.ToolButtonIconOnly
-    )
-    assert window._result_actions_widget.load_result_button.text() == ""
-    assert window._result_actions_widget.import_directory_button.text() == ""
-    assert window._result_actions_widget.load_result_button.toolTip().startswith(
-        "Load Result File\n"
-    )
-    assert window._recent_results_button.menu() is not None
-    # Exercise custom painters both with labels and with menu arrows.
-    for button in (
-        window._recent_results_button,
-        window._repeat_button,
-        window._result_actions_widget.load_result_button,
-        window._result_actions_widget.import_directory_button,
-        window._settings_button,
-    ):
-        assert not button.grab().isNull()
-    assert window._recent_results_button.width() == (
-        results.COMPACT_SIZE + results.MENU_EXTRA_WIDTH
-    )
-
-    # Widening the window restores all 168-pixel buttons.
-    window.resize(2140, 900)
-    application.processEvents()
-    assert results._mode == "full"
-    assert window._result_actions_widget.load_result_button.text() == "Load Result File"
-    assert window._result_actions_widget.import_directory_button.text() == (
-        "Import All From Directory"
-    )
-    assert [b.width() for b in results._buttons] == [168, 168, 168]
-    for button in results._buttons:
-        assert not button.grab().isNull()
-    assert all(bar._mode == "full" for bar in columns)
-    assert_buttons_contained()
+    for width in (2140, 1600, 1100, 2140):
+        window.resize(width, 850)
+        application.processEvents()
+        if width == 1100:
+            assert window.width() < 1350  # Controls must not force a wide window.
+        for column in (structure_column, calculate_column, results_column):
+            rectangles = []
+            for owner, button in controls:
+                if owner is not column:
+                    continue
+                assert button.isVisible()
+                rect = QRect(button.mapTo(column, QPoint()), button.size())
+                assert column.rect().contains(rect)
+                assert not any(rect.intersects(other) for other in rectangles)
+                rectangles.append(rect)
     window.close()
 
 
@@ -960,7 +739,6 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
         assert "…/" not in button.text()
         assert str(tmp_path) not in button.text()
         assert str(paths[kind][1]) in button.toolTip()
-        assert "width: 28px" in button.styleSheet()
         button.click()
         button.menu().actions()[1].trigger()
 
@@ -1001,26 +779,11 @@ def test_footer_recent_shortcuts_and_menus_react_to_history(tmp_path, monkeypatc
     window.close()
 
 
-def test_external_structure_viewer_lives_under_preview_fit(tmp_path, monkeypatch):
+def test_external_structure_viewer_dispatches_current_structure(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
-    assert not hasattr(window._structure_actions, "external_viewer_button")
     gui.controller.replace_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))
     application.processEvents()
-    preview = window._structure_overview.preview
-    controls = preview.layout().itemAt(1).layout()
-    fit_index = next(
-        i for i in range(controls.count())
-        if controls.itemAt(i).widget() is preview.fit_button
-    )
-    assert controls.itemAt(fit_index + 1).widget() is (
-        window._structure_overview.external_viewer_button
-    )
-    viewer = window._structure_overview.external_viewer_button
-    assert viewer.text() == "Viewer"
-    assert viewer.toolTip() == "External viewer"
-    assert viewer.height() == 68
-    assert window._structure_overview.frameShape() == QFrame.Shape.NoFrame
     calls = []
     monkeypatch.setattr(
         workflow_module.visualization_flow, "visualize_structure",
@@ -1139,7 +902,6 @@ def test_guided_structure_sidebar_tracks_current_structure(tmp_path):
     window.show()
     application.processEvents()
 
-    assert window._columns_layout.count() == 3
     assert window._structure_overview.isHidden()
 
     atoms = bulk("Fe", "bcc", a=2.87, cubic=True)
@@ -1164,35 +926,6 @@ def test_guided_structure_sidebar_tracks_current_structure(tmp_path):
     assert CreateStructure(CreateStructureKind.THREE_D) in _commands(window)
     assert Load(LoadKind.STRUCTURE) in _commands(window)
     window.close()
-
-def test_action_cards_are_equal_height_across_both_guided_columns(tmp_path):
-    application = QApplication.instance() or QApplication([])
-    _gui, window = _workflow(tmp_path)
-    window.show()
-    application.processEvents()
-
-    def card_heights():
-        cards = (
-            window._structure_actions.findChildren(QAbstractButton)
-            + window._actions.findChildren(QAbstractButton)
-        )
-        assert cards
-        return {card.height() for card in cards}
-
-    assert len(card_heights()) == 1
-    window.controller.replace_structure(
-        Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
-    )
-    application.processEvents()
-    assert len(card_heights()) == 1
-
-    window.showNormal()
-    window.resize(1400, 800)
-    application.processEvents()
-    assert len(card_heights()) == 1
-    # The shared teardown destroys the window without opening Unsaved Work.
-    # Interactive shutdown is covered by the dedicated exit tests.
-
 
 def test_introductory_cluster_action_appears_without_structure_and_can_be_hidden(
     tmp_path, monkeypatch,

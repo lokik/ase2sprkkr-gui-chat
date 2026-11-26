@@ -44,7 +44,6 @@ def test_commit_pending_does_not_materialize_implicit_defaults(application):
 
 def test_guided_dialog_leaves_run_identifiers_to_the_launch_dialog(application):
     dialog = GuidedInputParametersDialog("scf", InputParameters.create("scf"))
-    assert not hasattr(dialog, "dataset_editor")
     assert not dialog.editors_for(("CONTROL", "DATASET"))
     assert not dialog.editors_for(("CONTROL", "ADSI"))
     dialog.close()

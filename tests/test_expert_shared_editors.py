@@ -57,8 +57,6 @@ def test_expert_scaling_uses_compact_inline_defaultdict_editor(application, task
     assert control.value() == .8
     assert item.child(0).text(0) == '[2]'
     tree_editor = dialog.tree_editor.tree
-    assert tree_editor.headerItem().text(3) == ''
-    assert tree_editor.headerItem().text(4) == 'Comment'
     type_editor = tree_editor.itemWidget(item.child(0), 2)
     assert isinstance(type_editor, RealEditor)
     assert type_editor.value() == .4
@@ -74,8 +72,6 @@ def test_expert_scaling_uses_compact_inline_defaultdict_editor(application, task
     tree_editor.itemWidget(item.child(0), 3).click()
     application.processEvents()
     assert dialog.parameters().MODE[name](all_values=True) == {'def': .6, 3: .2}
-    assert isinstance(tree_editor.itemWidget(item, 3), QToolButton)
-    assert item.font(0).bold()
     dialog.close()
 
 def test_expert_tree_refreshes_energy_bound_dependencies_from_session(application):

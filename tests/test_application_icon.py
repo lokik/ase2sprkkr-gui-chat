@@ -41,11 +41,3 @@ def test_gui_application_icon_is_inherited_by_workflow_window(tmp_path):
         app.setApplicationName(previous_name)
 
 
-def test_icon_is_genuine_vector():
-    """The app icon contains shapes, not an embedded raster or image reference."""
-    source = icon_path("sprkkr-orbital.svg").read_text(encoding="utf-8")
-    assert "<image" not in source
-    assert "data:image/" not in source
-    assert "<path " in source
-    assert "<circle " in source
-

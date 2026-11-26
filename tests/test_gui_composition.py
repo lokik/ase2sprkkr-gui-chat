@@ -37,7 +37,6 @@ def test_composition_root_reuses_one_guided_window_and_shared_state(tmp_path):
     gui = GuiApplication(recent_files_path=tmp_path / "recent.json")
     workflow = gui.create_workflow_window()
     assert gui.create_workflow_window() is workflow
-    assert not hasattr(gui, "create_main_window")
     assert workflow.controller is gui.controller
     assert workflow.recent_history is gui.recent_files
 

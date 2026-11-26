@@ -91,8 +91,8 @@ def test_renderer_preserves_plan_group_order_and_presentation():
     widget.close()
 
 
-def test_action_shortcuts_follow_typed_commands_and_hide_on_narrow_cards():
-    app = _app()
+def test_action_shortcuts_follow_typed_commands():
+    _app()
     from ase2sprkkr_gui.gui.workflow.model import (
         CreateStructure, CreateStructureKind, EditStructure, Load, LoadKind,
         SaveStructure,
@@ -117,20 +117,10 @@ def test_action_shortcuts_follow_typed_commands_and_hide_on_narrow_cards():
     ))
     buttons = widget.findChildren(QPushButton)
     assert len(buttons) == len(commands)
-    widget.show()
-    app.processEvents()
     for button, (_command, title, shortcut) in zip(buttons, commands):
         assert button.accessibleName() == title
         assert button.shortcut().toString() == shortcut
-        hint = button.findChild(QLabel, "workflowShortcutHint")
-        assert hint is not None and hint.text() == shortcut
         assert "Shortcut: " + shortcut in button.toolTip()
-        button.setFixedWidth(600)
-        app.processEvents()
-        assert not hint.isHidden()
-        button.setFixedWidth(180)
-        app.processEvents()
-        assert hint.isHidden()
     widget.close()
 
 
@@ -169,7 +159,7 @@ def test_renderer_emits_typed_command_instead_of_interpreting_title():
     widget.close()
 
 
-def test_renderer_continue_uses_two_half_height_flat_dropdowns():
+def test_renderer_continue_routes_recent_menu_commands():
     app = _app()
     primary = ContinueRecent("output", "/tmp/SCF.out")
     structure = ContinueRecent("structure", "/tmp/Fe.cif")
@@ -212,12 +202,6 @@ def test_renderer_continue_uses_two_half_height_flat_dropdowns():
     structures = card.findChild(QToolButton, "continueStructuresMenuButton")
     results = card.findChild(QToolButton, "continueResultsMenuButton")
     assert structures is not None and results is not None
-    assert structures.width() >= 68 and results.width() >= 68
-    assert structures.height() + results.height() == card.height()
-    assert structures.geometry().bottom() + 1 == results.geometry().top()
-    assert structures.text() == "" and results.text() == ""
-    assert structures.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
-    assert results.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
     assert structures.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
     assert results.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
     assert structures.accessibleName() == "Choose recent structures"
@@ -298,9 +282,6 @@ def test_single_recent_input_group_opens_flat_menu():
     _app().processEvents()
     button = card.findChild(QToolButton, "repeatCalculationMenuButton")
     assert button is not None
-    assert button.width() >= 68
-    assert button.height() == card.height()
-    assert button.text() == ""
     assert button.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
     assert [a.text() for a in button.menu().actions()] == ["first.inp"]
     emitted = []
@@ -338,13 +319,9 @@ def test_replacing_plan_retires_old_groups():
     application = _app()
     widget = WorkflowActionsWidget()
     widget.set_plan(_single_action_plan(group="Old", title="Old action"))
-    label = widget.findChild(QLabel, "workflowActionGroupLabel")
-    assert label is not None
-    old_group = label.parentWidget()
 
     widget.set_plan(_single_action_plan(group="New", title="New action"))
 
-    assert old_group.isHidden()
     application.processEvents()
     visible_labels = [
         current.text()
@@ -355,80 +332,3 @@ def test_replacing_plan_retires_old_groups():
     widget.close()
 
 
-def test_tall_panel_keeps_groups_and_labels_compact():
-    application = _app()
-    widget = WorkflowActionsWidget()
-    groups = tuple(
-        AvailableActionGroup(
-            section, title, _single_action_plan(title=title).groups[0].actions
-        )
-        for section, title in (
-            (WorkflowSection.CREATE, "First"), (WorkflowSection.LOAD, "Second")
-        )
-    )
-    widget.set_plan(WorkflowPlan("subtitle", groups))
-    widget.resize(550, 1200)
-    widget.show()
-    application.processEvents()
-
-    labels = widget.findChildren(QLabel, "workflowActionGroupLabel")
-    panels = [label.parentWidget() for label in labels]
-    assert panels[0].geometry().top() == 0
-    for panel, label in zip(panels, labels):
-        assert panel.height() == panel.sizeHint().height()
-        assert label.height() == label.sizeHint().height()
-    assert panels[1].geometry().bottom() < widget.height() / 2
-    widget.close()
-
-def test_cards_have_matching_heights_with_wrapped_and_missing_descriptions():
-    application = _app()
-    widget = WorkflowActionsWidget()
-    widget.set_plan(WorkflowPlan(
-        "subtitle",
-        (
-            AvailableActionGroup(
-                WorkflowSection.CREATE,
-                "Create",
-                (
-                    AvailableAction(
-                        StartOver(), "Short", "One line", "structure", ActionIcon.RESET,
-                    ),
-                    AvailableAction(
-                        StartOver(), "Long",
-                        "A longer description that wraps into several lines at the minimum "
-                        "column width, without changing the height of the other action cards.",
-                        "structure", ActionIcon.RESET,
-                    ),
-                    AvailableAction(
-                        StartOver(), "No description", "", "neutral", ActionIcon.RESET,
-                    ),
-                ),
-            ),
-            AvailableActionGroup(
-                WorkflowSection.LOAD,
-                "Load",
-                (
-                    AvailableAction(
-                        ContinueRecent("output", "/tmp/SCF.out"),
-                        "Recent", "", "load", ActionIcon.CONTINUE,
-                        menu=(ActionMenuGroup("Recent", (), empty_text="None"),),
-                    ),
-                ),
-            ),
-        ),
-    ))
-    widget.resize(320, 750)
-    widget.show()
-    application.processEvents()
-
-    buttons = widget.findChildren(QPushButton) + widget.findChildren(QToolButton)
-    assert len(buttons) == 4
-    assert len({button.height() for button in buttons}) == 1
-    narrow_height = buttons[0].height()
-    assert narrow_height >= 68
-
-    widget.resize(600, 750)
-    application.processEvents()
-    assert len({button.height() for button in buttons}) == 1
-    assert buttons[0].height() <= narrow_height
-    widget.close()

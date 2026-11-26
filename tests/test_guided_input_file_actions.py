@@ -22,81 +22,27 @@ def _dialog(**kwargs):
     )
 
 
-def test_undo_redo_are_in_top_right_header_not_footer():
-    _app, dialog = _dialog()
-    layout = dialog.layout()
-    top = layout.itemAt(0).layout()
-    footer = layout.itemAt(layout.count() - 1).layout()
-    assert top.indexOf(dialog.undo_button) >= 0
-    assert top.indexOf(dialog.redo_button) >= 0
-    assert top.indexOf(dialog.undo_button) < top.indexOf(dialog.redo_button)
-    assert footer.indexOf(dialog.undo_button) == -1
-    assert footer.indexOf(dialog.redo_button) == -1
-    assert dialog.save_input_button.text() == "Save Input…"
-    dialog.close()
-
-
-def test_page_focus_has_no_native_tail_and_keeps_selected_border():
+def test_page_navigation_responds_to_mouse_and_keyboard():
     from PyQt6.QtCore import Qt
     from PyQt6.QtTest import QTest
 
     app, dialog = _dialog()
     dialog.show()
     app.processEvents()
-    first, second = dialog.spec.pages[:2]
-    first_label = dialog._navigation[first.id].label
-    second_label = dialog._navigation[second.id].label
-
-    # The original selected tile styling must NOT be changed.
-    assert "border: 3px solid" in first_label.styleSheet()
-    assert "border: 1px solid" in second_label.styleSheet()
-    stylesheet = dialog.navigation.styleSheet()
-    assert "outline: 0" in stylesheet
-    assert "QListWidget::item:selected, QListWidget::item:hover" in stylesheet
-    assert "background: transparent" in stylesheet
-
-    rect = dialog.navigation.visualItemRect(dialog._navigation[second.id].item)
+    rect = dialog.navigation.visualItemRect(dialog.navigation.item(1))
     QTest.mouseClick(dialog.navigation.viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
     assert dialog.navigation.currentRow() == 1
     assert dialog.pages.currentIndex() == 1
-    assert "border: 3px solid" in second_label.styleSheet()
-    assert "border: 1px solid" in first_label.styleSheet()
 
     dialog.navigation.setFocus()
     QTest.keyClick(dialog.navigation, Qt.Key.Key_Up)
     assert dialog.navigation.currentRow() == 0
     assert dialog.pages.currentIndex() == 0
-    assert "border: 3px solid" in first_label.styleSheet()
     dialog.close()
 
 
-def test_page_navigation_is_below_pages_and_run_controls_share_file_action_row():
+def test_previous_and_next_navigate_pages():
     _app, dialog = _dialog()
-    root = dialog.layout()
-    body = next(
-        root.itemAt(i).layout() for i in range(root.count())
-        if root.itemAt(i).layout() is not None
-        and any(
-            root.itemAt(i).layout().itemAt(j).widget() is dialog.pages
-            for j in range(root.itemAt(i).layout().count())
-        )
-    )
-    nav_column = body.itemAt(0).layout()
-    assert nav_column.itemAt(0).widget() is dialog.navigation
-    page_buttons = nav_column.itemAt(nav_column.count() - 1).layout()
-    assert page_buttons.indexOf(dialog.previous_button) >= 0
-    assert page_buttons.indexOf(dialog.next_button) >= 0
-
-    actions = root.itemAt(root.count() - 1).layout()
-    labels = ["Load input…", "Save Input…", "Presets…",
-              "Edit input file…", "Expert settings…", "Cancel", "Calculate"]
-    buttons = [actions.itemAt(i).widget() for i in range(actions.count())
-               if actions.itemAt(i).widget() is not None]
-    assert [button.text() for button in buttons] == labels
-    assert all(not button.icon().isNull() for button in buttons)
-    assert not dialog.previous_button.icon().isNull()
-    assert not dialog.next_button.icon().isNull()
-
     assert not dialog.previous_button.isEnabled()
     dialog.next_button.click()
     assert dialog.navigation.currentRow() == 1

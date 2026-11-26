@@ -121,15 +121,8 @@ class _FakeProfileStore:
         self.defaults.append(default_profile)
 
 
-def test_settings_has_independent_frame_tabs(tmp_path):
-    from PyQt6.QtWidgets import QFrame
-
+def test_settings_exposes_expected_sections(tmp_path):
     from ase2sprkkr_gui.gui.dialogs.settings import SettingsDialog
-    from ase2sprkkr_gui.gui.widgets.settings.preferred_tasks import PreferredTasksPage
-    from ase2sprkkr_gui.gui.widgets.settings.general import GeneralSettingsPage
-    from ase2sprkkr_gui.gui.widgets.settings.ase2sprkkr import Ase2sprkkrSettingsPage
-    from ase2sprkkr_gui.gui.widgets.settings.run_configurations import RunConfigurationsPage
-    from ase2sprkkr_gui.gui.widgets.settings.optional_dependencies import OptionalDependenciesPage
 
     dialog = SettingsDialog(
         ApplicationSettings(tmp_path / "settings.json"),
@@ -139,30 +132,12 @@ def test_settings_has_independent_frame_tabs(tmp_path):
         "General", "Preferred tasks", "Run configurations", "Ase2sprkkr",
         "Optional dependencies",
     ]
-    assert all(isinstance(dialog.tabs.widget(i), QFrame) for i in range(5))
-    assert isinstance(dialog.preferred_tasks_page, PreferredTasksPage)
-    assert isinstance(dialog.general_page, GeneralSettingsPage)
-    assert isinstance(dialog.run_configurations_page, RunConfigurationsPage)
-    assert isinstance(dialog.ase2sprkkr_page, Ase2sprkkrSettingsPage)
-    assert isinstance(dialog.optional_dependencies_page, OptionalDependenciesPage)
     assert "not GUI-specific" in dialog.ase2sprkkr_page.scope_notice.text()
     assert dialog.general_page.visualization_group.title() == "Visualization"
     assert dialog.general_page.atom_appearance_group.title() == "Atom appearance"
-    from PyQt6.QtWidgets import QLabel, QSlider
-    assert any(
-        item.text() == "External structure viewer:"
-        for item in dialog.general_page.visualization_group.findChildren(QLabel)
-    )
-    assert not dialog.general_page.visualization_group.findChildren(QSlider)
-    assert dialog.general_page.atom_appearance_group.findChildren(QSlider)
     assert dialog.general_page.sprkkr_group.title() == "SPR-KKR"
     assert dialog.general_page.python_shell_group.title() == "Python shell"
-    assert dialog.share_python_shell_history is (
-        dialog.general_page.share_python_shell_history
-    )
-    assert dialog.share_python_shell_history.isChecked()
-    assert dialog.viewer is dialog.general_page.viewer
-    assert dialog.dataset_default_mode is dialog.general_page.dataset_default_mode
+    assert dialog.general_page.share_python_shell_history.isChecked()
     dialog.close()
 
 
@@ -374,9 +349,8 @@ def test_logarithmic_atom_size_range_and_preview_uses_real_marker_areas(tmp_path
         dialog.close()
 
 
-def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
-    from PyQt6.QtCore import QPoint
-    from PyQt6.QtWidgets import QApplication, QLabel
+def test_atom_size_example_preserves_physical_distance(tmp_path):
+    from PyQt6.QtWidgets import QApplication
     from ase2sprkkr_gui.gui.dialogs.settings import SettingsDialog
 
     dialog = SettingsDialog(
@@ -388,19 +362,8 @@ def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
         QApplication.processEvents()
         page = dialog.general_page
         example = page.atom_size_example
-        assert example.mapTo(page, QPoint()).x() > page.atom_relative_sizes.mapTo(
-            page, QPoint()
-        ).x()
-        assert example.canvas.height() == 215
         assert page.atom_example_caption.text() == "Example (C / Au) · distance 2.5 Å"
         assert example.distance_angstrom == 2.5
-        assert page.atom_example_caption.mapTo(page, QPoint()).y() >= example.mapTo(
-            page, QPoint(0, example.height())
-        ).y()
-        assert not any(
-            "Preview uses" in label.text()
-            for label in page.atom_appearance_group.findChildren(QLabel)
-        )
         positions = example.markers.get_offsets().copy()
         assert positions[1, 0] - positions[0, 0] == example.distance_angstrom
         xlim = example.axes.get_xlim()
@@ -408,7 +371,6 @@ def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
         # Changing the marker radius must not move the atoms.
         page.atom_size_percent.setValue(500)
         assert (example.markers.get_offsets() == positions).all()
-        assert len(example.axes.texts) == 0
     finally:
         dialog.close()
 

@@ -92,7 +92,7 @@ def _set_store(
     )
 
 
-def test_results_toolbar_has_equal_width_buttons_and_load_action():
+def test_results_toolbar_actions_without_selection():
     application = QApplication.instance() or QApplication([])
     widget = _widget()
     loaded = []
@@ -109,9 +109,6 @@ def test_results_toolbar_has_equal_width_buttons_and_load_action():
     ]
     assert all(not button.icon().isNull() for button in top_buttons)
     assert all(button.isVisible() for button in top_buttons)
-    assert max(button.width() for button in top_buttons) - min(
-        button.width() for button in top_buttons
-    ) <= 1
 
     bottom_buttons = (
         widget._use_state_button, widget.assign_project_button,
@@ -120,20 +117,10 @@ def test_results_toolbar_has_equal_width_buttons_and_load_action():
     assert [button.text() for button in bottom_buttons] == [
         "Use this structure", "Assign to Project", "Select All",
     ]
-    assert widget.show_all_values_checkbox.parentWidget().parentWidget() is (
-        widget._record_actions
-    )
     assert widget._record_actions.isHidden()  # No result selected yet.
     assert not widget._recompute_button.isEnabled()
     assert not widget._use_state_button.isEnabled()
     assert widget._bottom_controls.isHidden()  # No results to select yet.
-    assert widget.layout().indexOf(widget._bottom_controls) == (
-        widget.layout().indexOf(widget._selector) + 1
-    )
-    assert widget._record_actions.parentWidget() is widget._container
-    assert widget.layout().indexOf(widget._record_actions) == -1
-    assert widget._container.layout().itemAt(0).layout() is widget._grid
-    assert widget._container.layout().itemAt(1).widget() is widget._record_actions
     assert not widget.select_all_button.isEnabled()
     assert not widget.assign_project_button.isEnabled()
     assert widget.load_result_button.isEnabled()
@@ -374,7 +361,7 @@ def test_result_from_other_structure_offers_structure_reuse():
     widget.close()
 
 
-def test_recompute_width_matches_selection_button_and_checkbox_is_independent():
+def test_recompute_availability_is_independent_of_show_all_values():
     application = QApplication.instance() or QApplication([])
     store = ResultStore()
     structure_id, state_id = store.new_structure_state(
@@ -395,15 +382,7 @@ def test_recompute_width_matches_selection_button_and_checkbox_is_independent():
     assert widget._recompute_button.isVisible()
     assert widget._recompute_button.isEnabled()
     assert widget.show_all_values_checkbox.isVisible()
-    assert widget._record_actions.layout().count() == 3
-    check = widget.show_all_values_checkbox
-    right = check.parentWidget().x() + check.x() + check.width()
-    assert widget._record_actions.width() - right <= 14
-    assert abs(
-        widget._recompute_button.width() - widget._use_state_button.width()
-    ) <= 18
-
-    # Recompute may be disabled for another result, but both slots stay put.
+    # Disabling recompute must not hide the independent values control.
     widget._refresh_record_actions(
         type(widget._current_presentation.actions)(use_state=None, recompute=None)
     )

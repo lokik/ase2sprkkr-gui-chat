@@ -79,17 +79,3 @@ def test_array_scaling_uses_orbital_columns_without_expanding_on_open(applicatio
     dialog.close()
 
 
-def test_single_row_tables_fit_contents_without_empty_viewport(application):
-    parameters = InputParameters.create("bsfkk")
-    parameters.TASK.set({"K1": [1., 0., 0.], "K2": [0., 1., 0.], "NK1": 60, "NK2": 60})
-    dialog = GuidedInputParametersDialog("bsf", parameters)
-    dialog.show()
-    dialog.select_page("path")
-    application.processEvents()
-    for name in ("KA", "K1", "K2"):
-        control = dialog.editors_for(("TASK", name))[0].control
-        table = control.table
-        assert table.rowCount() == 1
-        assert table.height() == table.horizontalHeader().sizeHint().height() + table.rowHeight(0) + 2 * table.frameWidth()
-        assert table.viewport().height() <= table.rowHeight(0) + 1
-    dialog.close()

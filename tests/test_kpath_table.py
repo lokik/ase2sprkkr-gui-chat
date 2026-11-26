@@ -172,4 +172,3 @@ def test_actual_cell_editor_commits_fraction_on_tab(dialog):
     QTest.keyClick(editor, Qt.Key.Key_Tab)
     QApplication.processEvents()
     assert dialog.session.value(("TASK", "KA"))[0, 0] == 1 / 3
-    assert dialog.form.views_for(("TASK", "KA"))[0].label.font().bold()

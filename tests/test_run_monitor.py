@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPlainTextEdit
+from PyQt6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox, QPlainTextEdit
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob
@@ -811,6 +811,7 @@ def test_saved_dos_partial_output_displays_info_warning(_qt_application):
         ),
     )
     assert window._info_page.progress.maximum() == 300
-    assert "Partial INFO" in window._info_page.layout().itemAt(0).widget().text()
+    assert any("Partial INFO" in label.text()
+               for label in window._info_page.findChildren(QLabel))
     assert "Earlier output was omitted" in window._output.toPlainText()
     window.close()

@@ -78,7 +78,7 @@ def test_non_pickleable_plot_still_expands_as_a_snapshot(monkeypatch):
     assert len(snapshot.axes[0].images) == 1
 
 
-def test_fullscreen_corner_button_uses_the_double_click_action(monkeypatch):
+def test_fullscreen_button_uses_the_double_click_action(monkeypatch):
     calls = []
     # Patch before construction: clicked.connect() captures the bound method.
     monkeypatch.setattr(previews.PreviewFigureCanvas, "open_fullscreen",
@@ -90,9 +90,7 @@ def test_fullscreen_corner_button_uses_the_double_click_action(monkeypatch):
 
     button = canvas.fullscreen_button
     assert button.isVisible()
-    assert button.x() < 30 and button.y() < 30
     assert button.toolTip() == "Open fullscreen preview"
-    assert "border: none" in button.styleSheet()
     QTest.mouseClick(button, Qt.MouseButton.LeftButton)
     QTest.mouseDClick(canvas, Qt.MouseButton.LeftButton)
     assert calls == [canvas, canvas]

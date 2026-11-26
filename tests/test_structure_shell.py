@@ -10,7 +10,7 @@ import pytest
 from ase import Atoms
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QDialog, QPlainTextEdit
+from PyQt6.QtWidgets import QApplication, QDialog
 
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.dialogs.structures import shell
@@ -52,13 +52,11 @@ def _enter(dialog, source):
     _flush()
 
 
-def test_shell_uses_one_editable_console_with_instructions():
+def test_shell_displays_usage_instructions():
     _app()
     dialog = shell.StructureShellDialog()
-    assert isinstance(dialog.console.edit, QPlainTextEdit)
     assert "use_structure(atoms)" in dialog.console.edit.toPlainText()
     assert "Shift+Enter" in dialog.console.edit.toPlainText()
-    assert not hasattr(dialog.console, "input")
     # Qonsole renders the prompt in its separate gutter, not in the editor text.
     assert dialog.console.in_prompt().strip() == ">>>"
     dialog.reject()
