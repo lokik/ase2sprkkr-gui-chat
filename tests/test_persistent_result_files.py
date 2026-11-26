@@ -38,6 +38,7 @@ def test_result_file_state_is_exposed():
 def test_gui_adoption_preserves_historical_auxiliary_file_identity(tmp_path):
     from ase2sprkkr.outputs.task_result import TaskResult
     from kkrunner.files import FileEntry, FileManifest, FileVersion
+    from kkrunner.runs import HistoricalFileMismatchError
 
     from ase2sprkkr_gui.gui.application.result_loading import load_result
     from ase2sprkkr_gui.gui.application.result_store import ResultStore
@@ -60,7 +61,7 @@ def test_gui_adoption_preserves_historical_auxiliary_file_identity(tmp_path):
 
     loaded = load_result(result, fallback_directory=None)
     assert loaded.atoms is None
-    assert "changed" in str(loaded.potential_error)
+    assert isinstance(loaded.potential_error, HistoricalFileMismatchError)
     record = ResultStore().add_result(
         result, structure_id=None, input_state_id=None, input_parameters=None,
         directory=str(tmp_path), output_path=output,

@@ -4,13 +4,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
-from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.flows import structures as structure_flows
 from ase2sprkkr_gui.main import GuiApplication
+from ase2sprkkr_gui.gui.workflow.model import Build2D, UpdateEmptySpheres
 
 
 def test_controller_exposes_structure_operation_capabilities(monkeypatch):
@@ -90,53 +91,57 @@ def test_build2d_flow_rejects_non_3d_structure(tmp_path, monkeypatch):
     assert "3D periodic bulk" in messages[0][2]
 
 
-def test_expert_and_guided_apply_different_empty_sphere_policy(
+def _commands(workflow):
+    return tuple(
+        action.command
+        for group in workflow._actions.plan.groups
+        for action in group.actions
+    )
+
+
+def test_workflow_hides_empty_spheres_when_scf_restart_is_required(
     tmp_path, monkeypatch
 ):
     application = QApplication.instance() or QApplication([])
-    gui = GuiApplication(recent_files_path=tmp_path / "recent.json")
-    expert = gui.create_main_window()
+    gui = GuiApplication(recent_files_path=tmp_path / "recent.json",
+                         settings_path=tmp_path / "settings.json")
     workflow = gui.create_workflow_window()
     controller = gui.controller
     controller.replace_structure(
         Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
     )
-    monkeypatch.setattr(controller, "scf_status", lambda: "CUSTOM-STAGE")
     monkeypatch.setattr(controller, "is_scf_converged", lambda: False)
-
-    expert._refresh_action_availability()
+    monkeypatch.setattr(controller, "scf_status", lambda: "START")
     workflow._refresh()
-    application.processEvents()
+    assert any(isinstance(command, UpdateEmptySpheres)
+               for command in _commands(workflow))
 
+    monkeypatch.setattr(controller, "scf_status", lambda: "CUSTOM-STAGE")
+    workflow._refresh()
     assert controller.structure_change_requires_scf_restart()
-    assert expert.empty_spheres_action.isVisible()
-    assert not any(
-        "Empty Spheres" in button.text()
-        for button in workflow._actions.findChildren(QPushButton)
-    )
-
-    expert.close()
+    assert not any(isinstance(command, UpdateEmptySpheres)
+                   for command in _commands(workflow))
     workflow.close()
 
 
-def test_expert_build2d_action_uses_shared_capability(tmp_path):
+def test_workflow_build2d_action_uses_shared_capability(tmp_path):
     application = QApplication.instance() or QApplication([])
-    gui = GuiApplication(recent_files_path=tmp_path / "recent.json")
-    expert = gui.create_main_window()
+    gui = GuiApplication(recent_files_path=tmp_path / "recent.json",
+                         settings_path=tmp_path / "settings.json")
+    workflow = gui.create_workflow_window()
 
     gui.controller.replace_structure(
         Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
     )
-    application.processEvents()
-    assert expert.build_2d_structure_action.isEnabled()
+    workflow._refresh()
+    assert any(isinstance(command, Build2D) for command in _commands(workflow))
 
     gui.controller.replace_structure(
         Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=(True, True, False))
     )
-    application.processEvents()
-    assert not expert.build_2d_structure_action.isEnabled()
-
-    expert.close()
+    workflow._refresh()
+    assert not any(isinstance(command, Build2D) for command in _commands(workflow))
+    workflow.close()
 
 
 def test_empty_sphere_warning_does_not_preemptively_reset_scf(monkeypatch):

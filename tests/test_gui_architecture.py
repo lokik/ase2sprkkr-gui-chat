@@ -394,5 +394,11 @@ def test_element_rows_use_callbacks_without_a_parent_dialog():
     assert row.rows[0]["elem"].text() == "Co"
     row.add_row()
     row.rows[1]["elem"].setText("Fe")
-    assert messages[-1] == ("a", "Occupation too large for site a")
+    # New rows start at zero and normalization is enabled by default.
+    assert messages[-1] == ("a", None)
+    row.normalize_check.setChecked(False)
+    row.rows[1]["occ"].setValue(0.25)
+    assert messages[-1] == ("a", "Occupation exceeds 1")
+    row.normalize_check.setChecked(True)
+    assert messages[-1] == ("a", None)
     row.close()

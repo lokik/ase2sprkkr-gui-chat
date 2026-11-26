@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any
 
 from ase import Atoms
-from ase.visualize import view as ase_view
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
@@ -34,6 +33,8 @@ def _open_viewer(atoms: Atoms, viewer: str) -> None:
         launch_ase_gui(atoms)
     else:
         # External viewers don't offer a common readiness notification.
+        from ase.visualize import view as ase_view
+
         ase_view(atoms, viewer=viewer)
 
 

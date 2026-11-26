@@ -11,8 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ase.io import read as ase_read
-from ase.io.formats import ioformats
+from ase2sprkkr_gui.ase.io import read as ase_read
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from ase2sprkkr_gui.gui.dialogs.structures.database import select_structure_prototype
@@ -36,6 +35,8 @@ class StructureCandidate:
 
 def structure_open_filter() -> str:
     """Return the ASE-backed file filter used for loading structures."""
+    from ase.io.formats import ioformats
+
     extensions = sorted(
         f"*.{extension}"
         for file_format in ioformats.values()

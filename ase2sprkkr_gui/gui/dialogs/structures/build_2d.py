@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import numpy as np
-from ase2sprkkr.sprkkr.build import semiinfinite_system
 from matplotlib.figure import Figure
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
@@ -292,6 +291,8 @@ class Build2DStructureDialog(QDialog):
         )
 
         try:
+            from ase2sprkkr.sprkkr.build import semiinfinite_system
+
             semi = semiinfinite_system(
                 atoms,
                 repeat=repeat,

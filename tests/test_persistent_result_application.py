@@ -4,14 +4,12 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from ase import Atoms
 from ase2sprkkr import InputParameters
 from kkrunner.projects import ProjectRunManager, ProjectRepository
-from kkrunner.files import FileEntry, FileManifest
+from kkrunner.files import FileEntry, FileManifest, FileVersion
 from kkrunner import RunState, RunStore
-from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QDialog, QWidget
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.dialogs.guided_input import GuidedInputParametersDialog
-from ase2sprkkr_gui.gui.dialogs.profiles import ProfileSelectionDialog
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 from ase2sprkkr_gui.main import GuiApplication
 
@@ -28,16 +26,16 @@ def _finished_dos_run(tmp_path):
     projects = ProjectRepository(tmp_path / 'projects')
     project = projects.create('Test')
     manager = ProjectRunManager(store=RunStore(tmp_path / 'runs'), project_repository=projects, project=project)
-    run = manager.new_record(directory=tmp_path, files=FileManifest(inputs=(FileEntry(local_path=str(input_path)),), stdout=FileEntry(local_path=str(output_path)), outputs=(FileEntry(local_path=str(dos_path)),)), metadata={'ase2sprkkr': {'task': str('DOS').upper(), 'input_definition': str('DOS').upper()}}, processing_required=True)
+    run = manager.new_record(directory=tmp_path, files=FileManifest(inputs=(FileEntry(local_path=str(input_path)),), stdout=FileEntry(local_path=str(output_path)), outputs=(FileEntry(local_path=str(dos_path)),), input_versions=(FileVersion.capture(input_path, require_digest=True),)), metadata={'ase2sprkkr': {'task': str('DOS').upper(), 'input_definition': str('DOS').upper()}}, processing_required=True)
     manager.store.save(run)
     run = manager.complete(run, state=RunState.FINISHED, return_code=0, artifacts_available=True)
     return (PersistentJobSource(manager), run)
 
-def test_persisted_result_enters_application_history_and_recompute(tmp_path):
+def test_persisted_result_enters_application_history_and_recompute(tmp_path, monkeypatch):
     """Exercise the production persistence -> workspace -> recompute boundaries."""
     application = QApplication.instance() or QApplication([])
     source, run = _finished_dos_run(tmp_path)
-    gui = GuiApplication(workspace=WorkspaceState(atoms=Atoms('Fe'), directory=str(tmp_path)), recent_files_path=tmp_path / 'recent.json', settings_path=tmp_path / 'settings.json', persistent_jobs=source)
+    gui = GuiApplication(workspace=WorkspaceState(atoms=Atoms('Fe', cell=(3, 3, 3), pbc=True), directory=str(tmp_path)), recent_files_path=tmp_path / 'recent.json', settings_path=tmp_path / 'settings.json', persistent_jobs=source)
     loaded = gui.persistent_jobs_controller.load_result(run.id)
     assert loaded.task_name.lower() == 'dos'
     assert loaded.input_parameters.task_name.lower() == 'dos'
@@ -47,29 +45,27 @@ def test_persisted_result_enters_application_history_and_recompute(tmp_path):
     assert record.task_name == 'dos'
     assert record.input_parameters.task_name.lower() == 'dos'
     parent = QWidget()
-    seen_dialogs = []
+    original_parameters = gui.controller.input_parameters
+    seen_dialogs, requests = [], []
 
-    def answer_next_dialog() -> None:
-        dialog = QApplication.activeModalWidget()
-        if dialog is None:
-            QTimer.singleShot(0, answer_next_dialog)
-            return
-        seen_dialogs.append(type(dialog))
-        if isinstance(dialog, GuidedInputParametersDialog):
-            dialog.accept()
-            QTimer.singleShot(0, answer_next_dialog)
-            return
-        if isinstance(dialog, ProfileSelectionDialog):
-            dialog.reject()
-            return
-        if isinstance(dialog, QDialog):
-            dialog.reject()
-    QTimer.singleShot(0, answer_next_dialog)
+    def accept_parameters(dialog):
+        seen_dialogs.append(dialog)
+        return QDialog.DialogCode.Accepted
+
+    def capture_request(*_args, **kwargs):
+        requests.append(kwargs["request_override"])
+        return None
+
+    monkeypatch.setattr(GuidedInputParametersDialog, "exec", accept_parameters)
+    monkeypatch.setattr(calculation_flow, "run_calculation", capture_request)
     launched = calculation_flow.recompute_result(gui.controller, gui.recent_files, parent, record.id)
     assert launched is None
-    assert GuidedInputParametersDialog in seen_dialogs
-    assert ProfileSelectionDialog in seen_dialogs
-    assert gui.controller.input_parameters.task_name.lower() == 'dos'
+    assert len(seen_dialogs) == 1
+    assert len(requests) == 1
+    assert requests[0].input_parameters.task_name.lower() == 'dos'
+    assert requests[0].atoms is gui.controller.atoms
+    # Recompute is a one-off request, not a workspace input document.
+    assert gui.controller.input_parameters is original_parameters
 
 
 def test_reopening_persistent_run_does_not_reinterpret_its_potential(tmp_path, monkeypatch):
