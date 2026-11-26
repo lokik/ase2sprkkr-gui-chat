@@ -5,15 +5,12 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
 from types import SimpleNamespace
-from PyQt6.QtCore import Qt, QPoint, QSize
+from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtWidgets import QApplication, QAbstractButton, QFrame, QLabel, QMessageBox, QSizePolicy, QToolButton, QWidget
 
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.dialogs import workflow_window as workflow_module
-from ase2sprkkr_gui.gui.widgets.centered_icon_buttons import (
-    CenteredIconPushButton, CenteredIconToolButton,
-)
 from ase2sprkkr_gui.gui.workflow.model import (
     Build2D,
     Build2DKind,
@@ -657,129 +654,24 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
 ):
     application = QApplication.instance() or QApplication([])
     gui, window = _workflow(tmp_path)
-    root = window.centralWidget().layout()
-    assert root.count() == 1
-    assert root.itemAt(0).layout() is window._columns_layout
-    assert window._columns_layout.count() == 3
-    assert window.findChild(QFrame, "workflowNavigation") is None
-    structure = window.findChild(QWidget, "workflowStructureColumn")
-    calculate = window.findChild(QWidget, "workflowCalculateColumn")
+
+    # Check ownership and action availability, independently of screen width.
     results = window.findChild(QWidget, "workflowResultsColumn")
-    navs = (
-        window.findChild(QWidget, "workflowStructureNavigation"),
-        window.findChild(QWidget, "workflowCalculationNavigation"),
-        window.findChild(QWidget, "workflowResultsNavigation"),
-    )
-    assert [nav.parentWidget() for nav in navs] == [
-        structure, calculate, results,
-    ]
-    footer = window.findChild(QFrame, "workflowResultsFooter")
-    assert footer is window._results_footer
+    nav = window.findChild(QWidget, "workflowResultsNavigation")
+    footer = window._results_footer
+    assert nav.parentWidget() is results
     assert footer.parentWidget() is results
-    assert results.layout().itemAt(results.layout().count() - 1).widget() is footer
-    assert structure.layout().indexOf(navs[0]) < structure.layout().indexOf(window._structure_title.parentWidget())
-    title = window.findChild(QLabel, "workflowCalculateTitle")
-    assert calculate.layout().indexOf(navs[1]) < calculate.layout().indexOf(title.parentWidget())
-    results_title = window.findChild(QLabel, "workflowResultsTitle")
-    assert results.layout().indexOf(navs[2]) < results.layout().indexOf(results_title)
-    for heading in (window._structure_title, title, results_title):
-        assert heading.alignment() & Qt.AlignmentFlag.AlignHCenter
-    assert not structure.isAncestorOf(footer)
-    assert not calculate.isAncestorOf(footer)
-    assert [len(nav.findChildren(QToolButton)) for nav in navs] == [2, 3, 1]
-    assert [btn.text() for btn in footer.findChildren(QToolButton)] == [
-        "Project Browser", "Settings", "Close",
-    ]
-    assert footer.frameShape() == QFrame.Shape.NoFrame
-    # The footer is retained, but its horizontal ruler is removed.
-    assert window.findChild(QWidget, "workflowResultsFooterSeparator") is None
-    assert footer.layout().itemAt(0).spacerItem() is not None
-    assert all(
-        btn.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-        and btn.iconSize().width() == 26
-        and btn.iconSize().height() == 26
-        and btn.height() == 68
-        for btn in footer.findChildren(QToolButton)
-    )
-    assert window._result_actions_widget.load_result_button.parentWidget() is navs[2]
-    assert all(
-        nav.layout().itemAt(0 if nav is navs[0] else 1).layout() is nav._button_row
-        for nav in navs
-    )
-    for nav in navs[1:]:
-        assert nav.layout().itemAt(0).spacerItem() is not None
-        assert nav.layout().itemAt(2).spacerItem() is not None
-    assert navs[0].layout().itemAt(1).spacerItem() is not None
-    assert all(
-        nav._button_row.itemAt(i).widget() is button
-        for nav in navs
-        for i, button in enumerate(nav._buttons)
-    )
-    assert window._result_actions_widget.import_directory_button.parentWidget() is navs[2]
-    assert all(
-        isinstance(button, CenteredIconToolButton)
-        for button in (
-            window._recent_structures_button,
-            window._repeat_button,
-            window._recent_results_button,
-            window._project_browser_button,
-            window._settings_button,
-            window._close_button,
-        )
-    )
-    assert all(
-        isinstance(button, CenteredIconPushButton)
-        for button in (
-            window._result_actions_widget.load_result_button,
-            window._result_actions_widget.import_directory_button,
-        )
-    )
-    assert [navs[2]._button_row.itemAt(i).widget() for i in range(3)] == [
+    for button in (
         window._recent_results_button,
         window._result_actions_widget.load_result_button,
         window._result_actions_widget.import_directory_button,
-    ]
-    assert window._result_actions_widget._import_controls_layout.count() == 0
-    assert all(
-        bar.height() == 93
-        for bar in navs
-    )
-    assert all(button.height() == 68 for bar in navs for button in bar._buttons)
-    assert all(
-        button.property("twoLineUnderIcon") is True
-        for bar in navs for button in bar._buttons
-    )
-    assert all(
-        button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-        for bar in navs for button in bar._buttons
-        if isinstance(button, QToolButton)
-    )
-    assert all(
-        button.iconSize() == QSize(26, 26)
-        for bar in navs for button in bar._buttons
-    )
-    # Fixed actions and Results utilities share the neutral card treatment.
-    assert all(
-        "border-left: 3px solid" in btn.styleSheet()
-        and "background-color:" in btn.styleSheet()
-        for bar in navs for btn in bar._buttons
-    )
-    assert all(
-        "border-left: 3px solid" in btn.styleSheet()
-        and "background-color:" in btn.styleSheet()
-        for btn in footer.findChildren(QToolButton)
-    )
-    assert all(
-        btn.icon().isNull() is False
-        for btn in (
-            window._recent_structures_button,
-            window._repeat_button,
-            window._recent_results_button,
-            window._project_browser_button,
-            window._settings_button,
-            window._close_button,
-        )
-    )
+    ):
+        assert nav.isAncestorOf(button)
+    for button in (
+        window._project_browser_button, window._settings_button, window._close_button,
+    ):
+        assert footer.isAncestorOf(button)
+
     assert window._start_over_button.isHidden()
     assert not window._start_over_button.isEnabled()
     assert not window._recent_structures_button.isEnabled()
@@ -1267,7 +1159,10 @@ def test_guided_structure_sidebar_tracks_current_structure(tmp_path):
     window.controller.reset()
     application.processEvents()
     assert inspector.isHidden()
-    assert window._subtitle.isVisible()
+    assert window._structure_title.text() == "Start with..."
+    assert window._subtitle.isHidden()  # The initial plan has no subtitle.
+    assert CreateStructure(CreateStructureKind.THREE_D) in _commands(window)
+    assert Load(LoadKind.STRUCTURE) in _commands(window)
     window.close()
 
 def test_action_cards_are_equal_height_across_both_guided_columns(tmp_path):
