@@ -5,6 +5,9 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
+from dataclasses import replace
+
+from ase2sprkkr.sprkkr.profile import SPRKKRProfile
 
 from ase2sprkkr_gui.gui.application import execution_profiles
 from ase2sprkkr_gui.gui.application.execution_profiles import ProfileDraft
@@ -124,11 +127,9 @@ def test_profiles_dialog_handles_yaml_error_on_save(monkeypatch):
 
 
 def test_profile_summary_fields_preserve_the_legacy_description(monkeypatch):
-    from types import SimpleNamespace
-
-    profile = SimpleNamespace(
+    profile = SPRKKRProfile(
         executor="local",
-        backend_config=SimpleNamespace(name="direct"),
+        backend="direct",
         mpi="auto",
         executable_dir="/home/user/SPRKKR",
         executable_suffix="",
@@ -150,11 +151,9 @@ def test_profile_summary_fields_preserve_the_legacy_description(monkeypatch):
 
 
 def test_profile_summary_mpi_modes(monkeypatch):
-    from types import SimpleNamespace
-
-    profile = SimpleNamespace(
+    profile = SPRKKRProfile(
         executor="local",
-        backend_config=SimpleNamespace(name="direct"),
+        backend="direct",
         mpi=None,
         executable_dir=None,
         executable_suffix=None,
@@ -171,6 +170,21 @@ def test_profile_summary_mpi_modes(monkeypatch):
         (("mpirun", "-np", "4"), "mpirun -np 4", "MPI: mpirun -np 4"),
     )
     for selected, value, description in cases:
-        profile.mpi = selected
+        profile = replace(profile, mpi=selected)
         assert execution_profiles.profile_summary_fields(None)[2] == ("MPI", value)
         assert f"· {description}\n" in execution_profiles.profile_description(None)
+
+
+def test_profile_summary_detached_direct_execution(monkeypatch):
+    profile = SPRKKRProfile(backend="direct", detached=True)
+    monkeypatch.setattr(
+        execution_profiles, "resolve_sprkkr_profile",
+        lambda _name, *, configuration=None: profile,
+    )
+    for executor, host, expected in (
+        ("local", None, "Local execution · direct (detached)"),
+        ("ssh", "cluster", "SSH to cluster · direct (detached)"),
+    ):
+        profile = replace(profile, executor=executor, host=host)
+        assert execution_profiles.profile_summary_fields(None)[0] == ("Execution", expected)
+        assert execution_profiles.profile_description(None).startswith(expected + " · MPI ")
