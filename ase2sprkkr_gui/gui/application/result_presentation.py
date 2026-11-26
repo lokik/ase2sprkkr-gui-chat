@@ -250,6 +250,44 @@ def present_result_record(
     return presentation
 
 
+def _imported_scf_source(store: ResultStore, record: ResultRecord, imported: tuple[ResultRecord, ...]) -> ResultRecord | None:
+    """Find a uniquely identifiable SCF source for an imported result.
+
+    Imported files have independent structure states: do not rewrite their
+    scientific provenance merely to group them in a history tree. A source
+    may be inferred for presentation only when both results still have
+    usable, current potential snapshots with identical content. Paths may
+    differ (e.g. a copied POTFIL), but ambiguous SCFs never become parents.
+    """
+    if not record.imported or record.task_name in {"scf", "empty_spheres"}:
+        return None
+    state = store.state_for_result(record)
+    version = state.potential_version if state is not None else None
+    if version is None or not version.available or not version.is_current():
+        return None
+
+    sources = []
+    for candidate in imported:
+        if candidate.id == record.id or candidate.task_name != "scf":
+            continue
+        if candidate.output_state_id is None:
+            continue
+        scf_state = store.state(candidate.output_state_id)
+        scf_version = scf_state.potential_version
+        if (
+            scf_version is None
+            or not scf_version.available
+            or scf_version.kind != version.kind
+            or scf_version.digest != version.digest
+            or scf_state.source_dependencies != state.source_dependencies
+            or not scf_version.is_current()
+        ):
+            continue
+        sources.append(candidate)
+        if len(sources) > 1:
+            return None
+    return sources[0] if sources else None
+
 def present_result_tree(
     store: ResultStore,
     *,
@@ -276,7 +314,7 @@ def present_result_tree(
                 _result_label(record), result_id=record.id,
             )
         for record in imported:
-            source = store.imported_scf_source(record)
+            source = _imported_scf_source(store, record, imported)
             parent = result_nodes.get(source.id) if source is not None else None
             (parent.children if parent is not None else directory_node.children).append(
                 result_nodes[record.id]
