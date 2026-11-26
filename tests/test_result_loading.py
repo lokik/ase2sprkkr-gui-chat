@@ -73,6 +73,7 @@ def test_native_dos_result_selects_control_potfil_clu(tmp_path, monkeypatch):
     # The native result requires a concrete host file for provenance,
     # even when this test stubs out potential parsing itself.
     (tmp_path / "host.pot").write_text("host placeholder")
+    (tmp_path / "cluster.clu").write_text("cluster placeholder")
     result = DosResult(parameters, None, tmp_path, task_name="dos")
     result.files.add_file("potential", "host.pot")
     parsed_atoms = Atoms("Fe")
@@ -570,7 +571,7 @@ def test_result_rejects_primary_potential_rewritten_during_loading(tmp_path, mon
 def test_batch_result_import_reuses_versioned_potential_and_invalidates(
     tmp_path, monkeypatch,
 ):
-    from ase import Atoms
+    from pathlib import Path
     from ase2sprkkr.outputs.task_result import TaskResult
     from ase2sprkkr_gui.gui.application import result_loading
 
@@ -608,12 +609,17 @@ def test_batch_result_import_reuses_versioned_potential_and_invalidates(
 
     a = result_loading.load_result_file(first, cache=cache)
     b = result_loading.load_result_file(second, cache=cache)
-    assert a.atoms is b.atoms
+    assert a.potential_error is None
+    assert b.potential_error is None
+    assert a.atoms is not None and a.atoms is b.atoms
     assert seen == [pot.resolve()]
 
     pot.write_text("changed version, not the same bytes")
+    # A new filesystem observation scope is required after an external edit.
+    cache.loader.file_operations.invalidate()
     c = result_loading.load_result_file(third, cache=cache)
-    assert c.atoms is not b.atoms
+    assert c.potential_error is None
+    assert c.atoms is not None and c.atoms is not b.atoms
     assert seen == [pot.resolve(), pot.resolve()]
 
 
@@ -658,17 +664,23 @@ def test_batch_embedded_cache_parses_host_and_clupot_once_without_atoms(
     assert len(parsed) == 2  # host and CLUPOT, each parsed without Atoms
     assert set(path for path, _ in parsed) == {str(host), str(cluster)}
 
-    # Even if CLUPOT is unchanged, replacing the host invalidates the
-    # reconstructed cluster and the cached host parser.
+    # Touching a file without changing its bytes preserves its identity.
     stat = host.stat()
     os.utime(host, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    touched = read()
+    assert touched.potential_error is None
+    assert touched.atoms is second.atoms
+    assert len(parsed) == 2
+
+    # A real byte change invalidates the host and the derived cluster.
+    # Trailing whitespace changes the version without changing the geometry.
+    host.write_bytes(host.read_bytes() + b"\n")
     third = read()
     assert third.potential_error is None
     assert third.atoms is not second.atoms
     assert len(parsed) == 4
 
-    stat = cluster.stat()
-    os.utime(cluster, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    cluster.write_bytes(cluster.read_bytes() + b"\n")
     fourth = read()
     assert fourth.potential_error is None
     assert fourth.atoms is not third.atoms

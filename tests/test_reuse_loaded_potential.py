@@ -19,13 +19,15 @@ def _fresh_import(tmp_path, monkeypatch):
     parsed_atoms = Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
     reads = []
 
-    def read(path):
+    def read(path, *, embedding_host=None):
         reads.append(path)
         return parsed_atoms
 
     monkeypatch.setattr(result_loading, "load_potential_atoms", read)
     result = SimpleNamespace(
         task_name="dos",
+        produces_potential=False,
+        potential_filename=potential.name,
         files={"potential": potential.name},
         directory=str(tmp_path),
         output_values={},

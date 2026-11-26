@@ -179,7 +179,7 @@ def test_visualize_launch_exception_is_visible_and_can_fallback(monkeypatch):
         if viewer == "vmd":
             raise OSError("Cannot launch requested viewer")
 
-    monkeypatch.setattr(visualization, "ase_view", fake_view)
+    monkeypatch.setattr("ase.visualize.view", fake_view)
     monkeypatch.setattr(
         visualization, "launch_ase_gui",
         lambda atoms: opened.append("ase"),

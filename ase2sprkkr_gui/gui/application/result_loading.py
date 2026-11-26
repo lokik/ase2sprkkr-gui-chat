@@ -96,7 +96,12 @@ class ResultImportCache:
             and previous.is_current()
         ):
             return previous
-        version = PotentialFileVersion.capture(path, require_digest=require_digest)
+        # Capture through the same observation owner as ResultLoader. A fresh
+        # version must invalidate any inconsistent cached stat, otherwise the
+        # loader could reuse atoms from a different version of this path.
+        version = self.loader.file_operations.capture_version(
+            path, require_digest=require_digest, refresh=True,
+        )
         self._versions[path] = version
         return version
 

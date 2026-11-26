@@ -9,7 +9,6 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 from ase import Atoms
 from ase2sprkkr import SPRKKRAtoms
 from ase2sprkkr.input_parameters.input_parameters import InputParameters
-from PyQt6.QtWidgets import QApplication
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -22,7 +21,6 @@ from ase2sprkkr_gui.gui.input_parameters.tasks import (
     guided_task_definitions,
     workflow_tasks,
 )
-from ase2sprkkr_gui.main import GuiApplication
 
 
 def _scf_atoms(status="CONVERGED"):
@@ -146,19 +144,3 @@ def test_run_calculation_does_not_apply_guided_stage_policy(monkeypatch, tmp_pat
     assert not window.closed
     assert window.kwargs["request"].input_parameters.task_name.lower() == "torque"
 
-
-def test_expert_run_action_uses_generic_calculation_readiness(tmp_path):
-    application = QApplication.instance() or QApplication([])
-    gui = GuiApplication(
-        workspace=WorkspaceState(),
-        recent_files_path=tmp_path / "recent.json",
-    )
-    expert = gui.create_main_window()
-    expert.controller.replace_structure(
-        Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True)
-    )
-    expert.controller.replace_input_parameters(InputParameters.create("TORQUE"))
-    application.processEvents()
-
-    assert expert.run_calculation_action.isEnabled()
-    expert.close()

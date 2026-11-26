@@ -125,6 +125,7 @@ def order_choices(
 
 def task_match_priority(row: TaskChoice, query: str) -> int | None:
     """Exact name, name prefix, name substring, then short info; never details."""
+    query = query.casefold()
     if not query:
         return 0
     name = row.name.casefold()

@@ -117,16 +117,18 @@ def test_action_shortcuts_follow_typed_commands_and_hide_on_narrow_cards():
     ))
     buttons = widget.findChildren(QPushButton)
     assert len(buttons) == len(commands)
+    widget.show()
+    app.processEvents()
     for button, (_command, title, shortcut) in zip(buttons, commands):
         assert button.accessibleName() == title
         assert button.shortcut().toString() == shortcut
         hint = button.findChild(QLabel, "workflowShortcutHint")
         assert hint is not None and hint.text() == shortcut
         assert "Shortcut: " + shortcut in button.toolTip()
-        button.resize(600, 80)
+        button.setFixedWidth(600)
         app.processEvents()
         assert not hint.isHidden()
-        button.resize(180, 80)
+        button.setFixedWidth(180)
         app.processEvents()
         assert hint.isHidden()
     widget.close()
