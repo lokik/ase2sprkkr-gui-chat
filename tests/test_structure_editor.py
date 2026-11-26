@@ -676,7 +676,8 @@ def test_overview_uses_indented_aligned_two_column_facts():
     assert overview.info_columns.direction() == expected_direction
     assert overview.info_columns.spacing() == 40
     assert "Type:" in overview.main.text()
-    assert "Cell (Å):" in overview.symmetry.text()
+    assert "Cell (Å):" in overview.host_facts.text()
+    assert "Cell (Å):" not in overview.symmetry.text()
     assert "Cluster symmetry:" in overview.symmetry.text()
     assert "<table" in overview.host_facts.text()
     assert "Space group:" in overview.host_facts.text()
@@ -770,7 +771,7 @@ def test_lattice_host_potential_label_and_cell_parameters_rebase_cluster():
     fractions = old_host.get_scaled_positions(wrap=False).copy()
     dialog = _dialog(cluster)
     dialog.tabs.setCurrentIndex(3)
-    assert "HOST POTENTIAL" in dialog.lattice_note.text()
+    assert "HOST POTENTIAL" in dialog.footer_hint.text()
     assert "Host potential" in dialog.lattice_group.title()
     dialog.cell_parameter_spins["a"].setValue(3.25)
     candidate = dialog._candidate()
