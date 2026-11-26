@@ -141,8 +141,8 @@ class SprkkrRunWindow(RunMonitorWindow):
         # Ownership and execution/project context are established by the caller
         # before ``start()``. This prevents a fast local submit from publishing a
         # run id before the application owns this top-level window.
-        parameters = getattr(request, "input_parameters", None)
-        task_name = str(getattr(parameters, "task_name", ""))
+        parameters = request.input_parameters
+        task_name = parameters.task_name
         super().__init__(
             worker_factory,
             parent,

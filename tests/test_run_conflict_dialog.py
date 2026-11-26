@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from ase import Atoms
+from ase2sprkkr import InputParameters
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
 from kkrunner import RunManager, RunState, RunStore
@@ -13,6 +15,7 @@ from kkrunner.files import FileEntry, FileManifest
 from kkrunner.runs import DuplicateSubmissionError
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import RunCancellation
+from ase2sprkkr_gui.gui.application.workspace_controller import CalculationRequest
 from ase2sprkkr_gui.gui.dialogs import run_calculation as calculation
 from ase2sprkkr_gui.gui.dialogs.run_conflict import SubmissionConflictDialog
 
@@ -35,9 +38,16 @@ def _conflict(tmp_path, *, count=1):
     return manager, DuplicateSubmissionError(proposed, tuple(active))
 
 
+def _request(tmp_path):
+    return CalculationRequest(
+        atoms=Atoms("Fe"), input_parameters=InputParameters.for_task("DOS"),
+        directory=str(tmp_path), structure_id=None, state_id=None,
+    )
+
+
 def _window(tmp_path, manager, conflict):
     window = calculation.SprkkrRunWindow(
-        SimpleNamespace(directory=str(tmp_path))
+        _request(tmp_path)
     )
     window._execution_manager = manager
     dialog = SubmissionConflictDialog(conflict, parent=window)
@@ -303,7 +313,7 @@ def test_destructive_action_cancel_confirmation_changes_nothing(monkeypatch, tmp
 def test_cancel_from_conflict_dialog_returns_to_run_setup(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     _manager, conflict = _conflict(tmp_path)
-    window = calculation.SprkkrRunWindow(SimpleNamespace(directory=str(tmp_path)))
+    window = calculation.SprkkrRunWindow(_request(tmp_path))
     returned = []
     monkeypatch.setattr(window, "_return_to_setup", lambda: returned.append(True))
     monkeypatch.setattr(
@@ -319,7 +329,7 @@ def test_cancel_from_conflict_dialog_returns_to_run_setup(monkeypatch, tmp_path)
 def test_calculate_action_launches_only_after_resolution(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     _manager, conflict = _conflict(tmp_path)
-    window = calculation.SprkkrRunWindow(SimpleNamespace(directory=str(tmp_path)))
+    window = calculation.SprkkrRunWindow(_request(tmp_path))
     started = []
     monkeypatch.setattr(window, "_retry_after_conflict", lambda: started.append(True))
 
@@ -401,7 +411,7 @@ def test_same_id_conflicts_select_independently(tmp_path, monkeypatch):
 def test_submission_thread_end_cannot_destroy_open_conflict_dialog(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     _manager, conflict = _conflict(tmp_path)
-    window = calculation.SprkkrRunWindow(SimpleNamespace(directory=str(tmp_path)))
+    window = calculation.SprkkrRunWindow(_request(tmp_path))
     window.show()
     window._close_requested = True
     restarted = []
@@ -432,7 +442,7 @@ def test_submission_thread_end_cannot_destroy_open_conflict_dialog(monkeypatch, 
 def test_shutdown_closes_idle_conflict_dialog_without_reopening_setup(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     _manager, conflict = _conflict(tmp_path)
-    window = calculation.SprkkrRunWindow(SimpleNamespace(directory=str(tmp_path)))
+    window = calculation.SprkkrRunWindow(_request(tmp_path))
     returned = []
     monkeypatch.setattr(window, "_return_to_setup", lambda: returned.append(True))
 
@@ -457,7 +467,7 @@ def test_shutdown_waits_for_current_conflict_action_and_closes_dialog(monkeypatc
     app = QApplication.instance() or QApplication([])
     manager, conflict = _conflict(tmp_path)
     parent = QWidget()
-    window = calculation.SprkkrRunWindow(SimpleNamespace(directory=str(tmp_path)))
+    window = calculation.SprkkrRunWindow(_request(tmp_path))
     window._execution_manager = manager
     calls = []
 
