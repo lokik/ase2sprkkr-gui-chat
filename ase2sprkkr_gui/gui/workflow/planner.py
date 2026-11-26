@@ -403,13 +403,10 @@ class WorkflowPlanner:
                 scf = definition.workflow.role is WorkflowTaskRole.SCF
             else:
                 title = f"Calculate {name}"
-                try:
-                    definition = InputParameters.input_parameters_registry.definition_for_task(
-                        InputParameters.task_registry[name]
-                    )
-                    description = getattr(definition, "info", "") or "Configure a native SPR-KKR task"
-                except (AttributeError, KeyError, ValueError):
-                    description = "Configure a native SPR-KKR task"
+                definition = InputParameters.input_parameters_registry.definition_for_task(
+                    InputParameters.task_registry[name]
+                )
+                description = definition.info() or "Configure a native SPR-KKR task"
                 scf = name == "SCF"
             if scf:
                 if progress.can_continue:

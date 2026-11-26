@@ -314,6 +314,23 @@ def test_registry_presentation_is_used_without_local_task_catalogue():
     assert action.description == definition.workflow.description
 
 
+def test_preferred_native_task_without_guided_editor_uses_native_help():
+    from types import SimpleNamespace
+    from ase2sprkkr import InputParameters
+
+    task = InputParameters.task_registry["CHILANDAU"]
+    definition = InputParameters.input_parameters_registry.definition_for_task(task)
+    settings = SimpleNamespace(effective_preferred_tasks=lambda: ("CHILANDAU",))
+    plan = WorkflowPlanner(settings=settings).for_workspace(
+        Workspace(atoms=FormulaAtoms(), converged=True)
+    )
+    actions = plan.group(WorkflowSection.CALCULATE).actions
+    action, = actions
+    assert action.command == RunTask("chilandau")
+    assert action.description == definition.info()
+    assert "<bound method" not in action.description
+
+
 def test_scf_workflow_behavior_is_declared_by_semantic_role():
     definition = guided_task_definition("scf")
     assert definition.workflow.role is WorkflowTaskRole.SCF
