@@ -9,6 +9,15 @@ import textwrap
 def test_workflow_import_does_not_construct_settings_or_viewer_registry():
     code = textwrap.dedent("""
         import sys
+        import traceback
+
+        # Preserve the startup constraint and identify the first importer
+        # on ASE/SciPy versions with a different transitive import graph.
+        def trace_integrate(event, args):
+            if event == "import" and args[0] == "scipy.integrate":
+                traceback.print_stack(file=sys.stderr)
+
+        sys.addaudithook(trace_integrate)
         from ase2sprkkr_gui.gui.application.viewers import viewer_unavailability
 
         assert "ase.visualize.viewers" not in sys.modules

@@ -239,7 +239,7 @@ def test_invalid_expert_text_blocks_ok_until_corrected(app):
 
 
 @pytest.mark.filterwarnings(
-    r"ignore:ENERGY\.NE selects BSF-(EK|KK), but BSF-(EK|KK) was requested:"
+    r"ignore:ENERGY\.NE selects BSF-(EK|KK), although BSF-(EK|KK) was requested:"
     r"ase2sprkkr.common.warnings.DataValidityWarning"
 )
 def test_expert_numeric_error_is_inline_and_keeps_model(app):
@@ -249,7 +249,7 @@ def test_expert_numeric_error_is_inline_and_keeps_model(app):
     d = InputParametersDialog(p)
     item, _ = tree_editor(d, 'NE')
     editor = d.tree_editor.tree.itemWidget(item.child(0), 2)
-    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-KK, but BSF-EK was requested"):
+    with pytest.warns(DataValidityWarning, match=r"ENERGY\.NE selects BSF-KK, although BSF-EK was requested"):
         editor.setValue(1)
     assert '[0]:' in d.tree_editor.error_text
     assert d.parameters().ENERGY.NE()[0] == 200
