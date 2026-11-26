@@ -57,21 +57,10 @@ def task_choices(
         status, reason = next(
             (item for item in outcomes if item[0] == "Yes"), outcomes[0]
         )
-        try:
-            definition = InputParameters.input_parameters_registry.definition_for_task(task)
-            # Backend info is the short summary; description is detailed help.
-            info = getattr(definition, "info", None)
-            details = getattr(definition, "description", None)
-            if callable(info):
-                info = info()
-            if callable(details):
-                details = details()
-            if not isinstance(info, str):
-                info = ""
-            if not isinstance(details, str):
-                details = ""
-        except (AttributeError, KeyError, ValueError):
-            info, details = "", ""
+        definition = InputParameters.input_parameters_registry.definition_for_task(task)
+        # Backend info is the short summary; description is detailed help.
+        info = definition.info()
+        details = definition.description()
         if not info.strip() and details.strip():
             # Only a short lead sentence when no dedicated summary exists.
             info = " ".join(details.split()).split(". ", 1)[0].rstrip(".") + "."

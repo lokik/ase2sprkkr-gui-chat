@@ -100,8 +100,8 @@ def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatc
             return tuple(self)
 
     schema = SimpleNamespace(
-        info="Short purpose of the calculation.",
-        description="Long technical help about this calculation. More limitations.",
+        info=lambda: "Short purpose of the calculation.",
+        description=lambda: "Long technical help about this calculation. More limitations.",
     )
     monkeypatch.setattr(task_metadata.InputParameters, "task_registry", Registry(TEST=task))
     monkeypatch.setattr(
@@ -113,8 +113,8 @@ def test_info_column_uses_short_summary_and_full_help_only_in_tooltip(monkeypatc
     chooser = TaskChooserDialog(object())
     info_col = chooser._fields.index("info")
     info_item = chooser.table.item(0, info_col)
-    assert info_item.text() == schema.info
-    assert info_item.toolTip() == schema.description
+    assert info_item.text() == "Short purpose of the calculation."
+    assert info_item.toolTip() == "Long technical help about this calculation. More limitations."
     chooser.search.setText("limitations")
     assert _names(chooser.table) == []  # Full help is tooltip-only.
     chooser.search.setText("purpose")
@@ -133,7 +133,7 @@ def test_info_falls_back_to_first_sentence_when_short_summary_is_missing(monkeyp
             return tuple(self)
 
     schema = SimpleNamespace(
-        info="", description="An informative first sentence. Extended instructions.",
+        info=lambda: "", description=lambda: "An informative first sentence. Extended instructions.",
     )
     monkeypatch.setattr(task_metadata.InputParameters, "task_registry", Registry(TEST=task))
     monkeypatch.setattr(
@@ -143,7 +143,7 @@ def test_info_falls_back_to_first_sentence_when_short_summary_is_missing(monkeyp
     rows = task_metadata.task_choices()
     assert len(rows) == 1
     assert rows[0].info == "An informative first sentence."
-    assert rows[0].details == schema.description
+    assert rows[0].details == "An informative first sentence. Extended instructions."
 
 
 def test_applicability_is_not_conflated_with_execution_readiness():
