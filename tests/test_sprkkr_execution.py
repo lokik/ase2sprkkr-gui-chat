@@ -641,15 +641,18 @@ def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_lau
 
 
 def test_run_monitor_forwards_worker_submit_signal_on_gui_thread(tmp_path):
+    from dataclasses import replace
+    from ase2sprkkr import InputParameters
     from PyQt6.QtWidgets import QApplication
     from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
 
     app = QApplication.instance() or QApplication([])
     observed = []
     window = SprkkrRunWindow(
-        _request(tmp_path),
+        replace(_request(tmp_path), input_parameters=InputParameters.for_task("DOS")),
         on_submitted=lambda path: observed.append(path),
     )
+    assert window._tabs.tabText(0) == "INFO"
     worker = window._worker_factory(window._cancellation)
     worker.submitted.emit(str(tmp_path / "Fe_SCF.inp"))
     app.processEvents()

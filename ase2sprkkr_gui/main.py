@@ -352,7 +352,7 @@ class GuiApplication(QObject):
 
     def _track_launch_monitor(self, monitor_window: SprkkrRunWindow) -> None:
         """Capture execution/project context before the monitor starts its worker."""
-        project_id = getattr(monitor_window, "launch_project_id", self.controller.active_project_id)
+        project_id = monitor_window.launch_project_id
         manager = self.session_manager if project_id is None else self.execution_manager
         monitor_window.set_execution_context(manager, project_id=project_id)
         monitor_window.conflictJobChanged.connect(self.persistent_jobs.job_changed)

@@ -121,6 +121,7 @@ def test_launch_captures_active_project_before_later_selection_change(tmp_path):
     )
     gui.set_active_project(launch_project.id)
     monitor_window = _LaunchWindow()
+    monitor_window.launch_project_id = launch_project.id
 
     gui._track_launch_monitor(monitor_window)
     captured_manager, captured_project = monitor_window.execution_context
