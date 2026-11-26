@@ -33,6 +33,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ase2sprkkr.potentials.potentials import PeriodicPotential
+from ase2sprkkr.sprkkr.embedding import host_atoms
 from ase2sprkkr_gui.ase.embedding import (
     EmbeddingDraft,
     HostSite,
@@ -644,7 +646,7 @@ class BuildEmbeddingDialog(QDialog):
         return tuple(cell)
 
     def _cell_offsets(self):
-        atoms = getattr(self.draft.geometry_host, "atoms", self.draft.geometry_host)
+        atoms = host_atoms(self.draft.geometry_host)
         return cell_ring_offsets(np.asarray(atoms.cell)[list(self._plane_axes())],
                                  self.cell_rings.value())
 
@@ -1103,7 +1105,7 @@ class BuildEmbeddingDialog(QDialog):
         )
         included = len(self.draft.entries)
         changed = sum(self._is_modified(site) for site in self.draft.entries)
-        has_host_pot = hasattr(self.draft.host, "LATTICE")
+        has_host_pot = isinstance(self.draft.host, PeriodicPotential)
         suffix = "" if has_host_pot else (
             "  •  No host POTFIL: cluster geometry can be built but native "
             "CLUPOT calculations require a host potential."
@@ -1145,15 +1147,15 @@ class BuildEmbeddingDialog(QDialog):
     def _selected_cell_corners(self):
         """Reference cell outline, with no leads or vacuum in the 2D detail."""
         origin, cell = embedding_cell(self.draft.geometry_host)
-        atoms = getattr(self.draft.geometry_host, "atoms", self.draft.geometry_host)
+        atoms = host_atoms(self.draft.geometry_host)
         shift = np.asarray(self._selected_cell) @ np.asarray(atoms.cell)[:self.draft.dimension]
         return corner_indices.T @ cell + origin + shift
 
     def _draw_sites(self, preview, sites, *, detail=False):
         points, colors, sizes, outlines, widths = [], [], [], [], []
         host = self.draft.geometry_host
-        atoms = getattr(host, 'atoms', host)
-        potential = host if hasattr(host, 'SCF_INFO') else None
+        atoms = host_atoms(host)
+        potential = host if isinstance(host, PeriodicPotential) else None
         factors = marker_areas(atoms, 1.0, potential=potential)
         for site in sites:
             entry = self.draft.entries.get(site)
@@ -1192,10 +1194,10 @@ class BuildEmbeddingDialog(QDialog):
         Native 2D lead sites are visible in the whole-structure view but are
         excluded from the transition-region view and the editable cell.
         """
-        host_atoms = getattr(self.draft.geometry_host, "atoms", self.draft.geometry_host)
+        atoms = host_atoms(self.draft.geometry_host)
         indices = (
             sorted(self.draft.allowed) if allowed_only
-            else range(len(host_atoms))
+            else range(len(atoms))
         )
         return tuple(HostSite(i, cell) for cell in self._visible_cells(whole=True) for i in indices)
 
@@ -1248,7 +1250,7 @@ class BuildEmbeddingDialog(QDialog):
                 neighbour[axes[0]] += x
                 neighbour[axes[1]] += y
                 extra_cells.add(tuple(neighbour))
-        atoms = getattr(self.draft.geometry_host, "atoms", self.draft.geometry_host)
+        atoms = host_atoms(self.draft.geometry_host)
         indices = (sorted(self.draft.allowed)
                    if self.draft.dimension == 2 and self.global_scope.currentData() == "layer"
                    else range(len(atoms)))

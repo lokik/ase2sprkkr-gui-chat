@@ -148,6 +148,22 @@ def test_host_facts_use_columns_when_wide_and_stack_when_narrow(application):
     widget.close()
 
 
+def test_geometric_embedding_host_has_preview_without_native_potential(application):
+    host = bulk("Fe", "bcc", a=2.87, cubic=True)
+    draft = EmbeddingDraft(host)
+    draft.include([draft.center])
+    cluster = draft.to_atoms()
+    widget = StructureOverviewWidget()
+    widget.set_structure(cluster, kind="0d")
+    assert not widget.host_heading.isHidden()
+    assert "SCF status:" not in widget.host_geometry.text()
+    widget.host_radio.setChecked(True)
+    assert len(widget.preview._positions) == len(host)
+    assert cluster.embedding_host is host
+    assert not isinstance(host, SPRKKRAtoms)
+    widget.close()
+
+
 def test_simple_structure_hides_host_cluster_selector(application):
     widget = StructureOverviewWidget()
     widget.set_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True))

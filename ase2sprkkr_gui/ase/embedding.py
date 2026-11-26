@@ -146,7 +146,7 @@ def embedding_cell(host):
     origin = np.zeros(3)
     if host_dimension(host) == 3:
         return origin, cell
-    regions = getattr(atoms, "regions", {})
+    regions = atoms.regions if isinstance(atoms, SPRKKRAtoms) else {}
     if all(name in regions for name in ("left", "central", "right")):
         origin = np.asarray(regions["left"].cell[2], dtype=float).copy()
         cell[2] = regions["central"].cell[2]
@@ -473,8 +473,7 @@ def embedding_source(atoms):
         raise ValueError("Load a host structure first")
     if isinstance(atoms, SPRKKRAtoms) and atoms.embedding_host is not None:
         return atoms.embedding_host, atoms
-    has_potential = getattr(atoms, "has_potential", None)
-    if callable(has_potential) and has_potential():
+    if isinstance(atoms, SPRKKRAtoms) and atoms.has_potential():
         return atoms.potential, None
     return atoms, None
 
@@ -489,8 +488,7 @@ def prepare_embedding_source(atoms):
     host, cluster = embedding_source(atoms)
     if isinstance(host, Potential):
         return atoms
-    has_potential = getattr(host, "has_potential", None)
-    if callable(has_potential) and has_potential():
+    if isinstance(host, SPRKKRAtoms) and host.has_potential():
         potential = host.potential
     else:
         detached = copy_for_edit(host)
