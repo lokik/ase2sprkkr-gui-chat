@@ -298,7 +298,7 @@ class ProjectBrowserDialog(QWidget):
             # A subsequent show/paint will restart the timer.
             self._initial_paint_seen = False
             return
-        future = self._project_executor.submit(self._repository.projects)
+        future = self._project_executor.submit(self._repository.refresh)
         self._initial_future = future
         signals = self._repository_signals
 
