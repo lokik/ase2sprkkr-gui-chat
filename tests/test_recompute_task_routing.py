@@ -25,6 +25,7 @@ def _controller(record, replacements):
         atoms=Atoms("Fe"),
         input_parameters=InputParameters.create("SCF"),
         replace_input_parameters=replace,
+        reusable_potential_version=lambda: None,
     )
 
 
@@ -49,6 +50,7 @@ def _assert_detached_request(calls, controller, recent_files, parent, edited,
     assert request.state_id == controller.state_id
     assert request.directory == (controller.directory or "")
     assert request.restart_scf == controller.restarted
+    assert request.reusable_potential_version is None
     assert request.input_parameters is not edited
     assert request.input_parameters is not controller.input_parameters
     assert request.input_parameters.task_name.lower() == task
