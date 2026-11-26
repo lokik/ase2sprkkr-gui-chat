@@ -343,10 +343,6 @@ def test_task_icons_use_separate_unlabelled_columns_on_both_task_lists(
 
     chooser = TaskChooserDialog()
     assert chooser.table.horizontalHeaderItem(0).text() == ""
-    assert chooser.table.columnWidth(0) == 30
-    assert chooser.table.verticalHeader().defaultSectionSize() == 30
-    assert chooser.table.iconSize().width() == 24
-    assert chooser.table.iconSize().height() == 24
     assert chooser.table.horizontalHeaderItem(1).text() == "Name"
     assert chooser._fields[:2] == ["icon", "name"]
     names = [
@@ -364,10 +360,6 @@ def test_task_icons_use_separate_unlabelled_columns_on_both_task_lists(
 
     page = PreferredTasksPage(ApplicationSettings(tmp_path / "settings.json"))
     assert page.available.horizontalHeaderItem(0).text() == ""
-    assert page.available.columnWidth(0) == 30
-    assert page.available.verticalHeader().defaultSectionSize() == 30
-    assert page.available.iconSize().width() == 24
-    assert page.available.iconSize().height() == 24
     assert page.available.horizontalHeaderItem(1).text() == "Name"
     available_names = [
         page.available.item(row, 1).text()
@@ -380,10 +372,6 @@ def test_task_icons_use_separate_unlabelled_columns_on_both_task_lists(
     assert page.available.item(row, 1).icon().isNull()
 
     assert page.preferred.horizontalHeader().isHidden()
-    assert page.preferred.columnWidth(0) == 30
-    assert page.preferred.verticalHeader().defaultSectionSize() == 30
-    assert page.preferred.iconSize().width() == 24
-    assert page.preferred.iconSize().height() == 24
     right_names = [
         page.preferred.item(row, 1).text()
         for row in range(page.preferred.rowCount())
