@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ase2sprkkr.sprkkr.projects import default_project_repository
 
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ from ase2sprkkr_gui.gui.application.result_loading import (
     load_result as interpret_result,
 )
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
+from ase2sprkkr_gui.gui.application.result_window_session import (
+    load_window_session, save_window_session,
+)
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import (
     WorkspaceConflict,
@@ -38,6 +42,9 @@ from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
 from ase2sprkkr_gui.gui.flows import files as file_flows
 from ase2sprkkr_gui.gui.presenters.result_actions import ResultActionsPresenter
+
+
+logger = logging.getLogger(__name__)
 
 
 class GuiApplication(QObject):
@@ -69,6 +76,7 @@ class GuiApplication(QObject):
             Path(settings_path) if settings_path is not None else None
         )
         self.settings.load()
+        self._result_session_path = self.settings.path.with_suffix(".result-windows.json")
         self.projects = (
             project_repository
             if project_repository is not None
@@ -238,6 +246,45 @@ class GuiApplication(QObject):
                 self._result_window_destroyed(key, target)
         )
         self._show_window(result_window)
+
+    def _save_result_windows(self) -> None:
+        """Snapshot visible result windows before any shutdown closes them."""
+        references = list(self.persistent_jobs_controller.open_window_references())
+        for result_id, window in self._result_windows.items():
+            if not window.isVisible():
+                continue
+            try:
+                record = self.controller.result_store.result(result_id)
+            except KeyError:
+                continue
+            if record.persistent_ref is not None:
+                references.append(("job", str(record.persistent_ref)))
+            elif record.output_path is not None:
+                references.append(("output", str(record.output_path)))
+        try:
+            save_window_session(self._result_session_path, references)
+        except OSError:
+            logger.exception("Could not save open result windows")
+
+    def restore_result_windows(self) -> None:
+        """Reopen saved results or observe existing jobs; never launch a new job."""
+        parent = self.create_workflow_window()
+        for kind, value in load_window_session(self._result_session_path):
+            try:
+                if kind == "job":
+                    if not self.persistent_jobs_controller.restore_window(value, parent):
+                        logger.warning("Cannot restore result window for job %s", value)
+                elif Path(value).is_file() and file_flows.load_output(
+                    self.controller, self.recent_files, value, parent,
+                ):
+                    record = self.controller.result_store.result_for_external_source(value)
+                    if record is not None:
+                        self._show_result_window(record.id)
+                else:
+                    logger.warning("Cannot restore result window for output %s", value)
+            except Exception:
+                # One missing or unreadable result must not prevent restoring others.
+                logger.exception("Could not restore result window for %s", value)
 
     def _result_window_destroyed(
         self, result_id: int, window: CompletedResultWindow,
@@ -509,6 +556,7 @@ class GuiApplication(QObject):
         try:
             if not self._confirm_unsaved_work():
                 return False
+            self._save_result_windows()
             self._exit_approved = True
             self._close_project_browser()
             if self._workflow_window is not None:
@@ -616,6 +664,7 @@ def main(argv: list[str] | None = None) -> int:
     gui = GuiApplication(parent=app)
     gui.show_workflow_window()
     gui.open_startup_selection(kind, file_path)
+    gui.restore_result_windows()
     def shutdown_from_console() -> None:
         if (gui.controller.has_unsaved_structure
                 or gui.controller.has_unsaved_input_parameters):

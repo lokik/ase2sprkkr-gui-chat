@@ -657,6 +657,32 @@ class PersistentJobsController(QObject):
             return
         self._create_attached_monitor(job)
 
+    def open_window_references(self) -> tuple[tuple[str, str], ...]:
+        """Stable identities for currently visible result and monitor windows."""
+        references = []
+        registered = set(self._monitor_windows.values())
+        for windows in (self._result_windows, self._monitor_windows):
+            for job_id, window in windows.items():
+                if window.isVisible():
+                    references.append(("job", job_id))
+        # Unassigned finished runs have no persistent ID. Their saved output
+        # is sufficient to reconstruct an ordinary completed result window.
+        for window in self._launch_monitor_windows - registered:
+            if window.isVisible() and window.completed_output_path is not None:
+                references.append(("output", str(window.completed_output_path)))
+        return tuple(dict.fromkeys(references))
+
+    def restore_window(self, job_id: str, parent: QWidget) -> bool:
+        """Route a saved window to the existing result or attachment workflow."""
+        job = self._source.job(job_id)
+        if _can_load_result(job, self._source):
+            self.open_result_window(job_id, parent)
+            return True
+        if job is not None and job.attachable and self._source.supports_attach:
+            self.open_monitor_window(job_id)
+            return True
+        return False
+
     def open_result_window(self, job_id: str, parent: QWidget) -> None:
         """Show completed result tabs using the existing monitor or saved files."""
         job_id = str(job_id)
