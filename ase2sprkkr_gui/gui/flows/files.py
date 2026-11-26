@@ -9,7 +9,8 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from ase2sprkkr_gui.ase.io import read as ase_read, write as ase_write
-from ase2sprkkr import InputParameters, PeriodicPotential, Potential
+from ase2sprkkr import InputParameters, PeriodicPotential, Potential, SPRKKRAtoms
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_ARRAY, EMBEDDING_HOST, host_atoms
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from ase2sprkkr_gui.ase.copy import copy_for_edit
@@ -133,18 +134,15 @@ def load_structure(
 
 def _current_host_potential(controller: WorkspaceController):
     """Use only a genuine periodic host Potential, not a ClusterPotential."""
-    from ase2sprkkr import Potential
-
     atoms = controller.atoms
     if atoms is None:
         return None
-    embedded_host = getattr(atoms, "embedding_host", None)
-    if isinstance(embedded_host, Potential):
+    embedded_host = atoms.info.get(EMBEDDING_HOST)
+    if isinstance(embedded_host, PeriodicPotential):
         return embedded_host
-    checker = getattr(atoms, "has_potential", None)
-    if callable(checker) and checker():
+    if isinstance(atoms, SPRKKRAtoms) and atoms.has_potential():
         potential = atoms.potential
-        return potential if isinstance(potential, Potential) else None
+        return potential if isinstance(potential, PeriodicPotential) else None
     return None
 
 
@@ -241,7 +239,7 @@ def load_embedded_cluster(
 
     # A freshly parsed CLUPOT has no GUI centre. Assign its geometrical
     # centre on load; metadata stays on these cluster atoms, not on the host.
-    if "sprkkr_embedding" in getattr(cluster, "arrays", {}):
+    if EMBEDDING_ARRAY in cluster.arrays:
         from ase2sprkkr_gui.ase.embedding import reset_cluster_center
         reset_cluster_center(cluster)
 
@@ -782,7 +780,7 @@ def save_structure(
     # Never fall back to a generic ASE writer for an embedded structure:
     # it cannot preserve the original-site/cell mapping and host reference.
     # save_embedded_cluster diagnoses a missing host rather than losing data.
-    if "sprkkr_embedding" in getattr(atoms, "arrays", {}):
+    if EMBEDDING_ARRAY in atoms.arrays:
         return save_embedded_cluster(controller, recent_files, parent)
     from ase.io.formats import ioformats
 
@@ -831,7 +829,7 @@ def save_embedded_cluster(
     its original host object in the workspace.
     """
     atoms = controller.atoms
-    source_host = getattr(atoms, "embedding_host", None)
+    source_host = atoms.info.get(EMBEDDING_HOST) if atoms is not None else None
     if source_host is None:
         QMessageBox.warning(
             parent, "Cannot Save Embedded Cluster",
@@ -870,7 +868,7 @@ def save_embedded_cluster(
         from ase2sprkkr import ClusterPotential
 
         host_potential = (
-            source_host if isinstance(source_host, Potential)
+            source_host if isinstance(source_host, PeriodicPotential)
             else Potential.from_atoms(source_host)
         )
         if host_potential is source_host:
@@ -918,7 +916,7 @@ def ensure_embedded_host_potential(
     if controller.can_run_embedding():
         return True
     cluster = controller.atoms
-    old_host = getattr(cluster, "embedding_host", None)
+    old_host = cluster.info.get(EMBEDDING_HOST) if cluster is not None else None
     if old_host is None:
         QMessageBox.warning(parent, "Host Potential Required",
                             "The embedded structure has no host geometry.")
@@ -941,7 +939,9 @@ def ensure_embedded_host_potential(
             QMessageBox.warning(parent, "Cannot Load Host Potential", str(exc))
             return False
     try:
-        original_atoms = getattr(old_host, "atoms", old_host)
+        if not isinstance(host_potential, PeriodicPotential):
+            raise TypeError("Select a periodic host POTFIL, not a CLUPOT.")
+        original_atoms = host_atoms(old_host)
         replacement_atoms = host_potential.atoms
         if (len(original_atoms) != len(replacement_atoms)
                 or not np.allclose(original_atoms.cell, replacement_atoms.cell,
@@ -1024,7 +1024,7 @@ def create_host_potential(
     """
     atoms = controller.atoms
     source = controller.unresolved_cluster_path
-    source_host = getattr(atoms, "embedding_host", None)
+    source_host = atoms.info.get(EMBEDDING_HOST) if atoms is not None else None
     if source_host is None and source is not None:
         from ase2sprkkr_gui.gui.flows.structure_candidates import create_structure_candidate
         from ase2sprkkr_gui.gui.dialogs.structures.spacegroup_selector import select_spacegroup
