@@ -387,7 +387,6 @@ def test_workspace_signals_refresh_semantic_plan(tmp_path):
 
 
 def test_python_bulk_keeps_embedding_action_reachable_in_small_window(tmp_path, monkeypatch):
-    from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QPushButton, QScrollArea
 
     from ase2sprkkr_gui.gui.application.shell_history import PythonReplHistory, ShellHistory
@@ -405,10 +404,15 @@ def test_python_bulk_keeps_embedding_action_reachable_in_small_window(tmp_path, 
             history=ShellHistory(tmp_path / "shell.json"),
             python_history=PythonReplHistory(tmp_path / "python_history"),
         )
-        QTimer.singleShot(0, lambda: dialog.console.process_input(
-            "use(bulk('Fe', 'bcc', a=2.87, cubic=True))"
-        ))
-        assert dialog.exec() == dialog.DialogCode.Accepted
+        dialog.show()
+        dialog.console.process_input("use(bulk('Fe', 'bcc', a=2.87, cubic=True))")
+        # Qonsole evaluates on a queued GUI connection. Dispatch pending
+        # events without entering an unbounded modal loop on failure.
+        for _ in range(10):
+            application.processEvents()
+            if dialog.result() == dialog.DialogCode.Accepted:
+                break
+        assert dialog.result() == dialog.DialogCode.Accepted
         return dialog.candidate
 
     monkeypatch.setattr(shell, "select_shell_structure", select_from_python)
@@ -1296,7 +1300,8 @@ def test_action_cards_are_equal_height_across_both_guided_columns(tmp_path):
     window.resize(1400, 800)
     application.processEvents()
     assert len(card_heights()) == 1
-    window.close()
+    # The shared teardown destroys the window without opening Unsaved Work.
+    # Interactive shutdown is covered by the dedicated exit tests.
 
 
 def test_introductory_cluster_action_appears_without_structure_and_can_be_hidden(
