@@ -37,8 +37,7 @@ PREVIEW_SITE_STYLE = {
 
 
 def _spacegroup_kinds_from_atoms(atoms: Any, count: int) -> list[Any]:
-    arrays = getattr(atoms, 'arrays', {})
-    kinds = arrays.get('spacegroup_kinds')
+    kinds = atoms.arrays.get('spacegroup_kinds')
     if kinds is None:
         symbols = list(atoms.get_chemical_symbols())
         if len(symbols) == count:

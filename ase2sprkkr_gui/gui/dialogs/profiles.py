@@ -141,7 +141,7 @@ class ProfileSelectionDialog(QDialog):
 
         self.dataset_edit: QLineEdit | None = None
         self.adsi_edit: QLineEdit | None = None
-        if input_parameters is not None and hasattr(input_parameters, "CONTROL"):
+        if input_parameters is not None and "CONTROL" in input_parameters:
             identifiers = QGroupBox("Calculation identification", self)
             identifier_form = QFormLayout(identifiers)
 
@@ -213,7 +213,6 @@ class ProfileSelectionDialog(QDialog):
         project_row = QHBoxLayout(self.project_box)
         self.project_selector = QComboBox(self.project_box)
         self._load_projects(active_project_id)
-        self.project_selector.currentIndexChanged.connect(self._project_changed)
         project_row.addWidget(self.project_selector, 1)
         self.new_project_button = QPushButton("New…", self.project_box)
         self.new_project_button.setToolTip(
@@ -254,6 +253,7 @@ class ProfileSelectionDialog(QDialog):
         self.directory_edit.textChanged.connect(self._refresh_directory_assignment)
         layout.addWidget(directory_box)
         directory_box.setVisible(require_directory)
+        self.project_selector.currentIndexChanged.connect(self._project_changed)
         self._project_changed()
         layout.addStretch(1)
 
@@ -311,12 +311,10 @@ class ProfileSelectionDialog(QDialog):
             if self._explicit_directory is not None
             else project_directory or self._fallback_directory
         )
-        if hasattr(self, "directory_edit") and self.directory_edit.text() != desired:
+        if self.directory_edit.text() != desired:
             self.directory_edit.setText(desired)
-        if hasattr(self, "edit_project_button"):
-            self.edit_project_button.setEnabled(project is not None)
-        if hasattr(self, "assign_directory_checkbox"):
-            self._refresh_directory_assignment()
+        self.edit_project_button.setEnabled(project is not None)
+        self._refresh_directory_assignment()
 
     def _refresh_directory_assignment(self, _text: str = "") -> None:
         """Only allow assigning a directory when it would change the project."""

@@ -102,8 +102,7 @@ class StructureState:
     @property
     def potential(self) -> Any | None:
         atoms = self.atoms
-        checker = getattr(atoms, "has_potential", None)
-        if not callable(checker) or not checker():
+        if not isinstance(atoms, SPRKKRAtoms) or not atoms.has_potential():
             return None
         return atoms.potential
 
@@ -140,8 +139,7 @@ class StructureState:
         atoms = self.atoms
         if atoms is None:
             return False
-        checker = getattr(atoms, "sprkkr_is_scf_converged", None)
-        return bool(callable(checker) and checker())
+        return isinstance(atoms, SPRKKRAtoms) and atoms.sprkkr_is_scf_converged()
 
     def has_vacuum_sites(self) -> bool:
         if self.atoms is None:
@@ -149,7 +147,7 @@ class StructureState:
         if isinstance(self.atoms, SPRKKRAtoms):
             return any(site.is_vacuum() for site in self.atoms.sites)
         return any(
-            int(number) == 0 for number in getattr(self.atoms, "numbers", ())
+            int(number) == 0 for number in self.atoms.numbers
         )
 
 

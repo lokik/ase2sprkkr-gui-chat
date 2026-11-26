@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ase import Atoms
+from ase2sprkkr import SPRKKRAtoms
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ase2sprkkr_gui.ase.copy import copy_for_edit
@@ -38,8 +39,7 @@ _KEEP_DIRECTORY = object()
 
 def _atoms_has_potential(atoms: Any) -> bool:
     """Return whether the authoritative atoms state owns a potential."""
-    checker = getattr(atoms, "has_potential", None)
-    return bool(callable(checker) and checker())
+    return isinstance(atoms, SPRKKRAtoms) and atoms.has_potential()
 
 
 class DocumentChange(Enum):
@@ -313,7 +313,7 @@ class WorkspaceController(QObject):
             return False
         from ase2sprkkr import Potential
 
-        return isinstance(getattr(self.atoms, "embedding_host", None), Potential)
+        return isinstance(self.atoms.info.get("sprkkr_embedding_host"), Potential)
 
     def embedding_host_scf_status(self) -> str | None:
         """Raw host SCFSTATUS; a START host is not a converged input for embedding."""
@@ -321,7 +321,7 @@ class WorkspaceController(QObject):
             return None
         from ase2sprkkr import Potential
 
-        host = getattr(self.atoms, "embedding_host", None)
+        host = self.atoms.info.get("sprkkr_embedding_host")
         if not isinstance(host, Potential):
             return None
         status = host.SCF_INFO.SCFSTATUS()
@@ -341,7 +341,7 @@ class WorkspaceController(QObject):
             raise TypeError("Host SCF must produce a periodic SPR-KKR Potential.")
         atoms = self.atoms
         if (self.structure_kind() != "0d" or
-                getattr(atoms, "embedding_host", None) is not expected_host):
+                atoms.info.get("sprkkr_embedding_host") is not expected_host):
             return False
         if self.state_id is None:
             return False
@@ -395,7 +395,7 @@ class WorkspaceController(QObject):
         kind = self.structure_kind()
         return (kind in {"3d", "2d"}
                 or (kind == "0d" and
-                    getattr(self.atoms, "embedding_host", None) is not None))
+                    self.atoms.info.get("sprkkr_embedding_host") is not None))
 
     def scf_status(self) -> str | None:
         return self.structure_state.scf_status()
@@ -437,7 +437,7 @@ class WorkspaceController(QObject):
             or structure.potential_path is None
             # Embedded runs have a distinct POTFIL (host) and POTFIL_CLU.
             # Reusing one path as a periodic POTFIL would be incorrect.
-            or getattr(structure.atoms, "embedding_host", None) is not None
+            or structure.atoms.info.get("sprkkr_embedding_host") is not None
             or self.has_unsaved_structure
         ):
             return None
@@ -662,7 +662,7 @@ class WorkspaceController(QObject):
             empty_spheres=None,
             # New embedded clusters already start with SCFSTATUS=START.
             # Do not request another restart (which would discard radial data).
-            restarted="sprkkr_embedding" not in getattr(atoms, "arrays", {}),
+            restarted="sprkkr_embedding" not in atoms.arrays,
         )
         self._commit_locked(
             self._workspace.structure,

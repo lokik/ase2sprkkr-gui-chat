@@ -249,17 +249,11 @@ class SprkkrExecution:
             self._notify_persistent_job_changed(runner)
 
         self._status("Loading result…")
-        kwargs = {
-            "fallback_directory": self.request.directory,
-            "persistent_ref": runner.id if self.project_id is not None else None,
-        }
-        atoms = self._file_backed_input.atoms if self._file_backed_input is not None else self.request.atoms
-        host = getattr(atoms, "embedding_host", None)
-        if host is not None:
-            # Native CLUPOT is not a standalone structure. Preserve the
-            # canonical launch host when interpreting the result file.
-            kwargs["embedding_host"] = host
-        loaded = load_result(result, **kwargs)
+        loaded = load_result(
+            result,
+            fallback_directory=self.request.directory,
+            persistent_ref=runner.id if self.project_id is not None else None,
+        )
         if self._file_backed_input is not None:
             loaded = replace(loaded, file_backed_input=self._file_backed_input)
         self._status("Finished")

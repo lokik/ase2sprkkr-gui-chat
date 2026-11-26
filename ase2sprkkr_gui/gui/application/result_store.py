@@ -6,12 +6,13 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
+from types import MappingProxyType
 
+from ase2sprkkr import InputParameters
 from kkrunner.files import FileState, FileVersion
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 from ase2sprkkr_gui.gui.application.result_contract import ResultCapabilities
-from ase2sprkkr_gui.gui.application.result_files import capture_result_files
-from ase2sprkkr.outputs import result_file_version
+from ase2sprkkr.outputs import TaskResult, capture_result_file_versions, result_file_version
 from ase2sprkkr_gui.gui.application.structure_snapshot import StructureSnapshot
 from ase2sprkkr_gui.gui.application.workspace import EmptySpheresState
 from ase2sprkkr_gui.physics.composition import structure_formula
@@ -32,12 +33,8 @@ def _snapshot_input_parameters(parameters: Any | None) -> Any | None:
     if parameters is None:
         return None
 
-    copier = getattr(parameters, "copy", None)
-    if callable(copier):
-        try:
-            return copier(copy_values=True)
-        except TypeError:
-            pass
+    if isinstance(parameters, InputParameters):
+        return parameters.copy(copy_values=True)
 
     if isinstance(parameters, Mapping):
         return deepcopy(dict(parameters))
@@ -405,7 +402,7 @@ class ResultStore:
         # CLUPOT alone is not self-contained. Retain only its small site
         # mapping and canonical host reference alongside the versioned file.
         # Ordinary periodic POTFIL states still avoid duplicate snapshots.
-        is_embedded = getattr(atoms, "embedding_host", None) is not None
+        is_embedded = atoms.info.get("sprkkr_embedding_host") is not None
         snapshot = (
             StructureSnapshot.capture(atoms)
             if _snapshot_needed(resolved_version) or is_embedded
@@ -665,7 +662,10 @@ class ResultStore:
         imported: bool,
     ) -> ResultRecord:
         """Snapshot one result record completely before anything is committed."""
-        captured_files = capture_result_files(result)
+        captured_files = (
+            capture_result_file_versions(result)
+            if isinstance(result, TaskResult) else MappingProxyType({})
+        )
         output_version = None
         if output_path is not None:
             path = Path(output_path).expanduser().absolute()
@@ -676,7 +676,10 @@ class ResultStore:
                 None,
             )
             if output_version is None:
-                output_version = result_file_version(result, output_path)
+                output_version = (
+                    result_file_version(result, output_path)
+                    if isinstance(result, TaskResult) else FileVersion.capture(path)
+                )
         return ResultRecord(
             id=self._next_result_id,
             result=result,

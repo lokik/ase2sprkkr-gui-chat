@@ -19,7 +19,7 @@ def result_key(record) -> str | None:
     if record.output_path is None:
         return None
     version = record.output_version
-    digest = getattr(version, "digest", None) if version is not None else None
+    digest = version.digest if version is not None else None
     return f"{Path(record.output_path).expanduser().resolve()}::{digest or ''}"
 
 

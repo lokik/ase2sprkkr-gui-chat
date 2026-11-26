@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from ase2sprkkr import TaskResult
+from .result_store import ResultRecord
+from .operation_results import EmptySpheresResult
 
 MAX_SAVED_OUTPUT_BYTES = 8 * 1024 * 1024
 
@@ -19,22 +21,8 @@ class SavedOutput:
     truncated: bool = False
 
 
-def _output_path(result: Any, record: Any | None) -> Path | None:
-    path = getattr(record, "output_path", None)
-    if path is None:
-        path = getattr(result, "output_file", None)
-    if path is None:
-        path_to = getattr(result, "path_to", None)
-        if callable(path_to):
-            try:
-                path = path_to("output")
-            except (KeyError, AttributeError, ValueError, OSError):
-                pass
-    return Path(path).expanduser().absolute() if path else None
-
-
 def read_saved_output(
-    result: Any, *, record: Any | None = None,
+    result: TaskResult | EmptySpheresResult, *, record: ResultRecord | None = None,
     max_bytes: int = MAX_SAVED_OUTPUT_BYTES,
 ) -> SavedOutput:
     """Replay the recorded OUT, never silently substituting overwritten bytes.
@@ -45,19 +33,20 @@ def read_saved_output(
     """
     if max_bytes <= 0:
         raise ValueError("max_bytes must be positive")
-    native = getattr(result, "result", result)
-    path = _output_path(native, record)
+    if isinstance(result, EmptySpheresResult):
+        return SavedOutput(warning="No saved SPR-KKR output file is recorded.")
+    path = record.output_path if record is not None else None
+    if path is None:
+        path = result.path_to("output") if "output" in result.files else result.output_file
     if path is None:
         return SavedOutput(warning="No saved SPR-KKR output file is recorded.")
-
-    version = getattr(record, "output_version", None)
-    require_current = getattr(native, "require_current_file", None)
+    path = Path(path).expanduser().absolute()
+    version = record.output_version if record is not None else None
 
     def verify() -> None:
         if version is not None and not version.is_current():
             raise OSError("The recorded output was overwritten or removed")
-        if callable(require_current):
-            require_current(path)
+        result.require_current_file(path)
 
     try:
         verify()

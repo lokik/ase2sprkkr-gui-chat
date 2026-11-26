@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ase2sprkkr import TaskResult
+from ase2sprkkr.outputs import OutputOnlyResult
+
 from ase2sprkkr_gui.gui.application.result_action_policy import (
     ResultActionAvailability,
     result_action_availability,
@@ -82,11 +85,10 @@ class _MutableTreeNode:
 def _result_label(record: ResultRecord) -> str:
     result = record.result
     task = _TASK_LABELS.get(record.task_name, record.task_name.upper())
-    try:
-        output = getattr(result, "output_file", None)
-        output_name = Path(str(output)).name if output else ""
-    except Exception:  # noqa: BLE001 - optional presentation metadata
-        output_name = ""
+    output = record.output_path
+    if output is None and isinstance(result, TaskResult):
+        output = result.output_file
+    output_name = Path(str(output)).name if output else ""
     return " — ".join(part for part in (task, output_name) if part)
 
 
@@ -110,9 +112,8 @@ def _present_value(
     disable_actions: bool = False,
 ) -> ResultValuePresentation:
     try:
-        fallback_name = getattr(value, "name", key)
-        name = str(getattr(value, "display_name", fallback_name))
-        raw_info = getattr(value, "info", "")
+        name = str(value.display_name)
+        raw_info = value.info
         info = str(raw_info) if raw_info else ""
         summary = str(value.value_label())
         show_in_summary = bool(getattr(value, "show_in_summary", False))
@@ -171,10 +172,7 @@ def present_result(
         return None
 
     try:
-        # Fail closed for results without explicit scientific-result metadata.
-        # Falling back to output_values would expose SCF potentials, logs and
-        # other auxiliary files as user-facing result tabs.
-        values = getattr(result, "result_values", {}) if result_only else result.output_values
+        values = result.result_values if result_only else result.output_values
         items = list(values.items())
     except Exception as exc:
         logger.exception("Failed to load result output values")
@@ -188,11 +186,7 @@ def present_result(
     has_replaced_result_file = False
     has_unavailable_result_file = False
     for key, value in items:
-        try:
-            name = str(key)
-        except Exception:
-            logger.exception("Failed to read an output value name")
-            name = "<unknown output>"
+        name = str(key)
 
         resolved = resolve_result_value(store, record, name, value)
         has_replaced_result_file |= resolved.replaced
@@ -216,11 +210,10 @@ def present_result(
     elif has_unavailable_result_file:
         file_warning = "⚠ Some historical result files are no longer available."
 
-    parse_error = getattr(result, "parse_error", None)
-    if parse_error is not None:
+    if isinstance(result, OutputOnlyResult):
         warning = (
             "⚠ The calculation output could not be parsed completely: "
-            f"{parse_error}. Showing the captured output file only. "
+            f"{result.parse_error}. Showing the captured output file only. "
             "Scientific result actions are unavailable."
         )
         file_warning = "\n\n".join(part for part in (warning, file_warning) if part)

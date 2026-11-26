@@ -5,6 +5,7 @@ from threading import Event, Thread
 from types import SimpleNamespace
 
 from ase import Atoms
+from ase2sprkkr import TaskResult
 import pytest
 from PyQt6.QtWidgets import QApplication, QWidget
 
@@ -212,12 +213,7 @@ def test_old_result_is_recorded_but_does_not_replace_new_structure(tmp_path):
     replacement = Atoms("Cu")
     controller.replace_structure(replacement)
 
-    result = SimpleNamespace(
-        files={},
-        directory=str(tmp_path),
-        task_name="DOS",
-        produces_potential=False,
-    )
+    result = TaskResult(None, None, tmp_path, task_name="DOS")
     loaded = load_result(result, fallback_directory=tmp_path)
     adoption = controller.adopt_calculation_result(loaded, request=request)
     assert not adoption.workspace_updated
@@ -312,12 +308,7 @@ def test_structure_file_load_rejects_intervening_structure_change(monkeypatch, t
 
 
 def test_external_result_load_survives_intervening_workspace_change(monkeypatch, tmp_path):
-    result = SimpleNamespace(
-        files={},
-        directory=str(tmp_path),
-        task_name="DOS",
-        produces_potential=False,
-    )
+    result = TaskResult(None, None, tmp_path, task_name="DOS")
     # External loading now goes through ResultLoader and fingerprints the
     # output. Supply a real file while replacing only scientific parsing.
     output_path = tmp_path / "Fe.out"
@@ -350,12 +341,7 @@ def test_directory_change_does_not_discard_completed_calculation_result(tmp_path
         )
     )
     request = controller.create_calculation_request()
-    result = SimpleNamespace(
-        files={},
-        directory=str(original_directory),
-        task_name="DOS",
-        produces_potential=False,
-    )
+    result = TaskResult(None, None, original_directory, task_name="DOS")
     loaded = load_result(result, fallback_directory=original_directory)
 
     controller.change_directory(str(next_directory))

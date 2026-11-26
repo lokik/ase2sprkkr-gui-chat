@@ -7,6 +7,7 @@ import os
 from types import SimpleNamespace
 import pytest
 from kkrunner.runs import RunState, FailurePhase, ExecutionMetadata, WorkingDirectory
+from kkrunner.runs.records import RunRecord
 from kkrunner.transports import SshTransport
 from kkrunner.backends import BackendConfig
 from kkrunner.files import FileManifest, FileEntry
@@ -48,6 +49,31 @@ def test_record_metadata_maps_canonical_backend_contract():
     assert job.directory == "/tmp/calc"
     assert job.attachable
     assert not job.is_final
+
+
+def test_persistent_job_projects_validated_run_record(tmp_path):
+    item = RunRecord(
+        id="native-run",
+        state=RunState.FAILED,
+        created_at="2026-10-19T10:00:00+00:00",
+        updated_at="2026-10-19T11:00:00+00:00",
+        execution=ExecutionMetadata(
+            SshTransport(host="cluster"),
+            WorkingDirectory(str(tmp_path), "/remote/calc"),
+            backend_id="42",
+            backend=BackendConfig(name="psij", options={"executor_name": "slurm"}),
+        ),
+        files=FileManifest(),
+        return_code=0,
+        failure_phase=FailurePhase.DOWNLOAD,
+        metadata={"ase2sprkkr": {"task": "DOS"}},
+    )
+    job = PersistentJob.from_run_record(item)
+    assert job.state == "failed"
+    assert job.result_files_state == "current"
+    assert job.failure_phase == "download"
+    assert job.target == "SSH · cluster · PSI/J slurm"
+    assert job.can_retry_download
 
 
 @pytest.mark.parametrize("state", (RunState.FINISHED, RunState.FAILED, RunState.CANCELLED))

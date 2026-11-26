@@ -63,17 +63,11 @@ def project_run_manager(projects: ProjectRepository) -> ProjectRunManager:
     return project_execution_manager(project_repository=projects)
 
 
-def _value(value: Any) -> str:
-    value = getattr(value, "value", value)
-    return "" if value is None else str(value)
-
-
 def _execution_target(record: RunRecord) -> str:
     """Describe transport and native backend separately."""
     transport = record.execution.transport
     backend = record.execution.backend
-    kind = _value(transport.kind)
-    label = "Local" if transport.is_local else f"{kind.upper()} · {transport.host}"
+    label = "Local" if transport.is_local else f"{transport.kind.upper()} · {transport.host}"
     if not record.execution.available:
         return f"{label} · unavailable backend/connection ({backend.name})"
     if backend.name == "psij":
@@ -196,9 +190,8 @@ class PersistentJob:
         *,
         result_files_verified: bool = False,
     ) -> "PersistentJob":
-        state = _value(record.state)
-        result_files = record.files
-        result_files_state = None if result_files is None else _value(result_files.state)
+        state = record.state.value
+        result_files_state = record.files.state.value
         finished_at = record.finished_at
         metadata = record.metadata.get("ase2sprkkr", {})
         attachable, reattach_unavailable_reason = _attachment_availability(record, state)
@@ -214,12 +207,12 @@ class PersistentJob:
             target=_execution_target(record),
             return_code=record.return_code,
             message=record.message,
-            result_files_state=result_files_state or None,
+            result_files_state=result_files_state,
             finished_at=None if finished_at is None else str(finished_at),
             attachable=attachable,
             reattach_unavailable_reason=reattach_unavailable_reason,
             result_files_verified=result_files_verified,
-            failure_phase=(None if record.failure_phase is None else _value(record.failure_phase)),
+            failure_phase=(None if record.failure_phase is None else record.failure_phase.value),
             project_id=record.project_id,
             profile=metadata.get("profile"),
             cancelable=cancelable,

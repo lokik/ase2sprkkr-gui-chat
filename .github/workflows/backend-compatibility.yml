@@ -66,13 +66,6 @@ jobs:
           ref: ${{ inputs.ase2sprkkr_ref || 'develop' }}
           path: ase2sprkkr
 
-      - name: Checkout KKRunner
-        uses: actions/checkout@v7
-        with:
-          repository: lokik/kkrunner-chat
-          ref: master
-          path: kkrunner
-
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -80,7 +73,6 @@ jobs:
           cache-dependency-path: |
             ase2sprkkr_gui/pyproject.toml
             ase2sprkkr/pyproject.toml
-            kkrunner/pyproject.toml
 
       - name: Install Qt runtime libraries
         run: |
@@ -94,9 +86,7 @@ jobs:
       - name: Install backend and Ase2sprkkr
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ./kkrunner
-          python -m pip install -e ./ase2sprkkr
-          python -m pip install -e ./ase2sprkkr_gui pytest 'setuptools>=61'
+          python -m pip install -e ./ase2sprkkr -e ./ase2sprkkr_gui pytest 'setuptools>=61'
 
       - name: Run Ase2sprkkr against selected backend
         working-directory: ase2sprkkr_gui

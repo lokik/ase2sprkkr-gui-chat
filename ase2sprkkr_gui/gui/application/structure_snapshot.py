@@ -67,14 +67,14 @@ class StructureSnapshot:
     embedding_magnetisations: tuple[tuple[float, float], ...] = ()
 
     @classmethod
-    def capture(cls, atoms: Any) -> "StructureSnapshot":
-        arrays = getattr(atoms, "arrays", {})
+    def capture(cls, atoms: Atoms) -> "StructureSnapshot":
+        arrays = atoms.arrays
         structural_arrays = {
             name: _freeze(arrays[name])
             for name in _STRUCTURAL_ARRAYS
             if name in arrays
         }
-        atom_info = getattr(atoms, "info", {})
+        atom_info = atoms.info
         embedded = "sprkkr_embedding" in arrays
         if embedded and atom_info.get("sprkkr_embedding_host") is None:
             raise ValueError("Embedded cluster is missing its host reference")

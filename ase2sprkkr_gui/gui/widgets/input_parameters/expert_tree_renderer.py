@@ -246,7 +246,7 @@ class ExpertTreeRenderer:
             path = tuple(option._get_path().split("."))
             if path in self._suppressed_paths:
                 continue
-            if bool(getattr(option._definition, "expert", False)):
+            if option._definition.is_expert:
                 if expert_parent is None:
                     expert_parent = QTreeWidgetItem(["expert", "", "", "", "Expert options"])
                     self._add_child(treeitem, expert_parent)
@@ -349,7 +349,7 @@ class ExpertTreeRenderer:
         values = value_items(binding.model_value_from(binding.parameters))
         self._install_editor(item, binding, placement)
         self._clear_children(item)
-        names = getattr(grammar, "names", None)
+        names = grammar.names
         labels = [f"[{i}]" for i in range(len(grammar.types))]
         if isinstance(names, Mapping):
             for name, index in names.items():
@@ -413,7 +413,7 @@ class ExpertTreeRenderer:
                 data = data.reshape((-1, 1))
             if data.ndim != 2:
                 return
-            names = getattr(grammar, "names", None) or [
+            names = grammar.names or [
                 f"[{i}]" for i in range(data.shape[1])
             ]
             rows = range(data.shape[0])
@@ -476,7 +476,7 @@ class ExpertTreeRenderer:
                 default=option.default_value,
                 allows_unset=True,
             )
-            if isinstance(grammar, (Array, SetOf)) and getattr(grammar, "array_access", False):
+            if isinstance(grammar, Array) and grammar.array_access:
                 whole_placement = replace(placement, editor="text")
                 self._install_editor(item, default, whole_placement)
             else:
@@ -495,7 +495,7 @@ class ExpertTreeRenderer:
                     append=False,
                     shape=default_shape,
                 )
-            if isinstance(grammar, (Array, SetOf)) and getattr(grammar, "array_access", False):
+            if isinstance(grammar, Array) and grammar.array_access:
                 group = self._new_item(
                     item,
                     "Default items",
@@ -526,9 +526,7 @@ class ExpertTreeRenderer:
                     allows_unset=True,
                 )
                 child = self._new_item(item, child_placement.label, str(grammar))
-                if isinstance(grammar, (Array, SetOf)) and getattr(
-                    grammar, "array_access", False
-                ):
+                if isinstance(grammar, Array) and grammar.array_access:
                     child.setData(0, ExpertTreeRole.COLLAPSE, True)
                     whole_placement = replace(child_placement, editor="text")
                     self._install_editor(child, binding, whole_placement)
@@ -585,7 +583,7 @@ class ExpertTreeRenderer:
             )
             append_item.setData(0, ExpertTreeRole.APPEND, True)
             self._install_editor(append_item, append_binding, append_placement)
-            if isinstance(grammar, (Array, SetOf)) and getattr(grammar, "array_access", False):
+            if isinstance(grammar, Array) and grammar.array_access:
                 self._render_array_children(
                     append_binding,
                     append_placement,
@@ -645,7 +643,7 @@ class ExpertTreeRenderer:
         display = list(values)
         if fixed:
             display.extend([None] * max(0, display_length - len(display)))
-        minimum = getattr(grammar, "min_length", None)
+        minimum = grammar.min_length
         draft = FixedArrayDraft(binding, minimum, value) if incomplete else None
         for index, _component in enumerate(display):
             child_placement = FieldPlacement(path, f"[{index}]")
@@ -729,7 +727,7 @@ class ExpertTreeRenderer:
         )
         if append:
             item.setData(0, ExpertTreeRole.APPEND, True)
-        if isinstance(grammar, (Array, SetOf)) and getattr(grammar, "array_access", False):
+        if isinstance(grammar, Array) and grammar.array_access:
             whole_placement = replace(placement, editor="text")
             self._install_editor(item, binding, whole_placement)
             if not append:

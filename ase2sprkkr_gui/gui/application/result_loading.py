@@ -118,11 +118,10 @@ def disambiguate_scf_potentials(
     """Adapt backend per-file attribution decisions to GUI structure state."""
     updated, ambiguous = [], []
     for path, item in loaded:
-        files = getattr(item.result, "files", None)
-        option = files["converged"] if files is not None and "converged" in files else None
-        details = getattr(option, "attribution_details", None) if option is not None else None
-        if callable(details):
-            attribution, evidence = details()  # one version-state check
+        files = item.result.files
+        if "converged" in files:
+            option = files["converged"]
+            attribution, evidence = option.attribution_details()
             if (attribution is FileAttribution.NOT_THIS_RESULT
                     or (attribution is FileAttribution.UNKNOWN
                         and evidence == "scf_mtime_tie_or_unreadable")):
@@ -221,7 +220,7 @@ def load_result_file(
         require_output_version_current(output_version)
     loaded = replace(loaded, parsed_output_version=output_version)
     # A stand-alone load must honor tied SCF ownership as well as batch loads.
-    if getattr(result, "produces_potential", False):
+    if result.produces_potential:
         updated, _ambiguous = disambiguate_scf_potentials([(path, loaded)])
         loaded = updated[0][1]
     return loaded
@@ -233,8 +232,6 @@ def load_result(
     fallback_directory: str | Path | None,
     output_fallback: str | Path | None = None,
     persistent_ref: str | None = None,
-    embedding_host=None,
-    reusable_potential: LoadedResult | None = None,
     import_cache: ResultImportCache | None = None,
 ) -> LoadedResult:
     """Resolve result files for an already constructed calculation result."""
@@ -262,7 +259,7 @@ def load_result(
     dependency_versions = []
     dependency_error = None
     if potential is not None:
-        for source in getattr(result, "potential_dependencies", ()):
+        for source in result.potential_dependencies:
             source_path = _resolve_path(source, result, fallback_directory)
             if manifest is not None:
                 # Historical evidence must never be replaced by a fresh
@@ -283,51 +280,20 @@ def load_result(
             if version is not None:
                 dependency_versions.append(version)
 
-    try:
-        if potential is not None and callable(getattr(result, "require_current_file", None)):
-            result.require_current_file(potential)
-    except OSError as exc:
-        atoms, potential_error = None, exc
-    else:
-        if potential is None:
-            atoms, potential_error = None, None
-        elif isinstance(result, TaskResult):
-            # A native result owns its scientific structure and SCF status.
-            # ResultLoader is optional and changes only parsing efficiency.
-            try:
-                atoms = result.get_atoms(
-                    loader=import_cache.loader if import_cache is not None else None
-                )
-                if atoms is None:
-                    raise ValueError(f"Potential contains no structure: {potential}")
-                potential_error = None
-            except Exception as exc:  # noqa: BLE001 - corrupted native file
-                atoms, potential_error = None, exc
-        elif getattr(result, "potential", None) is not None:
-            # Lightweight non-native results used by GUI operations/tests.
-            try:
-                atoms = result.potential.atoms
-                potential_error = None
-            except Exception as exc:  # noqa: BLE001 - invalid external data
-                atoms, potential_error = None, exc
-        elif (
-            reusable_potential is not None
-            and reusable_potential.potential_path == potential
-            and reusable_potential.atoms is not None
-            and reusable_potential.potential_error is None
-            and reusable_potential.parsed_potential_version is not None
-            and reusable_potential.parsed_potential_version == pre_read_potential_version
-        ):
-            atoms, potential_error = reusable_potential.atoms, None
-        else:
-            atoms, potential_error = _load_potential(
-                potential, embedding_host=embedding_host
+    atoms, potential_error = None, None
+    if potential is not None:
+        # The native result owns scientific interpretation and provenance.
+        # ResultLoader shares raw parses without changing that interpretation.
+        try:
+            atoms = result.get_atoms(
+                loader=import_cache.loader if import_cache is not None else None
             )
-        if atoms is not None and manifest is not None:
-            try:
+            if atoms is None:
+                raise ValueError(f"Potential contains no structure: {potential}")
+            if manifest is not None:
                 result.require_current_file(potential)
-            except OSError as exc:
-                atoms, potential_error = None, exc
+        except Exception as exc:  # noqa: BLE001 - corrupted native file
+            atoms, potential_error = None, exc
     if atoms is not None and dependency_error is not None:
         atoms, potential_error = None, dependency_error
     if atoms is not None:
@@ -383,74 +349,42 @@ def load_companion_scf_result(
     path = Path(result.path_to("output")).resolve()
     return load_result(
         result, fallback_directory=path.parent, output_fallback=path,
-        reusable_potential=loaded, import_cache=cache,
+        import_cache=cache,
     )
 
 
-def _load_input_parameters(result: Any) -> tuple[Any | None, Exception | None]:
+def _load_input_parameters(result: TaskResult) -> tuple[Any | None, Exception | None]:
     try:
-        return getattr(result, "input_parameters", None), None
+        return result.input_parameters, None
     except Exception as exc:  # noqa: BLE001 - parser failures are data
         return None, exc
 
 
-def _registered_path(result: Any, key: str) -> Path | None:
-    files = getattr(result, "files", None)
-    if files is None or key not in files:
-        return None
-    value = result.path_to(key)
-    return Path(value) if value else None
-
-
 def _resolve_path(
     path: str | Path | None,
-    result: Any,
+    result: TaskResult,
     fallback_directory: str | Path | None,
 ) -> Path | None:
     if not path:
         return None
     resolved = Path(path)
     if not resolved.is_absolute():
-        base = getattr(result, "directory", None) or fallback_directory
+        base = result.directory or fallback_directory
         if base:
             resolved = Path(base) / resolved
     return resolved.resolve()
 
 
 def _result_files(
-    result: Any,
+    result: TaskResult,
     fallback_directory: str | Path | None,
 ) -> tuple[Path | None, Path | None]:
     """Resolve paths supplied by the result without reinterpreting its task."""
-    output = _registered_path(result, "output")
-    if output is None:
-        output = getattr(result, "output_file", None)
+    output = result.path_to("output") if "output" in result.files else result.output_file
     output = _resolve_path(output, result, fallback_directory)
 
     try:
         potential = result.potential_filename
-    except (AttributeError, KeyError, ValueError):
+    except (KeyError, ValueError):
         potential = None
     return output, _resolve_path(potential, result, fallback_directory)
-
-def _load_potential(
-    potential: Path | None,
-    *,
-    embedding_host=None,
-) -> tuple[Any | None, Exception | None]:
-    if potential is None:
-        return None, None
-    if not potential.exists():
-        return None, FileNotFoundError(
-            f"Referenced potential file does not exist: {potential}"
-        )
-    if not potential.is_file():
-        return None, IsADirectoryError(
-            f"Referenced potential is not a file: {potential}"
-        )
-    try:
-        if embedding_host is not None:
-            return load_potential_atoms(potential, embedding_host=embedding_host), None
-        return load_potential_atoms(potential), None
-    except Exception as exc:  # noqa: BLE001 - parser failures are data
-        return None, exc

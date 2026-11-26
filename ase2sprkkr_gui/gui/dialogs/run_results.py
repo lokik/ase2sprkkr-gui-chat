@@ -187,11 +187,11 @@ class CompletedRunPages(QObject):
         self._tabs = tabs
         self._parent = parent
         self._pending_plots: set[ResultFilePage] = set()
-        self._plot_timer = QTimer(self)
-        self._plot_timer.setSingleShot(True)
-        self._plot_timer.timeout.connect(self._render_current_plot)
         self.file_pages: list[ResultFilePage] = []
         self.execution_widget: ResultActionsWidget | None = None
+        self._plot_timer = QTimer(self)
+        self._plot_timer.setSingleShot(True)
+        self._plot_timer.timeout.connect(self._render_plot)
         tabs.currentChanged.connect(self._tab_changed)
 
     def show_result(
@@ -244,20 +244,16 @@ class CompletedRunPages(QObject):
             self._tabs.setCurrentWidget(self.execution_widget)
 
     def _tab_changed(self, index: int) -> None:
-        page = self._tabs.widget(index)
-        if page not in self._pending_plots:
-            return
-        # Wait for the tab to become visible before rendering a heavy plot.
-        # A parent-owned timer is cancelled by Qt when the result window
-        # is destroyed, unlike a context-free singleShot Python closure.
-        self._plot_timer.start(0)
+        self._plot_timer.stop()
+        if self._tabs.widget(index) in self._pending_plots:
+            # Owned by this window's pages: destruction cancels pending rendering.
+            self._plot_timer.start(0)
 
-    def _render_current_plot(self) -> None:
+    def _render_plot(self) -> None:
         page = self._tabs.currentWidget()
-        if page not in self._pending_plots:
-            return
-        self._pending_plots.remove(page)
-        page.render()
+        if page in self._pending_plots:
+            self._pending_plots.remove(page)
+            page.render()
 
 
 class CompletedResultWindow(QDialog):
@@ -279,7 +275,7 @@ class CompletedResultWindow(QDialog):
         self.setWindowTitle(title)
         self.resize(900, 600)
         # Retain the native result for as long as its file actions and plots exist.
-        self._result = getattr(result, "result", result)
+        self._result = result
 
         layout = QVBoxLayout(self)
         self._tabs = QTabWidget(self)
@@ -289,15 +285,15 @@ class CompletedResultWindow(QDialog):
         replay = saved_output or SavedOutput(
             warning="Saved output has not been loaded."
         )
-        task = str(task_name or getattr(self._result, "task_name", "") or "").strip().lower()
+        task = str(task_name or result.task_name).strip().lower()
         # The workspace record preserves the parameters used for this result.
         # For standalone/persistent results, the TaskResult can resolve its own
         # verified input. Missing/stale inputs simply leave totals unknown.
-        parameters = getattr(record, "input_parameters", None)
+        parameters = record.input_parameters if record is not None else None
         if parameters is None and task in {"scf", "dos", "xas"}:
             try:
-                parameters = getattr(self._result, "input_parameters", None)
-            except (AttributeError, OSError, ValueError, TypeError, KeyError):
+                parameters = result.input_parameters
+            except (OSError, ValueError, TypeError, KeyError):
                 logger.warning("Cannot recover input parameters for saved INFO", exc_info=True)
         self._info_page: QWidget | None = None
         if has_info_page(task):

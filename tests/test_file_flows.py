@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from ase import Atoms
+from ase2sprkkr import TaskResult
 
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -329,8 +330,10 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
         parsed.append(path)
         if path == broken:
             raise ValueError("invalid output")
+        result = TaskResult(None, None, tmp_path, output_file=path, task_name="DOS")
+        result.id = 1 if path == earlier else 2
         return LoadedResult(
-            result=SimpleNamespace(id=1 if path == earlier else 2),
+            result=result,
             output_path=path,
             potential_path=earlier_potential if path == earlier else latest_potential,
             atoms=None,
@@ -453,10 +456,10 @@ def test_directory_import_adds_only_successfully_loaded_potentials(
 
     def load(path, *, cache=None):
         good = path == output_a
+        result = TaskResult(None, None, tmp_path, output_file=path, task_name="SCF")
+        result.produces_potential = True
         return LoadedResult(
-            result=SimpleNamespace(
-                task_name="scf", produces_potential=True, output_values={},
-            ),
+            result=result,
             output_path=path,
             potential_path=potential_a if good else potential_b,
             atoms=Atoms("Fe", cell=(3, 3, 3), pbc=True) if good else None,

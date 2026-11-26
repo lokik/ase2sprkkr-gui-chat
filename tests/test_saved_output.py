@@ -1,7 +1,9 @@
 """Saved stdout can be replayed without trusting overwritten historical data."""
 from __future__ import annotations
 
-from types import SimpleNamespace
+from ase2sprkkr import TaskResult
+from ase2sprkkr_gui.gui.application.result_store import ResultRecord
+from ase2sprkkr_gui.gui.application.operation_results import EmptySpheresResult
 
 from kkrunner.files import FileVersion
 
@@ -11,7 +13,7 @@ from ase2sprkkr_gui.gui.application.saved_output import read_saved_output
 def test_saved_output_reads_existing_native_out(tmp_path):
     path = tmp_path / "Fe2_SPLEED.out"
     path.write_text("first line\nsecond line\n", encoding="utf-8")
-    result = SimpleNamespace(output_file=path)
+    result = TaskResult(None, None, tmp_path, output_file=path, task_name="SPLEED")
     replay = read_saved_output(result)
 
     assert replay.warning is None
@@ -24,25 +26,29 @@ def test_saved_output_rejects_overwritten_record_version(tmp_path):
     path.write_text("historical", encoding="utf-8")
     version = FileVersion.capture(path)
     path.write_text("current overwritten contents", encoding="utf-8")
-    record = SimpleNamespace(output_path=path, output_version=version)
-    replay = read_saved_output(SimpleNamespace(), record=record)
+    result = TaskResult(None, None, tmp_path, output_file=path, task_name="SCF")
+    record = ResultRecord(
+        1, result, "scf", None, None, None, None, str(tmp_path), {},
+        output_path=path, output_version=version,
+    )
+    replay = read_saved_output(result, record=record)
 
     assert replay.text == ""
     assert "overwritten" in replay.warning
     assert "current overwritten contents" not in replay.text
 
 
-def test_saved_output_rejects_overwritten_manifest(tmp_path):
+def test_saved_output_rejects_overwritten_manifest(tmp_path, monkeypatch):
     path = tmp_path / "Fe_SCF.out"
     path.write_text("current contents", encoding="utf-8")
 
-    class HistoricalResult:
-        output_file = path
+    result = TaskResult(None, None, tmp_path, output_file=path, task_name="SCF")
 
-        def require_current_file(self, _path):
-            raise OSError("Not the historical output version")
+    def require_current_file(_path):
+        raise OSError("Not the historical output version")
 
-    replay = read_saved_output(HistoricalResult())
+    monkeypatch.setattr(result, "require_current_file", require_current_file)
+    replay = read_saved_output(result)
     assert replay.text == ""
     assert "historical output version" in replay.warning
 
@@ -59,6 +65,6 @@ def test_saved_output_bounds_tail_and_skips_partial_line(tmp_path):
 
 
 def test_saved_output_without_path_reports_unavailable():
-    replay = read_saved_output(SimpleNamespace(output_values={}))
+    replay = read_saved_output(EmptySpheresResult(1))
     assert replay.text == ""
     assert "No saved" in replay.warning

@@ -36,3 +36,9 @@ class EmptySpheresResult:
     @property
     def output_values(self) -> dict[str, EmptySpheresCount]:
         return {"empty_spheres": EmptySpheresCount(self.found)}
+
+
+    @property
+    def result_values(self) -> dict[str, EmptySpheresCount]:
+        """No standalone scientific result files for this GUI operation."""
+        return {}

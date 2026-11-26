@@ -53,8 +53,10 @@ def test_gui_command_invokes_main_with_clean_arguments(monkeypatch, exit_code):
     monkeypatch.setitem(sys.modules, "ase2sprkkr_gui.main", fake_main_module)
     command = importlib.import_module("ase2sprkkr_gui.cli.gui")
 
+    command_parser = argparse.ArgumentParser()
+    command.parser(command_parser)
     with pytest.raises(SystemExit) as exc:
-        command.run(argparse.Namespace(), {"debug": False, "profile": False})
+        command.run(command_parser.parse_args([]), {"debug": False, "profile": False})
 
     assert exc.value.code == exit_code
     assert calls == [[]]
