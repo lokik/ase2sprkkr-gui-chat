@@ -59,10 +59,12 @@ def test_visualization_uses_configured_viewer(monkeypatch):
         def atoms(self):
             return atoms
 
+    from ase import visualize
+
     opened = []
     monkeypatch.setattr(
-        visualization,
-        "ase_view",
+        visualize,
+        "view",
         lambda value, *, viewer: opened.append((value, viewer)),
     )
 

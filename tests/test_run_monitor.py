@@ -693,7 +693,7 @@ def test_reopened_spleed_result_restores_info_and_stdout(tmp_path, _qt_applicati
     ]
     assert "SPLEED calculation finished" in window._info_page.last_info.text()
     assert "spectral output" in window._info_page.events.toPlainText()
-    assert "11.00000E+00" in window._output.toPlainText()
+    assert window._output.toPlainText().splitlines()[0] == row
     window.close()
 
 

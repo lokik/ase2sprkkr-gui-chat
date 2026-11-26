@@ -183,10 +183,10 @@ def test_accepted_run_identification_overrides_only_request(application, monkeyp
         calculation_flow,
         "_select_profile",
         lambda _parent, **_kwargs: (
-            True, None, RunIdentification("new_dataset", "new_label"), str(tmp_path), None
+            True, None, RunIdentification("new_dataset", "new_label"), str(tmp_path), None, False, False
         ),
     )
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _name: ())
 
     assert calculation_flow.run_calculation(
         controller, RecentFiles(tmp_path / "recent.json"), object()
@@ -211,7 +211,7 @@ def test_cancelling_run_dialog_leaves_workspace_unchanged(application, monkeypat
     generation = controller.input_parameters_generation
     monkeypatch.setattr(
         calculation_flow, "_select_profile",
-        lambda _parent, **_kwargs: (False, None, None, None, None),
+        lambda _parent, **_kwargs: (False, None, None, None, None, False, False),
     )
 
     assert calculation_flow.run_calculation(
@@ -252,10 +252,11 @@ def test_submitted_run_saves_only_the_input_revision_written_at_launch(
             pass
 
     monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _name: ())
 
+    recent = RecentFiles(tmp_path / "recent.json")
     assert calculation_flow.run_calculation(
-        controller, RecentFiles(tmp_path / "recent.json"), object(),
+        controller, recent, object(),
         select_profile=False,
         on_result_loaded=lambda _loaded, _request: ResultAdoption(),
     ) is not None
@@ -265,7 +266,9 @@ def test_submitted_run_saves_only_the_input_revision_written_at_launch(
     if edit_timing == "before_submission_ack":
         controller.replace_input_parameters(_Parameters(dataset="changed_early"))
 
-    launched["on_submitted"]()
+    input_path = tmp_path / "Fe_SCF.inp"
+    launched["on_submitted"](str(input_path))
+    assert recent.paths("input") == (str(input_path.resolve()),)
     if edit_timing == "after_submission_ack":
         controller.replace_input_parameters(_Parameters(dataset="changed_later"))
 
@@ -308,14 +311,14 @@ def test_submitted_host_run_does_not_mark_unrelated_workspace_inputs_saved(
             pass
 
     monkeypatch.setattr(calculation_flow, "SprkkrRunWindow", Window)
-    monkeypatch.setattr(calculation_flow, "profile_description", lambda _name: None)
+    monkeypatch.setattr(calculation_flow, "profile_summary_fields", lambda _name: ())
     assert calculation_flow.run_calculation(
         controller, RecentFiles(tmp_path / "recent.json"), object(),
         select_profile=False, request_override=host_request,
         on_result_loaded=lambda _loaded, _request: ResultAdoption(),
     ) is not None
 
-    launched["on_submitted"]()
+    launched["on_submitted"](str(tmp_path / "host_SCF.inp"))
     assert controller.has_unsaved_input_parameters
     launched["on_finished"](LoadedResult(
         result=None, output_path=None, potential_path=None, atoms=None,
