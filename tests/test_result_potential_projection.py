@@ -227,7 +227,6 @@ def test_imported_dos_is_nested_under_scf_with_identical_potential_bytes(
         store, imported = _import_scf_and_dos(
             tmp_path / str(reverse), reverse=reverse,
         )
-        assert store.imported_scf_source(imported["dos"]) is imported["scf"]
 
         _application = QApplication.instance() or QApplication([])
         widget = _widget()
@@ -246,7 +245,6 @@ def test_imported_dos_with_unrelated_potential_remains_scf_sibling(tmp_path):
     store, imported = _import_scf_and_dos(
         tmp_path, dos_contents="the SCF input, not its output",
     )
-    assert store.imported_scf_source(imported["dos"]) is None
 
     _application = QApplication.instance() or QApplication([])
     widget = _widget()
@@ -259,7 +257,6 @@ def test_imported_dos_with_unrelated_potential_remains_scf_sibling(tmp_path):
 
 def test_ambiguous_imported_scf_sources_do_not_guess_dos_parent(tmp_path):
     store, imported = _import_scf_and_dos(tmp_path, second_scf=True)
-    assert store.imported_scf_source(imported["dos"]) is None
 
     _application = QApplication.instance() or QApplication([])
     widget = _widget()
@@ -272,11 +269,21 @@ def test_ambiguous_imported_scf_sources_do_not_guess_dos_parent(tmp_path):
 
 def test_overwritten_imported_scf_potential_is_not_dos_parent(tmp_path):
     store, imported = _import_scf_and_dos(tmp_path)
-    assert store.imported_scf_source(imported["dos"]) is imported["scf"]
+    def tree():
+        return present_result_tree(
+            store, current_structure_id=None, current_state_id=None,
+        ).roots[0]
+
+    before = tree()
+    assert [node.result_id for node in before.children] == [imported["scf"].id]
+    assert [node.result_id for node in before.children[0].children] == [imported["dos"].id]
     (tmp_path / "New" / "Fe2.pot_new").write_text(
         "different calculation", encoding="utf-8",
     )
-    assert store.imported_scf_source(imported["dos"]) is None
+    after = tree()
+    assert {node.result_id for node in after.children} == {
+        imported["scf"].id, imported["dos"].id,
+    }
 
 
 def test_hidden_import_only_structure_does_not_consume_formula_number(tmp_path):
