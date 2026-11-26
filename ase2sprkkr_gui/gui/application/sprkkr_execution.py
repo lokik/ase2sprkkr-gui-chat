@@ -91,18 +91,7 @@ class SprkkrExecution:
         if self.project_id is None:
             if isinstance(self.execution_manager, RunManager) and not isinstance(self.execution_manager, ProjectRunManager):
                 return self.execution_manager
-            # Even an unassigned clean-cache run needs the same reservation
-            # store as project runs. Without an injected manager, ASE2SPRKKR
-            # supplies its default persistent manager for clear_cache=True.
-            if not self.request.clear_cache or self.execution_manager is None:
-                return None
-            # ProjectRunManager cannot create unassigned jobs; an ordinary
-            # RunManager can reserve against the very same shared RunStore.
-            return RunManager(
-                self.execution_manager.store,
-                client_pool=self.execution_manager.client_pool,
-                conflict_stores=self.execution_manager.conflict_stores,
-            )
+            return None
         if self.execution_manager is None:
             return self.project_id
         return self.execution_manager.for_project(self.project_id)

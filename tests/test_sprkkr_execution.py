@@ -568,27 +568,6 @@ def test_prepare_only_uses_save_input_without_creating_a_runner(monkeypatch, tmp
     assert captured["potential_file"] == "%a.pot"
 
 
-def test_unassigned_clear_cache_uses_shared_project_run_store(tmp_path):
-    from kkrunner.projects import ProjectRepository, ProjectRunManager
-    from kkrunner.runs.manager import RunManager
-    from kkrunner.runs.records import RunStore
-
-    store = RunStore(tmp_path / "runs")
-    projects = ProjectRepository(tmp_path / "projects")
-    manager = ProjectRunManager(store=store, project_repository=projects)
-    execution = SprkkrExecution(
-        _request(tmp_path, clear_cache=True),
-        _Cancellation(),
-        execution_manager=manager,
-    )
-    reserved_manager = execution._project_context()
-    assert type(reserved_manager) is RunManager
-    assert reserved_manager.store is store
-
-    normal = SprkkrExecution(_request(tmp_path), _Cancellation(), execution_manager=manager)
-    assert normal._project_context() is None
-
-
 @pytest.mark.parametrize("failure_point", ["none", "submit", "wait"])
 def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_launches(
     monkeypatch, tmp_path, failure_point,
@@ -660,13 +639,36 @@ def test_run_monitor_forwards_worker_submit_signal_on_gui_thread(tmp_path):
     window.close()
 
 
-def test_unassigned_gui_run_uses_session_manager(tmp_path):
+@pytest.mark.parametrize("clear_cache", [False, True])
+def test_unassigned_gui_run_uses_session_manager(tmp_path, monkeypatch, clear_cache):
     from kkrunner import MemoryRunStore, RunManager
     manager = RunManager(MemoryRunStore())
-    execution = SprkkrExecution(_request(tmp_path), _Cancellation(), execution_manager=manager)
-    assert execution._project_context() is manager
-    clean = SprkkrExecution(_request(tmp_path, clear_cache=True), _Cancellation(), execution_manager=manager)
-    assert clean._project_context() is manager
+    captured = {}
+
+    class Runner:
+        record = None
+        id = "run-1"
+
+        def submit(self):
+            pass
+
+        def wait(self):
+            return object()
+
+    class Calculator:
+        def create_run(self, **kwargs):
+            captured.update(kwargs)
+            return Runner()
+
+    execution = SprkkrExecution(
+        _request(tmp_path, clear_cache=clear_cache), _Cancellation(),
+        execution_manager=manager,
+    )
+    monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
+    monkeypatch.setattr(execution_module, "load_result", lambda *_args, **_kwargs: object())
+    execution.run()
+    assert captured["project"] is manager
+    assert captured["clear_cache"] is clear_cache
 
 
 def test_execution_notifies_with_authoritative_run_record(tmp_path):
