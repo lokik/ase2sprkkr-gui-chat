@@ -335,18 +335,12 @@ def test_native_structure_save_uses_cluster_potential_writer(monkeypatch, tmp_pa
 
     from ase2sprkkr_gui.gui.flows import files as file_flows
 
-    class HostPotential:
-        LATTICE = object()
-
-        def __init__(self):
-            self.atoms = host()
-
-        def save_to_file(self, filename):
-            filename.write_text("HOST POT", encoding="utf-8")
-
-    host_potential = HostPotential()
-    from ase2sprkkr import Potential
-    monkeypatch.setattr(Potential, "from_atoms", lambda _source: host_potential)
+    from ase2sprkkr import PeriodicPotential, Potential
+    host_potential = Potential.from_atoms(host())
+    monkeypatch.setattr(
+        PeriodicPotential, "save_to_file",
+        lambda _self, filename: filename.write_text("HOST POT", encoding="utf-8"),
+    )
     cluster = SPRKKRAtoms.from_embedding(
         host_potential, [(0, (0, 0, 0), "Fe")]
     )
@@ -676,11 +670,7 @@ def test_open_native_cluster_with_explicit_host_preserves_reference(
     host_path.write_text("mock-host")
     reference = host()
 
-    class HostPotential:
-        LATTICE = object()
-        atoms = reference
-
-    original_host = HostPotential()
+    original_host = Potential.from_atoms(reference)
     generated = EmbeddingDraft(original_host)
     generated.set_occupation([generated.center], {"Fe": 1.0})
     expected = generated.to_atoms()
@@ -962,13 +952,21 @@ def test_mismatched_host_requires_confirmation_before_workspace_replacement(
 def test_active_cluster_potential_is_not_mistaken_for_a_periodic_host():
     from ase2sprkkr_gui.gui.flows.files import _current_host_potential
 
+    from ase2sprkkr import SPRKKRAtoms
+
     base = host()
-    draft = EmbeddingDraft(base)
+    controller = WorkspaceController(WorkspaceState(atoms=base))
+    assert _current_host_potential(controller) is None
+    native_host = SPRKKRAtoms.promote_ase_atoms(base).potential
+    assert _current_host_potential(controller) is native_host
+
+    draft = EmbeddingDraft(native_host)
     draft.include([draft.center])
     cluster = draft.to_atoms()
-    cluster._potential = object()  # Simulate an attached non-periodic potential.
+    cluster_potential = cluster.potential
     controller = WorkspaceController(WorkspaceState(atoms=cluster))
-    assert _current_host_potential(controller) is None
+    assert _current_host_potential(controller) is native_host
+    assert _current_host_potential(controller) is not cluster_potential
 
 
 def test_guided_cluster_scf_is_available_without_input_parameters():
