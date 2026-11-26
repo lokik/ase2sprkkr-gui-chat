@@ -662,12 +662,12 @@ class PersistentJobsWidget(QWidget):
         self.return_code_value.setText(
             "—" if job.return_code is None else str(job.return_code)
         )
-        if not job.is_final or not job.result_files_state:
+        if not job.is_final:
             result_files_label = "—"
+        elif not job.result_files_verified:
+            result_files_label = "Not checked"
         else:
-            result_files_label = _status_label(job.result_files_state)
-            if not job.result_files_verified:
-                result_files_label += " (stored, not checked)"
+            result_files_label = _status_label(job.result_files_state) if job.result_files_state else "—"
         self.result_files_value.setText(result_files_label)
         self.message_value.setText(job.message or "")
         self.message_value.setVisible(bool(job.message))

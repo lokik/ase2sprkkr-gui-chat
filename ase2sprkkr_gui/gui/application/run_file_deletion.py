@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from kkrunner.files.queries import remote_file_cleanup
+from kkrunner.runs.conflicts import file_reference_overlaps
 
 
 @dataclass(frozen=True)
@@ -109,35 +110,16 @@ def _absolute(path: str, directory: str) -> str:
 
 def referenced_local_paths(manifest, directory: str) -> tuple[str, ...]:
     """All local manifest paths, including input, cache and captured versions."""
-    if manifest is None:
-        return ()
-    entries = (
-        *manifest.inputs, *manifest.outputs, *(cache.file for cache in manifest.caches),
-        manifest.stdin, manifest.stdout, manifest.stderr,
-    )
-    paths = [
-        _absolute(entry.local_path, directory)
-        for entry in entries
-        if entry is not None and entry.local_path is not None
-    ]
-    paths.extend(
-        _absolute(version.path, directory)
-        for version in (*manifest.input_versions, *manifest.output_versions)
-    )
-    return tuple(sorted(set(paths)))
+    return tuple(sorted(declared_local_kinds(manifest, directory)))
 
 
 def declared_local_kinds(manifest, directory: str) -> dict[str, str]:
     """Expected filesystem kinds from persisted entries, not filesystem observations."""
     if manifest is None:
         return {}
-    entries = (
-        *manifest.inputs, *manifest.outputs, *(cache.file for cache in manifest.caches),
-        manifest.stdin, manifest.stdout, manifest.stderr,
-    )
     result = {}
-    for entry in entries:
-        if entry is None or entry.local_path is None:
+    for entry in manifest.entries:
+        if entry.local_path is None:
             continue
         path = _absolute(entry.local_path, directory)
         kind = entry.kind
@@ -146,7 +128,7 @@ def declared_local_kinds(manifest, directory: str) -> dict[str, str]:
         result[path] = kind
     for version in (*manifest.input_versions, *manifest.output_versions):
         path = _absolute(version.path, directory)
-        result.setdefault(path, "file")
+        result.setdefault(path, version.kind)
     return result
 
 
@@ -154,17 +136,13 @@ def referenced_remote_paths(manifest) -> tuple[str, ...]:
     """Collect exact target-side manifest paths for an optional SSH cleanup."""
     if manifest is None:
         return ()
-    entries = (
-        *manifest.inputs, *manifest.outputs, *(cache.file for cache in manifest.caches),
-        manifest.stdin, manifest.stdout, manifest.stderr,
-    )
     return tuple(sorted({
-        entry.remote_path for entry in entries
-        if entry is not None and entry.remote_path is not None
+        entry.remote_path for entry in manifest.entries
+        if entry.remote_path is not None
     }))
 
 
-def _references_for(
+def referencing_paths(
     path: str, directory: bool, other_references: Iterable[str],
 ) -> tuple[str, ...]:
     """A directory is shared when another record refers to a descendant.
@@ -176,9 +154,7 @@ def _references_for(
     matches = []
     for candidate in other_references:
         reference = os.path.realpath(candidate)
-        if reference == real or (
-            directory and os.path.commonpath((real, reference)) == real
-        ) or os.path.commonpath((real, reference)) == reference:
+        if file_reference_overlaps(real, reference, directory=directory):
             matches.append(candidate)
     return tuple(matches)
 
@@ -247,7 +223,7 @@ def plan_file_deletion(
             snapshot = FileDeletionSnapshot(
                 path, info.st_mtime_ns, info.st_size, info.st_dev, info.st_ino,
             )
-        matches = _references_for(path, is_dir, other_references)
+        matches = referencing_paths(path, is_dir, other_references)
         if matches:
             labels = sorted({
                 label

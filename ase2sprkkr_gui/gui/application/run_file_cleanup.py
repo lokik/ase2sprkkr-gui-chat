@@ -18,7 +18,7 @@ from ase2sprkkr_gui.gui.application.imported_project_results import assignments
 from ase2sprkkr_gui.gui.application.run_file_deletion import (
     FileDeletionPlan, RemoteFileReview, declared_local_kinds, delete_local_files,
     expected_identity, plan_file_deletion, referenced_local_paths,
-    referenced_remote_paths, snapshot_from_review,
+    referenced_remote_paths, referencing_paths, snapshot_from_review,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,13 +30,8 @@ def _run_records(manager):
         yield from store.runs()
 
 
-def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, job: Any) -> FileDeletionPlan:
-    """Preview explicit local-file cleanup using authoritative persisted refs.
-
-    Other saved records are detected regardless of project or application.
-    Shared local files may only be deleted through explicit selection and
-    an additional GUI warning.
-    """
+def _local_file_references(manager: RunManager, projects: Any, job_id: str, job: Any):
+    """Collect declarations and other run references without inspecting file contents."""
     job_id = str(job_id)
     if job is None:
         raise KeyError(job_id)
@@ -49,7 +44,6 @@ def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, jo
     if job.imported_path is not None:
         if job.imported_key not in imported:
             raise RuntimeError("The imported result reference has changed; refresh first")
-        candidates = (job.imported_path,)
         candidate_kinds = {job.imported_path: "file"}
         ignored_key = job.imported_key
         ignored_run_key = None
@@ -58,7 +52,6 @@ def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, jo
         if not record.state.is_terminal:
             raise RuntimeError("The calculation is no longer in a final state")
         directory = str(record.execution.directory.local)
-        candidates = referenced_local_paths(record.files, directory)
         candidate_kinds = declared_local_kinds(record.files, directory)
         remote = (
             referenced_remote_paths(record.files)
@@ -67,7 +60,6 @@ def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, jo
         ignored_key = None
         ignored_run_key = record.key
 
-    other_paths: list[str] = []
     reference_details: dict[str, set[str]] = {}
     for record in runs:
         if record.key == ignored_run_key:
@@ -80,19 +72,23 @@ def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, jo
         for path in referenced_local_paths(
             record.files, str(record.execution.directory.local)
         ):
-            other_paths.append(path)
             reference_details.setdefault(path, set()).add(label)
 
     for key, project_id in imported.items():
         if key == ignored_key:
             continue
         path = key.split("::", 1)[0]
-        other_paths.append(path)
         reference_details.setdefault(path, set()).add(
             f"Imported result (project {project_id or 'unassigned'})"
         )
+    return candidate_kinds, remote, reference_details
+
+
+def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, job: Any) -> FileDeletionPlan:
+    """Preview explicit local-file cleanup using authoritative persisted refs."""
+    candidate_kinds, remote, reference_details = _local_file_references(manager, projects, job_id, job)
     return plan_file_deletion(
-        candidates, other_references=other_paths, remote_references=remote,
+        candidate_kinds, other_references=reference_details, remote_references=remote,
         reference_details=reference_details, expected_kinds=candidate_kinds,
     )
 
@@ -174,9 +170,10 @@ def cleanup_remote_files(
     The caller schedules this outside the blocking deletion workflow.
     Shared-reference changes since the preview cause only the affected
     remote path to be skipped. The record is already removed by this point.
+    Do not hold a global reservation lock during an SSH request: remote
+    cleanup is best effort, including its active-reference check.
     """
     snapshots = {snapshot.path: snapshot for snapshot in review.snapshots}
-    references = _remote_reference_details(manager, record)
     approved = {}
     skipped = []
     for path in selected_files:
@@ -184,35 +181,42 @@ def cleanup_remote_files(
         if snapshot is None:
             skipped.append({"path": path, "status": "skipped",
                             "message": "Not present in the inspected remote file list"})
-            continue
-        before = review.referrers_for(path)
-        norm = posixpath.normpath(path)
-        current_labels = set()
-        for reference, labels in references.items():
-            if file_reference_overlaps(norm, reference, directory=snapshot.kind == "directory"):
-                current_labels.update(labels)
-        if before != tuple(sorted(current_labels)):
-            skipped.append({"path": path, "status": "skipped",
-                            "message": "Other run references changed since confirmation"})
-            continue
-        approved[path] = expected_identity(snapshot)
-    # A recursive directory target already covers explicitly selected
-    # children; sending both would lead to misleading missing-file errors.
-    directories = {
-        path for path, snapshot in snapshots.items()
-        if path in approved and snapshot.kind == "directory"
-    }
-    for path in tuple(approved):
-        if any(
-            path != directory
-            and posixpath.commonpath((path, directory)) == directory
-            for directory in directories
-        ):
-            del approved[path]
+        else:
+            approved[path] = expected_identity(snapshot)
     if not approved:
         return tuple(skipped)
+
     try:
-        outcomes = manager.client_for(record).delete_remote_files(record, approved)
+        blocked = manager.file_mutation_conflicts(
+            {path: snapshots[path].kind for path in approved}, target=record,
+        )
+        references = _remote_reference_details(manager, record)
+        for path in tuple(approved):
+            labels = {
+                label
+                for reference, names in references.items()
+                if file_reference_overlaps(
+                    posixpath.normpath(path), reference,
+                    directory=snapshots[path].kind == "directory",
+                )
+                for label in names
+            }
+            message = blocked.get(path)
+            if message is None and review.referrers_for(path) != tuple(sorted(labels)):
+                message = "Other run references changed since confirmation"
+            if message is not None:
+                del approved[path]
+                skipped.append({"path": path, "status": "skipped", "message": message})
+
+        # A selected directory already covers its selected descendants.
+        # Only collapse paths after excluding blocked directories.
+        directories = {path for path in approved if snapshots[path].kind == "directory"}
+        for path in tuple(approved):
+            if any(path != directory and posixpath.commonpath((path, directory)) == directory
+                   for directory in directories):
+                del approved[path]
+        outcomes = (manager.client_for(record).delete_remote_files(record, approved)
+                    if approved else ())
     except Exception as exc:  # noqa: BLE001 - background SSH I/O boundary
         logger.warning("Remote cleanup failed on %s: %s", review.host, exc)
         outcomes = tuple(
@@ -242,32 +246,28 @@ def delete_confirmed_local_files(
     selected = tuple(expected_files)
     if not selected or len(selected) != len(set(selected)):
         raise ValueError("File deletion requires a nonempty, unique selection")
-    plan = referenced_file_deletion(manager, projects, job_id, job)
-    if not set(selected).issubset(plan.selectable_files):
-        raise RuntimeError(
-            "Referenced files changed since confirmation; review them again"
-        )
-    shared = tuple(sorted(set(selected).intersection((
-        *plan.shared, *plan.shared_directories,
-    ))))
-    if shared != tuple(sorted(expected_shared_files)):
-        raise RuntimeError(
-            "Shared file references changed since confirmation; review them again"
-        )
-    if shared and not allow_shared_files:
-        raise RuntimeError(
-            "Deletion of files referenced by other runs requires an "
-            "additional explicit confirmation"
-        )
-    selected_snapshots = tuple(
-        snapshot for snapshot in plan.selectable_snapshots
-        if snapshot.path in selected
-    )
-    if expected_file_snapshots is None or (
-        tuple(expected_file_snapshots) != selected_snapshots
-    ):
-        raise RuntimeError(
-            "A file changed since the displayed last-modified times; "
-            "review the deletion list again"
-        )
-    delete_local_files(selected, snapshots=selected_snapshots)
+    if expected_file_snapshots is None:
+        raise ValueError("File deletion requires confirmed file identities")
+    kinds = {snapshot.path: snapshot.kind for snapshot in expected_file_snapshots}
+    if set(kinds) != set(selected):
+        raise ValueError("File deletion requires a snapshot for each selected path")
+    with manager.file_mutation_guard(kinds):
+        candidate_kinds, _, references = _local_file_references(manager, projects, job_id, job)
+        if any(candidate_kinds.get(path) != kind for path, kind in kinds.items()):
+            raise RuntimeError(
+                "Referenced files changed since confirmation; review them again"
+            )
+        shared = tuple(sorted(
+            path for path, kind in kinds.items()
+            if referencing_paths(path, kind == "directory", references)
+        ))
+        if shared != tuple(sorted(expected_shared_files)):
+            raise RuntimeError(
+                "Shared file references changed since confirmation; review them again"
+            )
+        if shared and not allow_shared_files:
+            raise RuntimeError(
+                "Deletion of files referenced by other runs requires an "
+                "additional explicit confirmation"
+            )
+        delete_local_files(selected, snapshots=expected_file_snapshots)
