@@ -65,7 +65,10 @@ def test_result_import_rebuilds_tree_once_and_selection_does_not_rebuild(tmp_pat
         recent_files_path=tmp_path / "recent.json",
         settings_path=tmp_path / "settings.json",
     )
-    widget = ResultActionsWidget(lambda _value, _action: None)
+    widget = ResultActionsWidget(
+        lambda _value, _action: None,
+        show_values_without_actions=True,
+    )
     window = QWidget()
     window.result_actions_widget = widget
     rebuilds = []
