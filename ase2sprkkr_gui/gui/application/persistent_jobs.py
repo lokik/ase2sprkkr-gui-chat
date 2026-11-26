@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from kkrunner import MemoryRunStore
 from kkrunner.backends.contracts import BackendCapability
-from kkrunner.files.versions import file_digest
+from kkrunner.files.versions import FileVersion
 from kkrunner.projects import ProjectRepository, ProjectRunManager
 from kkrunner.runs.manager import RunManager
 from kkrunner.runs.records import CorruptRunRecord, RunRecord
@@ -25,7 +25,7 @@ from ase2sprkkr.sprkkr.projects import (
 from ase2sprkkr_gui.gui.application.imported_project_results import (
     assignments, reference_id, reassign_references, remove_reference,
 )
-from ase2sprkkr_gui.gui.application.result_loading import load_result_file
+from ase2sprkkr import ResultLoader
 
 from ase2sprkkr_gui.gui.application.run_file_deletion import FileDeletionPlan, RemoteFileReview
 from ase2sprkkr_gui.gui.application.run_file_cleanup import (
@@ -531,23 +531,32 @@ class PersistentJobSource:
             )
             self.reload()
 
-    def load_result(self, job_id: str) -> Any:
+    def load_result(self, job_id: str, *, restore_missing=True) -> Any:
+        """Load the native result; only explicit requests may restore missing files."""
         job = self.job(str(job_id))
         if job is not None and job.imported_path is not None:
             expected_digest = job.imported_key.partition("::")[2]
-            if expected_digest and file_digest(job.imported_path) != expected_digest:
+            version = FileVersion.capture(job.imported_path, digest=bool(expected_digest),
+                                          require_digest=bool(expected_digest))
+            if expected_digest and version.digest != expected_digest:
                 raise RuntimeError(
                     "The imported output file has changed since it was assigned. "
                     "Add the updated file again to capture its new version."
                 )
-            return load_result_file(job.imported_path).result
+            result = ResultLoader().load_file(job.imported_path)
+            if not version.is_current():
+                raise RuntimeError("The imported output file changed while loading its result.")
+            return result
         manager, run_id = self._target(str(job_id))
         result = load_project_result(
-            manager, run_id, allow_unparsed=True,
+            manager, run_id, allow_unparsed=True, restore_missing=restore_missing,
         )
-        # Parsing can take arbitrarily long. Do not publish the record
-        # snapshot captured before parsing over a newer cache entry.
-        self.check_result_files(job_id)
+        # A passive parse only refreshes persisted metadata. An explicit load
+        # may have restored artifacts and can report their verified state.
+        if restore_missing:
+            self.check_result_files(job_id)
+        else:
+            self.job_changed(job_id)
         return result
 
     def _replace_cached_job(self, job: PersistentJob) -> bool:

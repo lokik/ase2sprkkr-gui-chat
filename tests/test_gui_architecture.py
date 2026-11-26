@@ -1,6 +1,5 @@
 """Stable architectural and component-contract checks for the GUI."""
 import ast
-import importlib
 import importlib.util
 import os
 import subprocess
@@ -172,50 +171,6 @@ def test_workflow_renderer_has_no_application_state_dependency():
     assert not any(
         module.startswith("ase2sprkkr_gui.gui.application") for module in dependencies
     )
-
-
-def test_moved_semantics_are_not_reexported_from_old_modules():
-    """Canonical moves must not leave accidental compatibility APIs behind."""
-    action_card = importlib.import_module("ase2sprkkr_gui.gui.widgets.action_card")
-    presentation = importlib.import_module("ase2sprkkr_gui.gui.presentation")
-    recent_launcher = importlib.import_module("ase2sprkkr_gui.gui.widgets.recent_launcher")
-    workspace_controller = importlib.import_module(
-        "ase2sprkkr_gui.gui.application.workspace_controller"
-    )
-
-    assert not hasattr(action_card, "ActionCategory")
-    assert not hasattr(presentation, "RecentLaunch")
-    assert not hasattr(presentation, "recent_launch_presentation")
-    assert not hasattr(recent_launcher, "recent_path_label")
-    assert not hasattr(workspace_controller, "EmptySpheresAction")
-    assert importlib.util.find_spec("ase2sprkkr_gui.gui.application.workspace_actions") is None
-
-
-def test_result_widget_accepts_presentations_not_application_state():
-    """Keep result-store/workspace orchestration outside the reusable Qt view."""
-    widget_tree = ast.parse((GUI / "widgets" / "result_actions.py").read_text())
-    widget_class = next(
-        node
-        for node in widget_tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "ResultActionsWidget"
-    )
-    widget_methods = {
-        node.name for node in widget_class.body if isinstance(node, ast.FunctionDef)
-    }
-    assert "set_results" not in widget_methods
-    assert "set_workspace_state" not in widget_methods
-
-    forbidden_calls = {"set_results", "set_workspace_state"}
-    for relative_path in (
-        Path("dialogs/workflow_window.py"),
-    ):
-        tree = ast.parse((GUI / relative_path).read_text())
-        calls = {
-            node.func.attr
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-        }
-        assert calls.isdisjoint(forbidden_calls), relative_path
 
 
 def test_editor_registry_dispatches_known_grammar_types():

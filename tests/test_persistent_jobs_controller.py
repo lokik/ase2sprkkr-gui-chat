@@ -10,7 +10,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QCoreApplication, QEvent, Qt, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QLabel, QWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QMessageBox, QWidget
 
 import ase2sprkkr_gui.gui.controllers.persistent_jobs as controller_module
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob
@@ -86,7 +86,7 @@ class _Source:
     def check_result_files(self, job_id):
         return self.job(job_id)
 
-    def load_result(self, job_id):
+    def load_result(self, job_id, *, restore_missing=True):
         raise OSError(f"No result fixture for {job_id}")
 
 
@@ -417,26 +417,27 @@ def test_destroyed_view_is_removed_from_controller_registry():
     assert len(controller._views) == 0
 
 
-def test_modal_result_loading_publishes_only_on_gui_thread(monkeypatch):
+def test_modal_result_loading_publishes_only_on_gui_thread(monkeypatch, tmp_path):
     from threading import get_ident
 
     _application = QApplication.instance() or QApplication([])
     gui_thread = get_ident()
     source = _Source((_job("completed", state="finished"),))
-    result = object()
+    from ase2sprkkr import ResultLoader, TaskResult
+    output = tmp_path / "completed.out"
+    output.write_text("completed")
+    result = ResultLoader().associate_result(TaskResult(None, None, tmp_path, output_file=output, task_name="DOS"))
     load_threads = []
     published = []
 
-    def load_result(job_id):
+    def load_result(job_id, *, restore_missing=True):
         assert job_id == "completed"
         load_threads.append(get_ident())
         return result
 
     source.load_result = load_result
-    controller = PersistentJobsController(source)
-    monkeypatch.setattr(
-        controller, "_publish_result",
-        lambda job_id, value, *, select_result: published.append(
+    controller = PersistentJobsController(
+        source, result_adopter=lambda job_id, value, select_result: published.append(
             (get_ident(), job_id, value, select_result)
         ),
     )
@@ -473,17 +474,25 @@ def test_untracked_launch_without_id_does_not_break_monitoring_other_run(monkeyp
     assert untracked in controller._pending_monitor_windows
 
 
-def test_postprocessing_retry_button_runs_worker_and_adopts_result(monkeypatch):
+@pytest.mark.parametrize("changed", (False, True))
+def test_postprocessing_retry_button_runs_worker_and_adopts_current_result(monkeypatch, tmp_path, changed):
     from dataclasses import replace
+    from ase2sprkkr import ResultLoader, TaskResult
     _application = QApplication.instance() or QApplication([])
     job = replace(_job('retry', state='failed'), failure_phase='postprocessing')
     source = _Source((job,))
-    result = object()
+    output = tmp_path / "retry.out"
+    output.write_text("result")
+    result = ResultLoader().associate_result(TaskResult(None, None, tmp_path, output_file=output, task_name="DOS"))
     calls = []
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
 
     def retry(job_id):
         calls.append(job_id)
         source.publish(replace(job, state='finished', failure_phase=None))
+        if changed:
+            output.write_text("rewritten result")
         return result
 
     source.retry_postprocessing = retry
@@ -497,7 +506,8 @@ def test_postprocessing_retry_button_runs_worker_and_adopts_result(monkeypatch):
     assert view.retry_postprocessing_button.isVisible()
     view.retry_postprocessing_button.click()
     assert calls == [job.id]
-    assert adopted == [(job.id, result, False)]
+    assert adopted == ([] if changed else [(job.id, result, False)])
+    assert bool(warnings) is changed
     assert not view.retry_postprocessing_button.isVisible()
     view.close()
 
@@ -1006,7 +1016,8 @@ def test_completed_job_can_reopen_result_window_without_restart(monkeypatch, tmp
     source = _Source((job,))
     output = tmp_path / "Fe_SCF.out"
     output.write_text("native SCF stdout\n", encoding="utf-8")
-    result = SimpleNamespace(output_values={}, result_values={}, output_file=output)
+    from ase2sprkkr import ResultLoader, TaskResult
+    result = ResultLoader().associate_result(TaskResult(None, None, tmp_path, output_file=output, task_name="SCF"))
     loads = []
     source.load_result = lambda job_id: (loads.append(job_id), result)[1]
     controller = PersistentJobsController(source)
@@ -1084,11 +1095,14 @@ def test_result_window_is_not_offered_for_active_or_pending_download_results():
     assert not view.open_result_window_button.isHidden()
 
 
-def test_closed_result_window_can_be_created_again(monkeypatch):
+def test_closed_result_window_can_be_created_again(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     job = _job("finished-run", state="finished")
     source = _Source((job,))
-    result = SimpleNamespace(output_values={}, result_values={})
+    from ase2sprkkr import ResultLoader, TaskResult
+    output = tmp_path / "closed.out"
+    output.write_text("saved result")
+    result = ResultLoader().associate_result(TaskResult(None, None, tmp_path, output_file=output, task_name="SCF"))
     source.load_result = lambda _job_id: result
     controller = PersistentJobsController(source)
     parent = _view()
@@ -1101,7 +1115,7 @@ def test_closed_result_window_can_be_created_again(monkeypatch):
             super().__init__()
             assert value is result
             assert task_name == "SCF"
-            assert saved_output.warning is not None
+            assert saved_output.text == "saved result"
             self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
             created.append(self)
 

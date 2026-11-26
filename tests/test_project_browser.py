@@ -64,7 +64,7 @@ class _JobSource:
     def check_result_files(self, job_id):
         return self.job(job_id)
 
-    def load_result(self, job_id):
+    def load_result(self, job_id, *, restore_missing=True):
         raise OSError(f"No result fixture for {job_id}")
 
     def job_changed(self, job_id):
