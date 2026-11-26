@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import (
     QStyle, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from ase2sprkkr.sprkkr.embedding import host_atoms
+from ase2sprkkr import PeriodicPotential
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_ARRAY, host_atoms
 from ase2sprkkr_gui.ase.embedding import reset_cluster_center
 from ase2sprkkr.sprkkr.embedding_transforms import (
     embedded_host_transform_capability,
@@ -42,7 +43,7 @@ from ase2sprkkr_gui.gui.misc.resources import icon_path
 
 
 def _is_cluster(atoms) -> bool:
-    return "sprkkr_embedding" in getattr(atoms, "arrays", {})
+    return atoms is not None and EMBEDDING_ARRAY in atoms.arrays
 
 
 class StructureEditorDialog(ElementAssignmentDialog):
@@ -458,19 +459,17 @@ class StructureEditorDialog(ElementAssignmentDialog):
                     spin.blockSignals(True)
                     spin.setValue(float(before[row, col]))
                     spin.blockSignals(False)
-            if hasattr(self, "cell_parameter_error"):
-                names = ", ".join("abc"[i] for i in invalid)
-                self.cell_parameter_error.setText(
-                    f"Lattice vector {names} must not have zero length."
-                )
+            names = ", ".join("abc"[i] for i in invalid)
+            self.cell_parameter_error.setText(
+                f"Lattice vector {names} must not have zero length."
+            )
             return
 
         super()._on_lattice_vector_changed(value)
-        if hasattr(self, "cell_parameter_spins"):
-            self._invalid_cell_parameters = None
-            self.cell_parameter_error.clear()
-            self._sync_cell_parameter_spins()
-            self._update_ok_state()
+        self._invalid_cell_parameters = None
+        self.cell_parameter_error.clear()
+        self._sync_cell_parameter_spins()
+        self._update_ok_state()
 
     def _sync_cell_parameter_spins(self) -> None:
         """Keep the six parameter spinboxes in sync with direct vector edits."""
@@ -707,7 +706,7 @@ class StructureEditorDialog(ElementAssignmentDialog):
 
     def _tab_changed(self, index: int) -> None:
         """Navigation never applies, discards or reconstructs a page draft."""
-        if self._switching_tabs or not getattr(self, "_editor_ready", False):
+        if self._switching_tabs or not self._editor_ready:
             return
         self._last_tab = index
         if index == self._embedded_index():
@@ -893,14 +892,10 @@ class StructureEditorDialog(ElementAssignmentDialog):
             # The backend resets electronic data on a host rebase. Ensure
             # this is a deliberate acceptance when the old SCF is reusable.
             old_host = self._original_atoms.embedding_host
-            has_results = False
-            if hasattr(old_host, "SCF_INFO"):
-                try:
-                    has_results = str(old_host.SCF_INFO.SCFSTATUS()).upper() not in (
-                        "START", "NONE", ""
-                    )
-                except (ValueError, TypeError, AttributeError):
-                    pass
+            has_results = (
+                isinstance(old_host, PeriodicPotential)
+                and str(old_host.SCF_INFO.SCFSTATUS()).upper() not in ("START", "NONE", "")
+            )
             if not has_results:
                 old_status = self._original_atoms.info.get("sprkkr_embedding_scf_status")
                 has_results = str(old_status).upper() not in ("NONE", "START", "")
