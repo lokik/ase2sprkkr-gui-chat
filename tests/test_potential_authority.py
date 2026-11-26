@@ -58,7 +58,7 @@ def test_exact_potential_loader_translates_backend_change(tmp_path, monkeypatch)
     path.write_text("stable")
     version = PotentialFileVersion.capture(path)
 
-    def changed(_path):
+    def changed(_path, *, embedding_host=None):
         raise PotentialFileChanged("changed")
 
     monkeypatch.setattr(result_loading, "load_potential_atoms", changed)
@@ -82,7 +82,7 @@ def test_exact_potential_loader_rejects_change_before_parse(tmp_path, monkeypatc
         result_loading.load_potential_version(version)
 
 
-def test_potential_structure_flow_uses_authoritative_potential_loader(
+def test_potential_structure_flow_reads_periodic_potential_once(
     tmp_path, monkeypatch
 ):
     path = tmp_path / "Fe.pot_new"
@@ -90,13 +90,15 @@ def test_potential_structure_flow_uses_authoritative_potential_loader(
     atoms = SPRKKRAtoms.promote_ase_atoms(Atoms("Fe"))
     calls = []
     monkeypatch.setattr(
-        file_flows,
-        "load_potential_atoms",
-        lambda value: calls.append(value) or atoms,
+        file_flows.PeriodicPotential,
+        "from_file",
+        staticmethod(lambda value, *, check_file_unchanged: (
+            calls.append((value, check_file_unchanged)) or SimpleNamespace(atoms=atoms)
+        )),
     )
 
     assert file_flows._read_structure_file(path) is atoms
-    assert calls == [path]
+    assert calls == [(str(path), True)]
 
 
 def test_calculation_request_uses_atoms_not_potential_path(tmp_path):

@@ -25,6 +25,7 @@ def _controller(record, replacements):
         atoms=Atoms("Fe"),
         input_parameters=InputParameters.create("SCF"),
         replace_input_parameters=replace,
+        reusable_potential_version=lambda: None,
     )
 
 
@@ -49,6 +50,7 @@ def _assert_detached_request(calls, controller, recent_files, parent, edited,
     assert request.state_id == controller.state_id
     assert request.directory == (controller.directory or "")
     assert request.restart_scf == controller.restarted
+    assert request.reusable_potential_version is None
     assert request.input_parameters is not edited
     assert request.input_parameters is not controller.input_parameters
     assert request.input_parameters.task_name.lower() == task
@@ -66,9 +68,9 @@ def test_non_guided_result_recompute_uses_expert_and_detached_request(monkeypatc
     workspace_input = controller.input_parameters
     editor_calls = []
 
-    def edit(parameters, *, parent, atoms, directory):
+    def edit(parameters, *, parent, atoms, directory, recent_files):
         assert directory == controller.directory
-        editor_calls.append((parameters, parent, atoms))
+        editor_calls.append((parameters, parent, atoms, recent_files))
         return edited
 
     monkeypatch.setattr(calculation_flow, "edit_input_parameters", edit)
@@ -90,7 +92,8 @@ def test_non_guided_result_recompute_uses_expert_and_detached_request(monkeypatc
     ) is launched
 
     assert len(editor_calls) == 1
-    editor_parameters, editor_parent, editor_atoms = editor_calls[0]
+    editor_parameters, editor_parent, editor_atoms, editor_recent = editor_calls[0]
+    assert editor_recent is recent_files
     assert editor_parameters is not historical
     assert editor_parameters.task_name.lower() == "torque"
     assert editor_parent is parent
@@ -118,9 +121,9 @@ def test_recompute_uses_effective_task_without_adopting_expert_input(monkeypatch
     input_generation = controller.input_parameters_generation
     editor_calls = []
 
-    def edit(parameters, *, parent, atoms, directory):
+    def edit(parameters, *, parent, atoms, directory, recent_files):
         assert directory == controller.directory
-        editor_calls.append((parameters, parent, atoms))
+        editor_calls.append((parameters, parent, atoms, recent_files))
         return edited
 
     monkeypatch.setattr(calculation_flow, "edit_input_parameters", edit)
@@ -146,7 +149,8 @@ def test_recompute_uses_effective_task_without_adopting_expert_input(monkeypatch
     ) is launched
 
     assert len(editor_calls) == 1
-    editor_parameters, editor_parent, editor_atoms = editor_calls[0]
+    editor_parameters, editor_parent, editor_atoms, editor_recent = editor_calls[0]
+    assert editor_recent is recent_files
     assert editor_parameters is not historical
     assert editor_parameters.definition_name.upper() == "ARPES"
     assert editor_parameters.task_name.upper() == "SPLEED"
