@@ -19,10 +19,11 @@ from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPre
 
 
 def test_double_click_opens_fullscreen_and_other_buttons_do_not(monkeypatch):
-    canvas = previews.PreviewFigureCanvas(Figure())
     calls = []
+    # Patch before construction: clicked.connect() captures the bound method.
     monkeypatch.setattr(previews.PreviewFigureCanvas, "open_fullscreen",
                         lambda self: calls.append(self))
+    canvas = previews.PreviewFigureCanvas(Figure())
     canvas.show()
     QApplication.processEvents()
     QTest.mouseDClick(canvas, Qt.MouseButton.LeftButton)
@@ -78,10 +79,11 @@ def test_non_pickleable_plot_still_expands_as_a_snapshot(monkeypatch):
 
 
 def test_fullscreen_corner_button_uses_the_double_click_action(monkeypatch):
-    canvas = previews.PreviewFigureCanvas(Figure())
     calls = []
+    # Patch before construction: clicked.connect() captures the bound method.
     monkeypatch.setattr(previews.PreviewFigureCanvas, "open_fullscreen",
                         lambda self: calls.append(self))
+    canvas = previews.PreviewFigureCanvas(Figure())
     canvas.resize(320, 240)
     canvas.show()
     QApplication.processEvents()
