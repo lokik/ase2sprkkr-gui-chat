@@ -67,11 +67,7 @@ def result_action_icon(style: QStyle, action: str) -> QIcon:
     )
 
 
-def result_action_tooltip(value, action: str) -> str:
-    return _action_tooltip(action, getattr(value, "info", ""))
-
-
-def _action_tooltip(action: str, info: str) -> str:
+def result_action_tooltip(action: str, info: str) -> str:
     label = _ACTION_LABELS.get(action, action.replace("_", " ").capitalize())
     return f"{label} — {info}" if info else label
 
@@ -427,15 +423,7 @@ class ResultActionsWidget(QWidget):
     @staticmethod
     def _is_extra_value(value: ResultValuePresentation) -> bool:
         """Whether the value would only be shown by Show all values."""
-        return (
-            not value.actions
-            and not value.show_in_summary
-            and not value.always_visible
-            and not (
-                value.value is not None
-                and callable(getattr(value.value, "path", None))
-            )
-        )
+        return not value.actions and not value.always_visible
 
     def _toggle_all_values(self, checked: bool) -> None:
         """Re-render the selected result without changing selection or state."""
@@ -585,7 +573,7 @@ class ResultActionsWidget(QWidget):
             button = QToolButton(buttons)
             button.setAutoRaise(True)
             button.setIcon(result_action_icon(self.style(), action))
-            action_tooltip = _action_tooltip(action, info)
+            action_tooltip = result_action_tooltip(action, info)
             if warning:
                 action_tooltip = "\n\n".join((action_tooltip, warning))
             button.setToolTip(action_tooltip)
