@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from ase import Atoms
-from ase2sprkkr import SPRKKRAtoms
+from ase2sprkkr import PeriodicPotential, SPRKKRAtoms
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_HOST
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ase2sprkkr_gui.ase.copy import copy_for_edit
@@ -307,22 +308,22 @@ class WorkspaceController(QObject):
     def structure_kind(self):
         return self.structure_state.structure_kind()
 
+    @property
+    def embedding_host_potential(self) -> PeriodicPotential | None:
+        """Return the native periodic host of the active embedded structure."""
+        if self.structure_kind() != "0d":
+            return None
+        host = self.atoms.info.get(EMBEDDING_HOST)
+        return host if isinstance(host, PeriodicPotential) else None
+
     def can_run_embedding(self) -> bool:
         """A guided cluster task can be configured once a native host exists."""
-        if self.structure_kind() != "0d":
-            return False
-        from ase2sprkkr import Potential
-
-        return isinstance(self.atoms.info.get("sprkkr_embedding_host"), Potential)
+        return self.embedding_host_potential is not None
 
     def embedding_host_scf_status(self) -> str | None:
         """Raw host SCFSTATUS; a START host is not a converged input for embedding."""
-        if self.structure_kind() != "0d":
-            return None
-        from ase2sprkkr import Potential
-
-        host = self.atoms.info.get("sprkkr_embedding_host")
-        if not isinstance(host, Potential):
+        host = self.embedding_host_potential
+        if host is None:
             return None
         status = host.SCF_INFO.SCFSTATUS()
         return str(status).strip().upper() if status is not None else None
@@ -334,14 +335,13 @@ class WorkspaceController(QObject):
         different host reference (or switching away from the cluster) prevents
         adoption. The previous cluster SCF is no longer considered converged.
         """
-        from ase2sprkkr import Potential
         from ase2sprkkr_gui.gui.application.structure_snapshot import StructureSnapshot
 
-        if not isinstance(new_host, Potential):
+        if not isinstance(new_host, PeriodicPotential):
             raise TypeError("Host SCF must produce a periodic SPR-KKR Potential.")
         atoms = self.atoms
         if (self.structure_kind() != "0d" or
-                atoms.info.get("sprkkr_embedding_host") is not expected_host):
+                atoms.info.get(EMBEDDING_HOST) is not expected_host):
             return False
         if self.state_id is None:
             return False
@@ -395,7 +395,7 @@ class WorkspaceController(QObject):
         kind = self.structure_kind()
         return (kind in {"3d", "2d"}
                 or (kind == "0d" and
-                    self.atoms.info.get("sprkkr_embedding_host") is not None))
+                    self.atoms.info.get(EMBEDDING_HOST) is not None))
 
     def scf_status(self) -> str | None:
         return self.structure_state.scf_status()
@@ -437,7 +437,7 @@ class WorkspaceController(QObject):
             or structure.potential_path is None
             # Embedded runs have a distinct POTFIL (host) and POTFIL_CLU.
             # Reusing one path as a periodic POTFIL would be incorrect.
-            or structure.atoms.info.get("sprkkr_embedding_host") is not None
+            or structure.atoms.info.get(EMBEDDING_HOST) is not None
             or self.has_unsaved_structure
         ):
             return None

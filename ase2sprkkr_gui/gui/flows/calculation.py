@@ -5,6 +5,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
+from ase2sprkkr import PeriodicPotential
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_HOST
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 from kkrunner.projects import ProjectRepository
 
@@ -148,8 +150,12 @@ def run_calculation(
     check_host = False
     host_status = None
     if request_override is not None and request_override.potential is False:
-        host = getattr(request_override.atoms, "embedding_host", None)
+        host = request_override.atoms.info.get(EMBEDDING_HOST)
         if host is not None:
+            if not isinstance(host, PeriodicPotential):
+                QMessageBox.warning(parent, "Host Potential Required",
+                                    "Attach a periodic SPR-KKR host potential before running an embedded calculation.")
+                return None
             check_host = True
             host_status = host.SCF_INFO.SCFSTATUS()
     elif request_override is None or request_override.potential is None:
@@ -458,11 +464,8 @@ def configure_and_run_host_scf(
     still refers to the host used for the launch, even if cluster sites have
     been edited meanwhile. The independent periodic result is also recorded.
     """
-    from ase2sprkkr import Potential
-
-    cluster = controller.atoms
-    host = getattr(cluster, "embedding_host", None)
-    if controller.structure_kind() != "0d" or not isinstance(host, Potential):
+    host = controller.embedding_host_potential
+    if host is None:
         QMessageBox.warning(
             parent, "Host Potential Required",
             "Attach a periodic SPR-KKR host potential before calculating its SCF.",
@@ -509,7 +512,7 @@ def configure_and_run_host_scf(
             # Read the native result instead; a missing/invalid host must never
             # silently replace the cluster's last usable host.
             new_host = loaded.result.potential
-            if not isinstance(new_host, Potential):
+            if not isinstance(new_host, PeriodicPotential):
                 raise TypeError("SCF result does not contain a periodic Potential.")
         except Exception as exc:  # noqa: BLE001 - missing or corrupt POTFIL
             QMessageBox.warning(
