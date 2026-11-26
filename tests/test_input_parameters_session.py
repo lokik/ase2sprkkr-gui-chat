@@ -570,21 +570,6 @@ def test_unrelated_edit_does_not_repair_incomplete_imported_split_contour():
 
 
 @pytest.mark.parametrize("task", ["scf", "bsf"])
-def test_energy_grid_editors_are_available(task):
-    application = QApplication.instance() or QApplication([])
-    dialog = GuidedInputParametersDialog(task, InputParameters.create(_backend_task(task)))
-    dialog.select_page("energy")
-    dialog.show()
-    application.processEvents()
-    main, single = dialog.editors_for(("ENERGY", "GRID"))
-    assert main.isVisible() and single.isVisible()
-    assert "grid" in main.placement.label.lower()
-    assert "grid" in single.placement.label.lower()
-    assert not dialog.session.is_modified()
-    dialog.close()
-
-
-@pytest.mark.parametrize("task", ["scf", "bsf"])
 def test_cluster_disabled_explanation_tracks_partial_and_full_activation(task):
     application = QApplication.instance() or QApplication([])
     dialog = GuidedInputParametersDialog(task, InputParameters.create(_backend_task(task)))

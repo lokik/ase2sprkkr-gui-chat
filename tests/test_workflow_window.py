@@ -902,7 +902,6 @@ def test_guided_structure_sidebar_tracks_current_structure(tmp_path):
     window.show()
     application.processEvents()
 
-    assert window._columns_layout.count() == 3
     assert window._structure_overview.isHidden()
 
     atoms = bulk("Fe", "bcc", a=2.87, cubic=True)

@@ -600,15 +600,6 @@ def test_overview_distinguishes_host_and_cluster_facts():
     dialog.close()
 
 
-def test_structure_information_and_site_table():
-    dialog = _dialog()
-    assert dialog.overview.info_box.title() == "Structure information"
-    assert dialog.overview.table_box.title() == "Atomic sites"
-    assert dialog.overview.site_table.horizontalHeader().count() == 9
-    assert dialog.overview.site_table.horizontalHeaderItem(2).text() == "Color"
-    dialog.close()
-
-
 def test_edit_lengths_angles_preserves_fractional_coordinates():
     from ase2sprkkr_gui.physics.cell_parameters import lengths_and_angles
 

@@ -5,7 +5,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QColor, QIcon, QPalette
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from ase2sprkkr_gui.gui.misc.resources import icon_path
@@ -17,7 +17,7 @@ def test_nexus_icons_are_bundled_and_render_at_action_size():
     for name in ("NeXus_Logo_square.svg", "NeXus_Logo_dark_square.svg"):
         path = icon_path(name)
         assert path.is_file()
-        assert "<svg" in path.read_text(encoding="utf-8")
+        assert not QIcon(str(path)).pixmap(22, 22).isNull()
     widget = QWidget()
     try:
         assert not result_actions.result_action_icon(widget.style(), "export_nexus").pixmap(22, 22).isNull()
@@ -25,28 +25,20 @@ def test_nexus_icons_are_bundled_and_render_at_action_size():
         widget.close()
 
 
-def test_nexus_uses_background_appropriate_official_variant(monkeypatch):
+def test_nexus_icon_renders_distinct_variants_for_light_and_dark_backgrounds():
     app = QApplication.instance() or QApplication([])
     previous = QPalette(app.palette())
     widget = QWidget()
-    called = []
-    original_icon_path = result_actions.icon_path
-
-    def tracked_icon_path(name):
-        called.append(name)
-        return original_icon_path(name)
-
-    monkeypatch.setattr(result_actions, "icon_path", tracked_icon_path)
+    images = []
     try:
-        for background, expected in (
-            ("#ffffff", "NeXus_Logo_square.svg"),
-            ("#1c1c1c", "NeXus_Logo_dark_square.svg"),
-        ):
+        for background in ("#ffffff", "#1c1c1c"):
             palette = QPalette(previous)
             palette.setColor(QPalette.ColorRole.Window, QColor(background))
             app.setPalette(palette)
-            result_actions.result_action_icon(widget.style(), "export_nexus")
-            assert called[-1] == expected
+            pixmap = result_actions.result_action_icon(widget.style(), "export_nexus").pixmap(22, 22)
+            assert not pixmap.isNull()
+            images.append(pixmap.toImage())
+        assert images[0] != images[1]
     finally:
         app.setPalette(previous)
         widget.close()
