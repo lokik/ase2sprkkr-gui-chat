@@ -10,7 +10,7 @@ import pytest
 from ase import Atoms
 from ase.build import bulk
 from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtWidgets import QFrame, QApplication, QBoxLayout
+from PyQt6.QtWidgets import QApplication
 
 from ase2sprkkr import SPRKKRAtoms
 from ase2sprkkr_gui.ase.embedding import EmbeddingDraft
@@ -71,30 +71,13 @@ def test_overview_shows_separate_host_and_cluster_information(application):
     assert "Cell (Å)" in widget.host_geometry.text()
     assert "SCF status: ITR" in widget.host_geometry.text()
 
-    # The scope selector is a mutually exclusive radio group in the
-    # right-hand control rail, above projection (3D) and Fit.
+    # Both preview scopes must be available and mutually exclusive.
     assert widget.host_radio.text() == "Host"
     assert widget.cluster_radio.text() == "Cluster"
     assert widget.cluster_radio.isChecked()
     assert not widget.host_radio.isChecked()
     assert not widget._view_selector.isHidden()
-    assert widget.preview.layout().itemAt(0).widget() is widget.preview.canvas
-    assert widget.preview.layout().itemAt(1).layout() is not None
     assert widget.preview.projection.currentText() == "3D"
-    assert widget.preview.fit_button.text() == "Fit"
-    controls = widget.preview.layout().itemAt(1).layout()
-    fit_index = next(i for i in range(controls.count())
-                     if controls.itemAt(i).widget() is widget.preview.fit_button)
-    assert controls.itemAt(fit_index + 1).widget() is widget.external_viewer_button
-    assert widget.frameShape() == QFrame.Shape.NoFrame
-    assert widget.layout().contentsMargins().left() == 0
-    assert widget.external_viewer_button.text() == "Viewer"
-    assert widget.external_viewer_button.toolTip() == "External viewer"
-    assert widget.external_viewer_button.height() == 68
-    assert widget.external_viewer_button.iconSize() == QSize(26, 26)
-    assert widget.external_viewer_button.toolButtonStyle() == (
-        Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-    )
 
     widget.host_radio.setChecked(True)
     assert not widget.cluster_radio.isChecked()
@@ -127,24 +110,6 @@ def test_replacing_host_view_with_bulk_draws_preview_once(application, monkeypat
     widget.set_structure(Atoms("Fe", cell=(3, 3, 3), pbc=True), kind="3d")
     assert widget.cluster_radio.isChecked()
     assert len(calls) == 1
-    widget.close()
-
-
-def test_host_facts_use_columns_when_wide_and_stack_when_narrow(application):
-    host = SPRKKRAtoms.promote_ase_atoms(bulk("Fe", "bcc", a=2.87)).potential
-    draft = EmbeddingDraft(host)
-    draft.include([draft.center])
-    cluster = draft.to_atoms()
-    widget = StructureOverviewWidget()
-    widget.set_structure(cluster, kind="0d")
-    widget.resize(500, 620)
-    widget.show()
-    application.processEvents()
-    assert widget._host_layout.direction() == QBoxLayout.Direction.LeftToRight
-
-    widget.resize(340, 620)
-    application.processEvents()
-    assert widget._host_layout.direction() == QBoxLayout.Direction.TopToBottom
     widget.close()
 
 

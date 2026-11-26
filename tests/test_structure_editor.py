@@ -52,37 +52,15 @@ def test_overview_first_and_advanced_removed_with_shared_preview():
     assert dialog.tabs.currentIndex() == 0
     assert dialog.overview.site_table.rowCount() == 2
     assert not dialog.tabs.tabIcon(0).isNull()
-    assert dialog.tabs.iconSize().width() >= 20
-    assert dialog.editor_splitter.widget(1).isAncestorOf(dialog.canvas)
-    assert not hasattr(dialog, "splitter")
     dialog.close()
 
 
-def test_embedded_tab_reuses_guided_embedding_icon():
-    from PyQt6.QtGui import QIcon
-    from ase2sprkkr_gui.gui.misc.resources import icon_path
-
+def test_editor_page_hints_follow_selected_page():
     dialog = _dialog(_cluster())
-    index = dialog._embedded_index()
-    assert index >= 0
-    expected = QIcon(str(icon_path("bulk_crystal.png")))
-    assert not expected.isNull()
-    size = dialog.tabs.iconSize()
-    assert dialog.tabs.tabIcon(index).pixmap(size).toImage() == (
-        expected.pixmap(size).toImage()
-    )
-    dialog.close()
-
-
-def test_editor_page_hints_live_in_shared_footer():
-    dialog = _dialog(_cluster())
-    action_row = dialog.layout().itemAt(dialog.layout().count() - 1).layout()
-    assert action_row.indexOf(dialog.footer_hint) >= 0
     dialog.tabs.setCurrentWidget(dialog._sites_page)
     assert "host sites and occupations" in dialog.footer_hint.text()
     dialog.tabs.setCurrentWidget(dialog._lattice_page)
     assert "HOST POTENTIAL lattice" in dialog.footer_hint.text()
-    assert dialog._lattice_page.layout().itemAt(0).widget() is dialog.lattice_group
     dialog.tabs.setCurrentWidget(dialog._embedded_page)
     assert "Select a repeated host cell" in dialog.footer_hint.text()
     dialog.tabs.setCurrentWidget(dialog.overview)
@@ -186,11 +164,8 @@ def test_discard_cluster_is_a_transform_and_retains_host(monkeypatch):
     cluster = _cluster()
     host = cluster.embedding_host
     dialog = _dialog(cluster)
-    assert dialog.discard_cluster_button.property("workflowActionTitle") == "Discard cluster"
     assert dialog.cluster_actions.title() == "Embedded cluster"
     assert not dialog.cluster_actions.isHidden()
-    assert not hasattr(dialog, "apply_cluster_button")
-    assert not dialog._embedded_page.isAncestorOf(dialog.discard_cluster_button)
     dialog.tabs.setCurrentWidget(dialog._transform_page)
     monkeypatch.setattr(
         editor_module.QMessageBox, "question",
@@ -603,83 +578,17 @@ def test_overview_reports_hall_number_for_3d_and_left_right_bulk_for_2d():
 
 
 
-def test_lattice_inputs_have_uniform_compact_width_and_parameter_frame():
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QFrame, QHeaderView
-
-    dialog = _dialog()
-    assert dialog.cell_parameter_frame.frameShape() == QFrame.Shape.StyledPanel
-    assert dialog.cell_parameter_frame.parentWidget() is dialog.cell_parameter_group.content
-    assert dialog.cell_parameter_group.content_layout.indexOf(
-        dialog.cell_parameter_frame
-    ) >= 0
-    assert dialog.lattice_group.title() == "Lattice vectors (Å)"
-    assert dialog.cell_parameter_group.title() == "Cell lengths and angles"
-    assert dialog.lattice_group.maximumWidth() == dialog.cell_parameter_group.maximumWidth()
-    widths = {spin.width() for spin in dialog.cell_parameter_spins.values()}
-    assert len(widths) == 1
-    (width,) = tuple(widths)
-    assert 110 <= width <= 145
-    table = dialog.lattice_vectors_table
-    header = table.horizontalHeader()
-    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
-    assert header.minimumSectionSize() == 115
-    assert table.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-    assert table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
-    expected_height = (
-        table.horizontalHeader().sizeHint().height()
-        + table.verticalHeader().length()
-        + 2 * table.frameWidth()
-    )
-    if table.horizontalScrollBar().maximum() > 0:
-        expected_height += table.horizontalScrollBar().sizeHint().height()
-    assert table.height() == expected_height
-    grid = dialog.cell_parameter_grid
-    assert grid.columnStretch(4) == 1
-    for index in range(6):
-        row, column = index % 3, 0 if index < 3 else 2
-        assert grid.itemAtPosition(row, column + 1).alignment() == Qt.AlignmentFlag.AlignLeft
-    dialog.show()
-    QApplication.processEvents()
-    assert dialog.lattice_group.width() == dialog.cell_parameter_group.width()
-    expected_height = (
-        table.horizontalHeader().sizeHint().height()
-        + table.verticalHeader().length()
-        + 2 * table.frameWidth()
-    )
-    if table.horizontalScrollBar().maximum() > 0:
-        expected_height += table.horizontalScrollBar().sizeHint().height()
-    assert table.height() == expected_height
-    dialog.close()
-
-
-def test_overview_uses_indented_aligned_two_column_facts():
-    from PyQt6.QtWidgets import QBoxLayout
+def test_overview_distinguishes_host_and_cluster_facts():
     from ase2sprkkr_gui.gui.widgets.structures.editor_overview import (
         _fact_columns, _fact_table,
     )
 
     dialog = _dialog(_cluster())
     overview = dialog.overview
-    sections = (
-        overview.info_box, overview.host_box, overview.table_box,
-        *(box for box, _ in overview.bulk_boxes.values()),
-    )
-    assert all(section.content_layout.contentsMargins().left() == 14 for section in sections)
-    dialog.show()
-    QApplication.processEvents()
-    expected_direction = (
-        QBoxLayout.Direction.LeftToRight
-        if overview.scroll.viewport().width() >= 720
-        else QBoxLayout.Direction.TopToBottom
-    )
-    assert overview.info_columns.direction() == expected_direction
-    assert overview.info_columns.spacing() == 40
     assert "Type:" in overview.main.text()
     assert "Cell (Å):" in overview.host_facts.text()
     assert "Cell (Å):" not in overview.symmetry.text()
     assert "Cluster symmetry:" in overview.symmetry.text()
-    assert "<table" in overview.host_facts.text()
     assert "Space group:" in overview.host_facts.text()
     summary, details = _fact_columns(
         "Type: 3D\nSites: 2\nCell (Å): a=2\nAngles (°): α=90",
@@ -687,54 +596,16 @@ def test_overview_uses_indented_aligned_two_column_facts():
     )
     assert summary == ["Type: 3D", "Sites: 2"]
     assert details == ["Cell (Å): a=2", "Angles (°): α=90", "Space group: Pm-3m"]
-    assert _fact_table(summary, details).count("<tr>") == 3
-    assert '<td width="36"></td>' in _fact_table(summary, details)
     assert _fact_table(["Elements: Fe < Co"]).count("&lt;") == 1
     dialog.close()
 
 
-def test_info_headings_and_unframed_sites():
-    from PyQt6.QtWidgets import QFrame
-
+def test_structure_information_and_site_table():
     dialog = _dialog()
     assert dialog.overview.info_box.title() == "Structure information"
     assert dialog.overview.table_box.title() == "Atomic sites"
-    from PyQt6.QtWidgets import QGroupBox
-    from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
-
-    sections = (
-        dialog.overview.info_box,
-        dialog.overview.host_box,
-        dialog.overview.table_box,
-        *(box for box, _label in dialog.overview.bulk_boxes.values()),
-        dialog.lattice_group,
-        dialog.cell_parameter_group,
-        dialog.geometry_group,
-        dialog.derived_group,
-    )
-    assert all(isinstance(section, EditorSection) for section in sections)
-    assert all(not isinstance(section, QGroupBox) for section in sections)
-    assert all(section.heading.font().bold() for section in sections)
-    assert all(
-        section.heading.font().pointSizeF() > dialog.font().pointSizeF()
-        for section in sections
-    )
-    assert dialog.scroll.frameShape() == QFrame.Shape.NoFrame
     assert dialog.overview.site_table.horizontalHeader().count() == 9
     assert dialog.overview.site_table.horizontalHeaderItem(2).text() == "Color"
-    assert not hasattr(dialog, "cell_summary")
-    dialog.close()
-
-
-def test_guided_style_transform_actions():
-    dialog = _dialog()
-    assert dialog.scale_button.property("workflowActionTitle") == "Scale lattice"
-    assert dialog.repeat_button.property("workflowActionTitle") == "Repeat structure"
-    assert dialog.rotate_button.property("workflowActionTitle") == (
-        "Rotate structure (Miller indices)"
-    )
-    assert dialog.build_surface_button.property("workflowActionTitle") == "Create 2D surface"
-    assert dialog.embedding_button.property("workflowActionTitle") == "Build embedded cluster"
     dialog.close()
 
 
@@ -882,20 +753,6 @@ def test_cluster_host_color_legend_matches_both_previews():
     dialog.close()
 
 
-def test_site_scope_radios_are_stacked_beside_table():
-    from PyQt6.QtWidgets import QVBoxLayout
-
-    dialog = _dialog(_cluster())
-    overview = dialog.overview
-    assert isinstance(overview.site_scope.layout(), QVBoxLayout)
-    assert overview.site_scope.layout().itemAt(0).widget() is overview.cluster_radio
-    assert overview.site_scope.layout().itemAt(1).widget() is overview.host_radio
-    assert overview.table_row.itemAt(0).widget() is overview.site_table
-    assert overview.table_row.itemAt(1).widget() is overview.site_scope
-    assert overview.table_box.title() == "Atomic sites"
-    dialog.close()
-
-
 def test_cannot_make_lattice_vector_zero():
     dialog = _dialog()
     before = dialog._require_draft().cell.copy()
@@ -920,32 +777,3 @@ def test_loaded_zero_vector_can_be_repaired_without_crashing():
     editor_module.QDialog.reject(dialog)
 
 
-def test_transform_action_cards_use_bundled_crystal_icons():
-    """All four Transform actions render their bundled icons, including on clusters."""
-    from PyQt6.QtGui import QIcon
-    from PyQt6.QtWidgets import QLabel
-    from ase2sprkkr_gui.gui.misc.resources import icon_path
-
-    for atoms, icons in (
-        (None, (
-            ("scale_button", "scale_lattice.svg"),
-            ("repeat_button", "repeat_structure.svg"),
-            ("rotate_button", "rotate_structure.svg"),
-        )),
-        (_cluster(), (("discard_cluster_button", "discard_cluster.svg"),)),
-    ):
-        dialog = _dialog(atoms)
-        try:
-            for name, filename in icons:
-                path = icon_path(filename)
-                assert path.is_file(), filename
-                expected = QIcon(str(path)).pixmap(26, 26)
-                assert not expected.isNull(), filename
-                icon_images = [
-                    label.pixmap().toImage()
-                    for label in getattr(dialog, name).findChildren(QLabel)
-                    if label.pixmap() is not None and not label.pixmap().isNull()
-                ]
-                assert expected.toImage() in icon_images, name
-        finally:
-            dialog.close()

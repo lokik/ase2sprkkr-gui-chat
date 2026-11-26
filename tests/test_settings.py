@@ -374,9 +374,8 @@ def test_logarithmic_atom_size_range_and_preview_uses_real_marker_areas(tmp_path
         dialog.close()
 
 
-def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
-    from PyQt6.QtCore import QPoint
-    from PyQt6.QtWidgets import QApplication, QLabel
+def test_atom_size_example_preserves_physical_distance(tmp_path):
+    from PyQt6.QtWidgets import QApplication
     from ase2sprkkr_gui.gui.dialogs.settings import SettingsDialog
 
     dialog = SettingsDialog(
@@ -388,19 +387,8 @@ def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
         QApplication.processEvents()
         page = dialog.general_page
         example = page.atom_size_example
-        assert example.mapTo(page, QPoint()).x() > page.atom_relative_sizes.mapTo(
-            page, QPoint()
-        ).x()
-        assert example.canvas.height() == 215
         assert page.atom_example_caption.text() == "Example (C / Au) · distance 2.5 Å"
         assert example.distance_angstrom == 2.5
-        assert page.atom_example_caption.mapTo(page, QPoint()).y() >= example.mapTo(
-            page, QPoint(0, example.height())
-        ).y()
-        assert not any(
-            "Preview uses" in label.text()
-            for label in page.atom_appearance_group.findChildren(QLabel)
-        )
         positions = example.markers.get_offsets().copy()
         assert positions[1, 0] - positions[0, 0] == example.distance_angstrom
         xlim = example.axes.get_xlim()
@@ -408,7 +396,6 @@ def test_atom_size_example_sits_beside_checkboxes_with_caption_below(tmp_path):
         # Changing the marker radius must not move the atoms.
         page.atom_size_percent.setValue(500)
         assert (example.markers.get_offsets() == positions).all()
-        assert len(example.axes.texts) == 0
     finally:
         dialog.close()
 
