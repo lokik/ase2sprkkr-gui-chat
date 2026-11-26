@@ -35,14 +35,7 @@ def _job(job_id: str, updated: str = "2026-11-13T10:00:00+00:00") -> PersistentJ
 
 
 class _Source:
-    available = True
-    unavailable_reason = None
-    supports_refresh = False
-    supports_results = True
-    supports_attach = False
-    supports_retry_download = False
-    supports_retry_postprocessing = False
-    supports_result_file_check = False
+    history_warning = None
 
     def __init__(self):
         self.metadata = {"first": _job("first"), "second": _job("second")}
@@ -60,6 +53,9 @@ class _Source:
 
     def job(self, job_id):
         return self.metadata.get(job_id)
+
+    def check_result_files(self, job_id):
+        return self.job(job_id)
 
     def load_result(self, job_id):
         self.calls.append((job_id, get_ident()))

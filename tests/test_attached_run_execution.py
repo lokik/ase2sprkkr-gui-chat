@@ -20,6 +20,10 @@ class _Source:
     def __init__(self, runner):
         self.runner = runner
         self.calls = []
+        self.changed = []
+
+    def job_changed(self, job_id):
+        self.changed.append(job_id)
 
     def attach(self, job_id, *, output_listener):
         self.calls.append(job_id)
@@ -52,6 +56,7 @@ def test_attached_execution_replays_output_and_waits_for_result():
 
     assert execution.run() is result
     assert source.calls == ["run-1"]
+    assert source.changed == ["run-1"]
     assert output == [("replayed\n", "out")]
     assert attached == [runner]
     assert cancellation.runner is runner
@@ -61,7 +66,7 @@ def test_attached_execution_honors_cancellation_before_registration():
     events = []
 
     class Runner:
-        def wait(self):  # pragma: no cover - cancellation stops before wait
+        def wait(self):
             events.append("wait")
 
         def stop_observation(self):
@@ -77,7 +82,7 @@ def test_attached_execution_honors_cancellation_before_registration():
             _Cancellation(requested=True),
         ).run()
 
-    assert events == ["stop_observation"]
+    assert events == ["stop_observation", "wait"]
 
 
 def test_attached_execution_converts_wait_failure_after_cancel_to_cancellation():
@@ -103,5 +108,19 @@ def test_attached_execution_propagates_backend_failure_when_not_cancelled():
         def cancel(self):
             pass
 
+    source = _Source(Runner())
     with pytest.raises(RuntimeError, match="backend failed"):
-        AttachedRunExecution(_Source(Runner()), "run-1", _Cancellation()).run()
+        AttachedRunExecution(source, "run-1", _Cancellation()).run()
+    assert source.changed == ["run-1"]
+
+
+def test_failed_attach_refreshes_metadata_without_masking_original_error():
+    source = _Source(None)
+
+    def attach(*args, **kwargs):
+        raise OSError("connection lost")
+
+    source.attach = attach
+    with pytest.raises(OSError, match="connection lost"):
+        AttachedRunExecution(source, "run-1", _Cancellation()).run()
+    assert source.changed == ["run-1"]

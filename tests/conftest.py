@@ -46,3 +46,20 @@ def native_embedded_potentials(tmp_path):
     copyfile(examples / "Fe3CoFe3.host.pot", host)
     copyfile(examples / "Fe3CoFe3.clu.pot", cluster)
     return host, cluster
+
+
+
+@pytest.fixture
+def make_job_source(tmp_path):
+    """Supply real session and project dependencies for job source tests."""
+    from kkrunner import MemoryRunStore, RunManager
+    from kkrunner.projects import ProjectRepository
+    from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
+
+    def make(manager, *, projects=None, session_manager=None):
+        return PersistentJobSource(
+            manager,
+            projects=projects if projects is not None else ProjectRepository(tmp_path / "source-projects"),
+            session_manager=session_manager if session_manager is not None else RunManager(MemoryRunStore()),
+        )
+    return make

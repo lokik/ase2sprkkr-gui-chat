@@ -1,4 +1,4 @@
-"""Automatic recovery only for interrupted postprocessing and downloads."""
+"""Reading job metadata never creates observers or recovers native execution."""
 from types import SimpleNamespace
 import ase2sprkkr_gui.gui.application.persistent_jobs as module
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
@@ -7,66 +7,31 @@ from kkrunner.files import FileManifest
 from kkrunner.transports import LocalTransport
 from kkrunner.backends import BackendConfig
 
-def _record(state=RunState.POSTPROCESSING):
-    return SimpleNamespace(
-        id="run-1", state=state,
+
+def test_source_has_no_implicit_recovery_on_construction_reload_or_refresh(monkeypatch, make_job_source):
+    record = SimpleNamespace(
+        id="run-1", state=RunState.POSTPROCESSING, store=None, project_id=None,
         created_at="2026-10-19T10:00:00+00:00",
         updated_at="2026-10-19T10:01:00+00:00",
         finished_at=None, metadata={"ase2sprkkr": {"task": "DOS"}},
         return_code=0, message=None, failure_phase=None,
         files=FileManifest(),
-        execution=ExecutionMetadata(LocalTransport(), WorkingDirectory("/tmp/calc"), "pid-42", backend=BackendConfig("kkrunner")),
+        execution=ExecutionMetadata(LocalTransport(), WorkingDirectory("/tmp/calc"),
+                                    "pid-42", backend=BackendConfig("kkrunner")),
     )
-
-class Store:
-    def __init__(self, rec): self.record = rec
-    def runs(self): return (self.record,)
-    def get(self, value): return self.record
-
-def test_recovery_failure_updates_terminal_metadata(monkeypatch):
-    store = Store(_record())
-    manager = SimpleNamespace(store=store, attach=lambda *args, **kw: None)
-    def attach(*args, **kwargs):
-        store.record = _record(RunState.FAILED)
-        store.record.message = "cannot reconstruct historical result"
-        raise RuntimeError(store.record.message)
-    monkeypatch.setattr(module, "attach_project_run", attach)
-    source = PersistentJobSource(manager)
-    assert source.active_recovery_ids == ()
-    assert source.job("run-1").state == "failed"
-    assert source.job("run-1").message == "cannot reconstruct historical result"
-
-def test_transient_recovery_failure_does_not_recurse(monkeypatch):
-    manager = SimpleNamespace(store=Store(_record()), attach=lambda *args, **kw: None)
+    store = SimpleNamespace(runs=lambda **kwargs: (record,), get=lambda _id: record)
     calls = []
-    def attach(*args, **kwargs):
-        calls.append(1)
-        raise OSError("connection lost")
-    monkeypatch.setattr(module, "attach_project_run", attach)
-    source = PersistentJobSource(manager)
-    assert calls == [1]
-    assert source.active_recovery_ids == ()
+    manager = SimpleNamespace(store=store, attach=lambda *a, **k: None,
+                              refresh=lambda **kwargs: calls.append("refresh"))
+
+    def unexpected_attach(*args, **kwargs):
+        raise AssertionError("a metadata source must not start a runner")
+
+    monkeypatch.setattr(module, "attach_project_run", unexpected_attach)
+    source = make_job_source(manager)
     assert source.job("run-1").state == "postprocessing"
-
-
-def test_live_postprocessing_notification_does_not_create_second_runner(monkeypatch):
-    store = Store(_record(RunState.RUNNING))
-    manager = SimpleNamespace(store=store, attach=lambda *args, **kwargs: None)
-    calls = []
-
-    def attach(*args, **kwargs):
-        calls.append(args[0])
-        return object()
-
-    monkeypatch.setattr(module, "attach_project_run", attach)
-    source = PersistentJobSource(manager)
-    assert calls == []
-
-    store.record = _record(RunState.POSTPROCESSING)
     source.job_changed("run-1")
     source.reload()
-
-    # The original live launch still owns postprocessing; neither its state
-    # notification nor refreshing history may create a second task processor.
-    assert calls == []
+    source.refresh()
+    assert calls == ["refresh"]
     assert source.job("run-1").state == "postprocessing"

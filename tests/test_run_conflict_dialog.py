@@ -84,7 +84,7 @@ def test_conflict_list_has_job_ids_file_paths_and_disabled_calculate(tmp_path):
     assert dialog.failed_button.isEnabled()
     assert dialog.delete_button.isEnabled()
     dialog.stop_button.click()
-    assert requests == [("stop", (conflict.conflicts[0].id,))]
+    assert requests == [("stop", (conflict.conflicts[0].key,))]
     assert not dialog.calculate_button.isEnabled()
     assert app is QApplication.instance()
 
@@ -175,8 +175,8 @@ def test_failed_cancellation_remains_selectable_for_other_actions(monkeypatch, t
     _window_obj, dialog = _window(tmp_path, manager, conflict)
     old_id = conflict.conflicts[0].id
 
-    def cannot_cancel(run_id):
-        assert run_id == old_id
+    def cannot_cancel(record):
+        assert record.id == old_id
         raise NotImplementedError("No verified PID")
 
     monkeypatch.setattr(manager, "cancel", cannot_cancel)
@@ -200,9 +200,8 @@ def test_confirmed_cancellation_enables_calculate_but_does_not_autostart(
     _window_obj, dialog = _window(tmp_path, manager, conflict)
     old_id = conflict.conflicts[0].id
 
-    def confirmed_cancel(run_id):
-        assert run_id == old_id
-        record = manager.store.get(run_id)
+    def confirmed_cancel(record):
+        assert record.id == old_id
         return manager.transition(record, state=RunState.CANCELLED)
 
     monkeypatch.setattr(manager, "cancel", confirmed_cancel)
@@ -346,9 +345,9 @@ def test_pending_backend_stop_does_not_close_dialog_or_allow_calculation(
     _window_obj, dialog = _window(tmp_path, manager, conflict)
     original = conflict.conflicts[0]
 
-    def pending_cancel(run_id):
-        assert run_id == original.id
-        return manager.store.get(run_id)
+    def pending_cancel(record):
+        assert record.id == original.id
+        return manager.store.get(record.id)
 
     monkeypatch.setattr(manager, "cancel", pending_cancel)
     _select(dialog)
@@ -358,4 +357,42 @@ def test_pending_backend_stop_does_not_close_dialog_or_allow_calculation(
     assert dialog.details.topLevelItemCount() == 1
     assert not dialog.calculate_button.isEnabled()
     assert dialog.result() == QDialog.DialogCode.Rejected
+    assert app is QApplication.instance()
+
+
+def test_conflict_actions_use_foreign_store(tmp_path, monkeypatch):
+    from kkrunner import MemoryRunStore
+    app = QApplication.instance() or QApplication([])
+    disk, original = _conflict(tmp_path)
+    memory = RunManager(MemoryRunStore(), conflict_stores=(disk.store,))
+    disk.conflict_stores = (memory.store,)
+    memory_record = memory.new_record(directory=tmp_path, files=original.record.files)
+    memory_record = memory.transition(memory_record, state=RunState.RUNNING)
+    conflict = DuplicateSubmissionError(original.record, (memory_record,))
+    window, dialog = _window(tmp_path, disk, conflict)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: QMessageBox.StandardButton.Yes)
+    _select(dialog)
+    dialog.failed_button.click()
+    assert memory.store.get(memory_record.id).state == RunState.FAILED
+    assert disk.store.get(original.conflicts[0].id).state == RunState.RUNNING
+    assert dialog.details.topLevelItemCount() == 1
+    assert app is QApplication.instance()
+
+
+def test_same_id_conflicts_select_independently(tmp_path, monkeypatch):
+    from kkrunner import MemoryRunStore
+    app = QApplication.instance() or QApplication([])
+    disk, original = _conflict(tmp_path)
+    old = original.conflicts[0]
+    memory = RunManager(MemoryRunStore(), conflict_stores=(disk.store,))
+    disk.conflict_stores = (memory.store,)
+    other = memory.transition(memory.new_record(directory=tmp_path, files=old.files, run_id=old.id),
+                              state=RunState.RUNNING)
+    window, dialog = _window(tmp_path, disk, DuplicateSubmissionError(original.record, (old, other)))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: QMessageBox.StandardButton.Yes)
+    _select(dialog, 1)
+    dialog.failed_button.click()
+    assert disk.store.get(old.id).state == RunState.RUNNING
+    assert memory.store.get(other.id).state == RunState.FAILED
+    assert dialog.details.topLevelItemCount() == 1
     assert app is QApplication.instance()

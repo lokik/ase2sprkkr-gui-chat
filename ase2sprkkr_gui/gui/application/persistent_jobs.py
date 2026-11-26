@@ -1,25 +1,25 @@
-"""Read and track ASE2SPRKKR persistent-run history behind a GUI-facing API."""
+"""Track ASE2SPRKKR runs in both application stores behind one GUI-facing API."""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any, Callable
 
+from kkrunner import MemoryRunStore
 from kkrunner.backends.contracts import BackendCapability
 from kkrunner.files.versions import file_digest
 from kkrunner.projects import ProjectRepository, ProjectRunManager
 from kkrunner.runs.manager import RunManager
-from kkrunner.runs.records import CorruptRunRecord, RunStore
+from kkrunner.runs.records import CorruptRunRecord, RunRecord
 from ase2sprkkr.outputs.project_results import (
     attach_project_run,
     load_project_result,
     retry_project_postprocessing,
 )
 from ase2sprkkr.sprkkr.projects import (
-    default_project_repository,
     project_execution_manager,
 )
 from ase2sprkkr_gui.gui.application.imported_project_results import (
@@ -42,7 +42,20 @@ _FINAL_STATES = frozenset(
     {"finished", "failed", "cancelled"}
 )
 JobChangedListener = Callable[[str], None]
-_RECOVERING = object()
+_SESSION_PREFIX = "session/"
+
+
+def is_session_job_id(job_id: str) -> bool:
+    return job_id.startswith(_SESSION_PREFIX)
+
+
+def job_id_for_record(record: RunRecord) -> str:
+    """Encode the store namespace in the existing string-valued GUI identity.
+
+    Run ids cannot contain slashes, so the two namespaces cannot collide.
+    """
+    prefix = _SESSION_PREFIX if isinstance(record.store, MemoryRunStore) else ""
+    return prefix + str(record.id)
 
 
 def project_run_manager(projects: ProjectRepository) -> ProjectRunManager:
@@ -55,7 +68,7 @@ def _value(value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def _execution_target(record: Any) -> str:
+def _execution_target(record: RunRecord) -> str:
     """Describe transport and native backend separately."""
     transport = record.execution.transport
     backend = record.execution.backend
@@ -72,7 +85,7 @@ def _execution_target(record: Any) -> str:
     return label
 
 
-def _attachment_availability(record: Any, state: str) -> tuple[bool, str | None]:
+def _attachment_availability(record: RunRecord, state: str) -> tuple[bool, str | None]:
     """Explain whether a persisted execution can be observed after a GUI restart."""
     if state in _FINAL_STATES:
         return False, None
@@ -104,10 +117,12 @@ def _attachment_availability(record: Any, state: str) -> tuple[bool, str | None]
     return True, None
 
 
-def _cancellation_availability(record: Any, state: str) -> tuple[bool, str | None]:
-    """Do not offer unverified process killing for legacy direct identities."""
+def _cancellation_availability(record: RunRecord, state: str) -> tuple[bool, str | None]:
+    """Offer cancellation only while a native calculation can still be stopped."""
     if state in _FINAL_STATES:
         return False, None
+    if state in ("downloading", "postprocessing"):
+        return False, "Execution has finished; result finalization cannot be cancelled as a native job."
     if not record.execution.available:
         return False, "The saved backend or connection is unavailable."
     token = record.execution.backend_id
@@ -127,7 +142,7 @@ def _cancellation_availability(record: Any, state: str) -> tuple[bool, str | Non
 
 @dataclass(frozen=True)
 class PersistentJob:
-    """Stable presentation model for one persistent ASE2SPRKKR run."""
+    """Stable presentation model for one tracked ASE2SPRKKR run."""
 
     id: str
     state: str
@@ -177,19 +192,19 @@ class PersistentJob:
     @classmethod
     def from_run_record(
         cls,
-        record: Any,
+        record: RunRecord,
         *,
         result_files_verified: bool = False,
     ) -> "PersistentJob":
         state = _value(record.state)
         result_files = record.files
         result_files_state = None if result_files is None else _value(result_files.state)
-        finished_at = getattr(record, "finished_at", None)
+        finished_at = record.finished_at
         metadata = record.metadata.get("ase2sprkkr", {})
         attachable, reattach_unavailable_reason = _attachment_availability(record, state)
         cancelable, cancel_unavailable_reason = _cancellation_availability(record, state)
         return cls(
-            id=str(record.id),
+            id=job_id_for_record(record),
             state=state,
             created_at=str(record.created_at),
             updated_at=str(record.updated_at),
@@ -197,15 +212,15 @@ class PersistentJob:
             directory=str(record.execution.directory.local),
             dataset=(None if metadata.get("dataset") is None else str(metadata["dataset"])),
             target=_execution_target(record),
-            return_code=getattr(record, "return_code", None),
-            message=getattr(record, "message", None),
+            return_code=record.return_code,
+            message=record.message,
             result_files_state=result_files_state or None,
             finished_at=None if finished_at is None else str(finished_at),
             attachable=attachable,
             reattach_unavailable_reason=reattach_unavailable_reason,
             result_files_verified=result_files_verified,
             failure_phase=(None if record.failure_phase is None else _value(record.failure_phase)),
-            project_id=getattr(record, "project_id", None),
+            project_id=record.project_id,
             profile=metadata.get("profile"),
             cancelable=cancelable,
             cancel_unavailable_reason=cancel_unavailable_reason,
@@ -242,97 +257,41 @@ class PersistentJob:
 
 
 class PersistentJobSource:
-    """Application-owned persistent-job cache and lifecycle adapter.
+    """Read model and command adapter for ASE2SPRKKR runs and imported results.
 
-    ASE2SPRKKR's persisted ``RunRecord`` remains authoritative. ``job_changed``
-    receives only a stable run id and reloads the record from the persistent
-    store instead of accepting a parallel copy of lifecycle state.
-
-    Recovery of interrupted ``downloading`` and ``postprocessing`` jobs is an implementation detail of
-    this source. Presentation code never owns or classifies recovery failures.
-    A failed download is terminal until the user explicitly retries it;
-    the backend then owns the transfer and postprocessing transitions.
+    RunManager owns execution state; the stores own records. This source
+    caches their presentation, resolves GUI ids and delegates explicit
+    commands. Reading or refreshing it never starts a Run observer.
     """
 
     def __init__(
-        self, manager: Any | None = None, *, projects: ProjectRepository | None = None
+        self, manager: RunManager, *, projects: ProjectRepository,
+        session_manager: RunManager,
     ) -> None:
         self._manager = manager
+        self._session_manager = session_manager
         self._projects = projects
-        self.unavailable_reason: str | None = None
         self.history_warning: str | None = None
         self._unreadable_records: dict[Path, str] = {}
+        # Serialize authoritative read -> projection -> cache publication.
+        # Readers only need the short cache lock, never the history I/O lock.
+        self._update_lock = Lock()
         self._lock = RLock()
         self._jobs: dict[str, PersistentJob] = {}
         self._listeners: set[JobChangedListener] = set()
-        self._recovery_runners: dict[str, Any] = {}
-
-        if manager is None:
-            # The backend stores project runs globally, not in a legacy default
-            # persistent-run manager. Browse that same authoritative store.
-            manager = project_run_manager(default_project_repository())
-            self._manager = manager
-
-        try:
-            store = manager.store
-        except AttributeError as exc:
-            raise TypeError("persistent job manager must expose a run store") from exc
-        if not callable(getattr(store, "runs", None)) or not callable(
-            getattr(store, "get", None)
-        ):
-            raise TypeError("persistent run store must provide runs() and get()")
 
         self.reload(notify=False)
-        # Recover persisted work at startup. Ordinary state notifications can
-        # describe runs still owned by their original live monitor.
-        self._recover_incomplete(self.jobs())
 
-    @property
-    def available(self) -> bool:
-        return self._manager is not None
+    def _target(self, job_id: str):
+        """Resolve a GUI job id to the manager and its native record id."""
+        if is_session_job_id(job_id):
+            return self._session_manager, job_id[len(_SESSION_PREFIX):]
+        return self._manager, job_id
 
-    @property
-    def supports_refresh(self) -> bool:
-        return self.available and callable(getattr(self._manager, "refresh", None))
-
-    @property
-    def supports_results(self) -> bool:
-        return self.available and callable(getattr(self._manager, "retrieve_result_files", None))
-
-    @property
-    def supports_attach(self) -> bool:
-        return self.available and callable(getattr(self._manager, "attach", None))
-
-    @property
-    def supports_retry_download(self) -> bool:
-        return self.supports_attach
-
-    @property
-    def supports_retry_postprocessing(self) -> bool:
-        return self.available and callable(getattr(self._manager, "retry_postprocessing", None))
-
-    @property
-    def supports_cancel(self) -> bool:
-        return self.available and callable(getattr(self._manager, "cancel", None))
-
-    @property
-    def supports_forget(self) -> bool:
-        return self.available and callable(getattr(self._manager, "forget", None))
-
-    @property
-    def supports_result_file_check(self) -> bool:
-        return self.available
-
-    @property
-    def supports_reassignment(self) -> bool:
-        return self._projects is not None or (
-            self.available and callable(getattr(ProjectRepository, "reassign_runs", None))
-        )
-
-    @property
-    def active_recovery_ids(self) -> tuple[str, ...]:
-        with self._lock:
-            return tuple(self._recovery_runners)
+    def record(self, job_id: str):
+        """Return the authoritative record for a GUI job identity."""
+        manager, run_id = self._target(job_id)
+        return manager.store.get(run_id)
 
     def subscribe(self, listener: JobChangedListener) -> Callable[[], None]:
         """Subscribe to metadata changes and return an unsubscribe callback."""
@@ -367,103 +326,83 @@ class PersistentJobSource:
     def _report_unreadable_record(self, error: CorruptRunRecord) -> None:
         """Keep a damaged history entry visible as a warning, not as a run."""
         logger.warning("Skipping unreadable persistent run: %s", error)
-        self._unreadable_records[error.path] = str(error)
-        count = len(self._unreadable_records)
-        noun = "record" if count == 1 else "records"
-        verb = "is" if count == 1 else "are"
-        self.history_warning = (
-            f"{count} stored run {noun} could not be read and {verb} not shown "
-            "in the history. The original files were not changed. "
-            "See the application log for their paths and errors."
-        )
+        with self._lock:
+            self._unreadable_records[error.path] = str(error)
+            count = len(self._unreadable_records)
+            noun = "record" if count == 1 else "records"
+            verb = "is" if count == 1 else "are"
+            self.history_warning = (
+                f"{count} stored run {noun} could not be read and {verb} not shown "
+                "in the history. The original files were not changed. "
+                "See the application log for their paths and errors."
+            )
 
-    def _history_records(self):
-        """Browse valid history while keeping strict reads for run operations."""
-        self._unreadable_records.clear()
-        self.history_warning = None
-        store = self._manager.store
-        if isinstance(store, RunStore):
-            return store.runs(on_error=self._report_unreadable_record)
-        return store.runs()
+    def _records(self):
+        """Browse both stores while keeping strict reads for run operations."""
+        with self._lock:
+            self._unreadable_records.clear()
+            self.history_warning = None
+        records = []
+        for manager in (self._manager, self._session_manager):
+            records.extend(manager.store.runs(on_error=self._report_unreadable_record))
+        return tuple(records)
 
     def reload(self, *, notify: bool = True) -> tuple[PersistentJob, ...]:
         """Reload authoritative metadata without starting another runner."""
-        if self._manager is None:
-            return ()
-        records = self._history_records()
-        loaded = {
-            str(record.id): PersistentJob.from_run_record(record)
-            for record in records
-            if "ase2sprkkr" in record.metadata
-        }
-        if self._projects is not None:
+        with self._update_lock:
+            records = self._records()
+            loaded = {
+                job_id_for_record(record): PersistentJob.from_run_record(record)
+                for record in records
+                if "ase2sprkkr" in record.metadata
+            }
             for key, project_id in assignments(self._projects).items():
                 imported = PersistentJob.from_external_reference(key, project_id)
                 loaded[imported.id] = imported
-        with self._lock:
-            previous = self._jobs
-            self._jobs = loaded
-        changed = tuple(
-            job_id
-            for job_id in set(previous) | set(loaded)
-            if previous.get(job_id) != loaded.get(job_id)
-        )
+            with self._lock:
+                previous = self._jobs
+                self._jobs = loaded
+            changed = tuple(
+                job_id
+                for job_id in set(previous) | set(loaded)
+                if previous.get(job_id) != loaded.get(job_id)
+            )
         if notify:
             for job_id in changed:
                 self._notify(job_id)
         return self.jobs()
 
-    def job_changed(self, job_id: str) -> PersistentJob | None:
-        """Reload one authoritative record after an external lifecycle event."""
-        if self._manager is None:
-            return None
-        job_id = str(job_id)
-        if job_id.startswith("external:") and self._projects is not None:
+    def job_changed(self, job_id) -> PersistentJob | None:
+        """Read one authoritative record and publish its changed presentation."""
+        job_id = job_id if isinstance(job_id, str) else job_id_for_record(job_id)
+        if job_id.startswith("external:"):
             self.reload()
             return self.job(job_id)
-        try:
-            record = self._manager.store.get(job_id)
-        except (FileNotFoundError, KeyError, CorruptRunRecord) as exc:
-            if isinstance(exc, CorruptRunRecord):
-                self._report_unreadable_record(exc)
-            with self._lock:
-                existed = self._jobs.pop(job_id, None) is not None
-            if existed:
-                self._notify(job_id)
-            return None
+        with self._update_lock:
+            try:
+                record = self.record(job_id)
+            except (FileNotFoundError, KeyError, CorruptRunRecord) as exc:
+                if isinstance(exc, CorruptRunRecord):
+                    self._report_unreadable_record(exc)
+                record = None
 
-        if "ase2sprkkr" not in record.metadata:
+            job = (PersistentJob.from_run_record(record)
+                   if record is not None and "ase2sprkkr" in record.metadata else None)
             with self._lock:
-                existed = self._jobs.pop(job_id, None) is not None
-            if existed:
-                self._notify(job_id)
-            return None
-
-        job = PersistentJob.from_run_record(record)
-        changed = self._replace_cached_job(job)
-        if changed:
+                previous = self._jobs.get(job_id)
+                if job is None:
+                    self._jobs.pop(job_id, None)
+                else:
+                    self._jobs[job_id] = job
+        if previous != job:
             self._notify(job_id)
         return job
 
     def refresh(self) -> tuple[PersistentJob, ...]:
-        """Recover interrupted submissions, refresh backend state, and reload."""
-        if self._manager is None:
-            return ()
-        recover_submitting = getattr(self._manager, "recover_submitting", None)
-        if callable(recover_submitting):
-            for record in self._history_records():
-                if _value(record.state) == "submitting":
-                    recover_submitting(record)
-        if self.supports_refresh:
-            if isinstance(self._manager, RunManager):
-                self._manager.refresh(on_error=self._report_unreadable_record)
-            else:
-                self._manager.refresh()
-        jobs = self.reload()
-        # Recover any processing/downloading work that just became eligible
-        # after a backend status refresh; never resubmit its calculation.
-        self._recover_incomplete(jobs)
-        return jobs
+        """Ask the managers to refresh their own records, then update the view."""
+        for manager in (self._manager, self._session_manager):
+            manager.refresh(on_error=self._report_unreadable_record)
+        return self.reload()
 
     def check_result_files(self, job_id: str) -> PersistentJob:
         job = self.job(str(job_id))
@@ -473,13 +412,11 @@ class PersistentJobSource:
             if current is None:
                 raise FileNotFoundError(job_id)
             return current
-        if not self.supports_result_file_check:
-            raise NotImplementedError(
-                "This ASE2SPRKKR version cannot verify persistent result files."
-            )
-        record = self._manager.store.get(str(job_id))
-        job = PersistentJob.from_run_record(record, result_files_verified=True)
-        if self._replace_cached_job(job):
+        with self._update_lock:
+            record = self.record(str(job_id))
+            job = PersistentJob.from_run_record(record, result_files_verified=True)
+            changed = self._replace_cached_job(job)
+        if changed:
             self._notify(job.id)
         return job
 
@@ -491,57 +428,48 @@ class PersistentJobSource:
         output_listener=None,
     ) -> Any:
         """Attach to an active run or explicitly retry a failed download."""
-        if not self.supports_attach:
-            raise NotImplementedError(
-                "This ASE2SPRKKR version cannot attach to persistent calculations."
-            )
-        job = self.job(str(job_id))
-        if (
-            job is not None
-            and job.can_retry_download
-            and not self.supports_retry_download
-        ):
-            raise NotImplementedError(
-                "This ASE2SPRKKR version cannot retry a failed download."
-            )
+        manager, run_id = self._target(str(job_id))
         return attach_project_run(
-            self._manager,
-            str(job_id),
+            manager,
+            run_id,
             callback=callback,
             output_listener=output_listener,
         )
 
     def cancel(self, job_id: str) -> PersistentJob | None:
         """Ask the backend to stop the native process, then refresh its record."""
-        if not self.supports_cancel:
-            raise NotImplementedError("This runner cannot cancel persistent jobs")
         try:
-            self._manager.cancel(str(job_id))
+            manager, run_id = self._target(str(job_id))
+            manager.cancel(run_id)
         finally:
             self.job_changed(str(job_id))
         return self.job(str(job_id))
 
     def referenced_file_deletion(self, job_id: str) -> FileDeletionPlan:
         """Return the deletable files and their current reference/snapshot state."""
+        manager, run_id = self._target(str(job_id))
         return plan_referenced_file_deletion(
-            self._manager, self._projects, str(job_id), self.job(str(job_id)),
+            manager, self._projects, run_id, self.job(str(job_id)),
         )
 
     def remote_file_review(self, job_id: str) -> RemoteFileReview:
+        manager, run_id = self._target(str(job_id))
         return inspect_remote_file_review(
-            self._manager, str(job_id), self.job(str(job_id)),
+            manager, run_id, self.job(str(job_id)),
         )
 
     def capture_remote_cleanup(self, job_id: str) -> Any:
+        manager, run_id = self._target(str(job_id))
         return prepare_remote_file_cleanup(
-            self._manager, str(job_id), self.job(str(job_id)),
+            manager, run_id, self.job(str(job_id)),
         )
 
     def cleanup_remote_files(
-        self, record: Any, review: RemoteFileReview,
+        self, record: RunRecord, review: RemoteFileReview,
         selected_files: tuple[str, ...],
     ) -> tuple[dict, ...]:
-        return perform_remote_file_cleanup(self._manager, record, review, selected_files)
+        manager, _ = self._target(job_id_for_record(record))
+        return perform_remote_file_cleanup(manager, record, review, selected_files)
 
     def forget(
         self, job_id: str, *, force: bool = False, delete_files: bool = False,
@@ -557,9 +485,10 @@ class PersistentJobSource:
         """
         job_id = str(job_id)
         job = self.job(job_id)
+        manager, run_id = self._target(job_id)
         if delete_files:
             delete_confirmed_local_files(
-                self._manager, self._projects, job_id, job,
+                manager, self._projects, run_id, job,
                 expected_files=expected_files,
                 expected_file_snapshots=expected_file_snapshots,
                 expected_shared_files=expected_shared_files,
@@ -567,23 +496,18 @@ class PersistentJobSource:
             )
 
         if job is not None and job.imported_path is not None:
-            if self._projects is None:
-                raise RuntimeError("Imported project repository is unavailable")
             remove_reference(self._projects, job.id)
             self.reload()
             return job
-        if not self.supports_forget:
-            raise NotImplementedError("This runner cannot remove persistent history")
-        removed = self._manager.forget(job_id, force=force)
+        removed = manager.forget(run_id, force=force)
         self.job_changed(job_id)
         return removed
 
     def retry_postprocessing(self, job_id: str) -> Any:
         """Reprocess persisted output files without executing the run again."""
-        if not self.supports_retry_postprocessing:
-            raise NotImplementedError("This runner cannot retry postprocessing")
         try:
-            return retry_project_postprocessing(self._manager, str(job_id))
+            manager, run_id = self._target(str(job_id))
+            return retry_project_postprocessing(manager, run_id)
         finally:
             self.job_changed(str(job_id))
 
@@ -592,8 +516,9 @@ class PersistentJobSource:
         *, expected_project_ids,
     ) -> None:
         """Move tracked runs through KKRunner and external references through their store."""
-        if not self.supports_reassignment:
-            raise NotImplementedError("Project reassignment is unavailable")
+        job_ids = tuple(job_ids)
+        if any(is_session_job_id(job_id) for job_id in job_ids):
+            raise ValueError("Session runs are not project history")
         imported_ids = tuple(
             job_id for job_id in job_ids
             if (job := self.job(job_id)) is not None and job.imported_path is not None
@@ -623,18 +548,13 @@ class PersistentJobSource:
                     "Add the updated file again to capture its new version."
                 )
             return load_result_file(job.imported_path).result
-        if not self.supports_results:
-            raise NotImplementedError(
-                "This ASE2SPRKKR version cannot load persistent historical results."
-            )
+        manager, run_id = self._target(str(job_id))
         result = load_project_result(
-            self._manager, str(job_id), allow_unparsed=True,
+            manager, run_id, allow_unparsed=True,
         )
-        record = getattr(result, "run_record", None)
-        if record is not None:
-            job = PersistentJob.from_run_record(record, result_files_verified=True)
-            if self._replace_cached_job(job):
-                self._notify(job.id)
+        # Parsing can take arbitrarily long. Do not publish the record
+        # snapshot captured before parsing over a newer cache entry.
+        self.check_result_files(job_id)
         return result
 
     def _replace_cached_job(self, job: PersistentJob) -> bool:
@@ -642,67 +562,3 @@ class PersistentJobSource:
             previous = self._jobs.get(job.id)
             self._jobs[job.id] = job
         return previous != job
-
-    def _refresh_after_recovery_failure(self, job_id: str) -> None:
-        """Refresh cache after recovery without recursively attempting recovery."""
-        try:
-            record = self._manager.store.get(job_id)
-        except (OSError, RuntimeError, ValueError):
-            logger.exception(
-                "Failed to refresh persistent run %s after recovery failure", job_id
-            )
-            return
-        job = PersistentJob.from_run_record(record)
-        if self._replace_cached_job(job):
-            self._notify(job.id)
-
-    def _recover_incomplete(self, jobs: tuple[PersistentJob, ...]) -> None:
-        if not self.supports_attach:
-            return
-        for job in jobs:
-            if job.state not in ("downloading", "postprocessing") or not job.attachable:
-                continue
-            try:
-                self._recover(job.id)
-            except Exception:  # noqa: BLE001 - persisted/backend recovery boundary
-                logger.exception("Failed to recover persistent run %s", job.id)
-                self._refresh_after_recovery_failure(job.id)
-
-    def _recover(self, job_id: str) -> Any | None:
-        # Reserve the identity before attach, then release the lock. A second
-        # reload sees the sentinel and cannot attach the same recovering run.
-        with self._lock:
-            if job_id in self._recovery_runners:
-                value = self._recovery_runners[job_id]
-                return None if value is _RECOVERING else value
-            self._recovery_runners[job_id] = _RECOVERING
-
-        completed_synchronously = False
-
-        def completed(_result: Any) -> None:
-            nonlocal completed_synchronously
-            completed_synchronously = True
-            with self._lock:
-                self._recovery_runners.pop(job_id, None)
-            try:
-                self.job_changed(job_id)
-            except Exception:  # noqa: BLE001 - recovery completion boundary
-                logger.exception(
-                    "Recovered persistent run %s completed, but its metadata "
-                    "could not be refreshed",
-                    job_id,
-                )
-
-        try:
-            runner = self.attach(job_id, callback=completed)
-        except BaseException:
-            with self._lock:
-                if self._recovery_runners.get(job_id) is _RECOVERING:
-                    self._recovery_runners.pop(job_id, None)
-            raise
-
-        with self._lock:
-            if completed_synchronously or job_id not in self._recovery_runners:
-                return None
-            self._recovery_runners[job_id] = runner
-        return runner

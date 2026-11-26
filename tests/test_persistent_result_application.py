@@ -5,7 +5,7 @@ from ase import Atoms
 from ase2sprkkr import InputParameters
 from kkrunner.projects import ProjectRunManager, ProjectRepository
 from kkrunner.files import FileEntry, FileManifest, FileVersion
-from kkrunner import RunState, RunStore
+from kkrunner import MemoryRunStore, RunManager, RunState, RunStore
 from PyQt6.QtWidgets import QApplication, QDialog, QWidget
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -29,7 +29,8 @@ def _finished_dos_run(tmp_path):
     run = manager.new_record(directory=tmp_path, files=FileManifest(inputs=(FileEntry(local_path=str(input_path)),), stdout=FileEntry(local_path=str(output_path)), outputs=(FileEntry(local_path=str(dos_path)),), input_versions=(FileVersion.capture(input_path, require_digest=True),)), metadata={'ase2sprkkr': {'task': str('DOS').upper(), 'input_definition': str('DOS').upper()}}, processing_required=True)
     manager.store.save(run)
     run = manager.complete(run, state=RunState.FINISHED, return_code=0, artifacts_available=True)
-    return (PersistentJobSource(manager), run)
+    return (PersistentJobSource(manager, projects=projects,
+                                session_manager=RunManager(MemoryRunStore())), run)
 
 def test_persisted_result_enters_application_history_and_recompute(tmp_path, monkeypatch):
     """Exercise the production persistence -> workspace -> recompute boundaries."""

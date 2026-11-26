@@ -31,7 +31,7 @@ class SubmissionConflictDialog(QDialog):
         self._busy = False
         self._verified = True
         self._manual_override = False
-        self._errors: dict[str, str] = {}
+        self._errors: dict[tuple | str, str] = {}
 
         layout = QVBoxLayout(self)
         introduction = QLabel(
@@ -99,9 +99,13 @@ class SubmissionConflictDialog(QDialog):
     def proposed_record(self):
         return self._conflict.record
 
-    def selected_ids(self) -> tuple[str, ...]:
+    @property
+    def conflicting_records(self):
+        return self._conflict.conflicts
+
+    def selected_keys(self) -> tuple[tuple, ...]:
         return tuple(
-            item.data(0, Qt.ItemDataRole.UserRole)
+            item.data(0, Qt.ItemDataRole.UserRole).key
             for index in range(self.details.topLevelItemCount())
             for item in (self.details.topLevelItem(index),)
             if item.checkState(0) == Qt.CheckState.Checked
@@ -109,7 +113,7 @@ class SubmissionConflictDialog(QDialog):
 
     def set_conflicts(self, conflict, *, errors=None, manually_changed=False) -> None:
         """Replace the live blocker list, retaining checked jobs that remain."""
-        selected = set(self.selected_ids()) if self.details.topLevelItemCount() else set()
+        selected = set(self.selected_keys()) if self.details.topLevelItemCount() else set()
         self._conflict = conflict
         self._verified = True
         self._manual_override |= manually_changed
@@ -124,16 +128,16 @@ class SubmissionConflictDialog(QDialog):
             parent_item = QTreeWidgetItem(
                 self.details, (f"{title} · {record.id[:12]}", str(record.state.value))
             )
-            parent_item.setData(0, Qt.ItemDataRole.UserRole, record.id)
+            parent_item.setData(0, Qt.ItemDataRole.UserRole, record)
             parent_item.setCheckState(
-                0, Qt.CheckState.Checked if record.id in selected else Qt.CheckState.Unchecked
+                0, Qt.CheckState.Checked if record.key in selected else Qt.CheckState.Unchecked
             )
             parent_item.setToolTip(
                 0, f"Run ID: {record.id}\nProject: {record.project_id or 'Unassigned'}"
             )
-            if record.id in self._errors:
-                QTreeWidgetItem(parent_item, ("Operation failed", self._errors[record.id]))
-            overlaps = conflict.file_conflicts.get(record.id, ())
+            if record.key in self._errors:
+                QTreeWidgetItem(parent_item, ("Operation failed", self._errors[record.key]))
+            overlaps = conflict.file_conflicts.get(record.key, ())
             if not overlaps:
                 QTreeWidgetItem(parent_item, ("Overlapping files", "Details unavailable"))
             seen = set()
@@ -156,7 +160,7 @@ class SubmissionConflictDialog(QDialog):
         if self._errors:
             self.status_label.setText(
                 "Some operations failed: "
-                + "; ".join(f"{key}: {message}" for key, message in self._errors.items())
+                + "; ".join(f"{key[-1] if isinstance(key, tuple) else key}: {message}" for key, message in self._errors.items())
             )
         elif conflict.conflicts:
             self.status_label.setText(
@@ -169,7 +173,7 @@ class SubmissionConflictDialog(QDialog):
             )
         self._update_buttons()
 
-    def set_verification_error(self, errors: dict[str, str]) -> None:
+    def set_verification_error(self, errors: dict[tuple | str, str]) -> None:
         """Do not approve a launch if the latest reservation check failed."""
         self._verified = False
         self.status_label.setText(
@@ -185,7 +189,7 @@ class SubmissionConflictDialog(QDialog):
         self._update_buttons()
 
     def _update_buttons(self, *_args) -> None:
-        selected = bool(self.selected_ids())
+        selected = bool(self.selected_keys())
         for button in (self.stop_button, self.failed_button, self.delete_button):
             button.setEnabled(not self._busy and selected)
         self.refresh_button.setEnabled(not self._busy)
@@ -197,7 +201,7 @@ class SubmissionConflictDialog(QDialog):
     def _request(self, action: str) -> None:
         if self._busy:
             return
-        selected = () if action == "refresh" else self.selected_ids()
+        selected = () if action == "refresh" else self.selected_keys()
         if action != "refresh" and not selected:
             return
         if action in ("fail", "delete"):

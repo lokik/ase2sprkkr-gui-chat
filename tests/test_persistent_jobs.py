@@ -16,7 +16,7 @@ from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, Persis
 
 def record(state=RunState.RUNNING, *, backend_id="pid-42", failure_phase=None, return_code=None):
     return SimpleNamespace(
-        id="run-1", state=state,
+        id="run-1", state=state, store=None, project_id=None,
         created_at="2026-10-19T10:00:00+00:00",
         updated_at="2026-10-19T11:00:00+00:00", finished_at=None,
         metadata={"ase2sprkkr": {"task": "DOS", "dataset": "Fe-DOS"}},
@@ -35,7 +35,7 @@ class Store:
     def __init__(self, value):
         self.current = value
         self.calls = []
-    def runs(self):
+    def runs(self, *, on_error=None):
         return (self.current,)
     def get(self, run_id):
         self.calls.append(run_id)
@@ -68,10 +68,10 @@ def test_download_retry_is_explicit_and_requires_successful_execution():
     assert not PersistentJob.from_run_record(record(RunState.FAILED, failure_phase=FailurePhase.EXECUTION, return_code=1)).can_retry_download
 
 
-def test_source_tracks_authoritative_changes():
+def test_source_tracks_authoritative_changes(make_job_source):
     initial = record()
     store = Store(initial)
-    source = PersistentJobSource(SimpleNamespace(store=store))
+    source = make_job_source(SimpleNamespace(store=store))
     assert source.jobs()[0].state == "running"
     updates = []
     source.subscribe(updates.append)
@@ -82,7 +82,7 @@ def test_source_tracks_authoritative_changes():
     assert source.jobs()[0].state == "finished"
 
 
-def test_attach_and_load_delegate_to_backend_api(monkeypatch):
+def test_attach_and_load_delegate_to_backend_api(monkeypatch, make_job_source):
     item = record(RunState.FINISHED)
     store = Store(item)
     calls = []
@@ -94,9 +94,7 @@ def test_attach_and_load_delegate_to_backend_api(monkeypatch):
     )
     monkeypatch.setattr(module, "attach_project_run", lambda _manager, ref, **kwargs: calls.append("attach") or object())
     monkeypatch.setattr(module, "load_project_result", lambda _manager, ref, **kwargs: calls.append(("load", kwargs)) or result)
-    source = PersistentJobSource(manager)
-    assert source.supports_results
-    assert source.supports_result_file_check
+    source = make_job_source(manager)
     source.attach(item.id)
     assert source.load_result(item.id) is result
     assert calls == ["attach", ("load", {"allow_unparsed": True})]
@@ -112,15 +110,15 @@ def test_postprocessing_retry_requires_successful_execution():
     assert not PersistentJob.from_run_record(record(RunState.FINISHED)).can_retry_postprocessing
 
 
-def test_history_excludes_records_from_other_applications():
+def test_history_excludes_records_from_other_applications(make_job_source):
     foreign = record(RunState.FINISHED)
     foreign.metadata = {"other_application": {"task": "DOS"}}
-    source = PersistentJobSource(SimpleNamespace(store=Store(foreign)))
+    source = make_job_source(SimpleNamespace(store=Store(foreign)))
     assert source.jobs() == ()
     assert source.job_changed(foreign.id) is None
 
 
-def test_explicit_postprocessing_retry_delegates_to_application(monkeypatch):
+def test_explicit_postprocessing_retry_delegates_to_application(monkeypatch, make_job_source):
     item = record(RunState.FAILED, failure_phase=FailurePhase.POSTPROCESSING, return_code=0)
     store = Store(item)
     manager = SimpleNamespace(store=store, retry_postprocessing=lambda *_args: None)
@@ -132,8 +130,7 @@ def test_explicit_postprocessing_retry_delegates_to_application(monkeypatch):
         return expected
 
     monkeypatch.setattr(module, "retry_project_postprocessing", retry)
-    source = PersistentJobSource(manager)
-    assert source.supports_retry_postprocessing
+    source = make_job_source(manager)
     assert source.retry_postprocessing(item.id) is expected
     assert calls == [(manager, item.id)]
     assert store.calls == [item.id]
@@ -189,7 +186,7 @@ def test_direct_run_with_saved_output_can_monitor_and_safely_cancel():
     assert job.reattach_unavailable_reason is None
 
 
-def test_source_cancel_and_forget_delegate_to_manager():
+def test_source_cancel_and_forget_delegate_to_manager(make_job_source):
     item = record(RunState.UNKNOWN)
     store = Store(item)
     calls = []
@@ -199,7 +196,7 @@ def test_source_cancel_and_forget_delegate_to_manager():
         store.current = None
         return item
 
-    store.runs = lambda: (() if store.current is None else (store.current,))
+    store.runs = lambda **kwargs: (() if store.current is None else (store.current,))
 
     def get(job_id):
         if store.current is None:
@@ -212,16 +209,14 @@ def test_source_cancel_and_forget_delegate_to_manager():
         cancel=lambda job_id: calls.append(("cancel", job_id)),
         forget=forget,
     )
-    source = PersistentJobSource(manager)
-    assert source.supports_cancel
-    assert source.supports_forget
+    source = make_job_source(manager)
     assert source.cancel(item.id) is not None
     source.forget(item.id, force=True)
     assert source.job(item.id) is None
     assert calls == [("cancel", item.id), ("forget", item.id, True)]
 
 
-def test_file_only_results_join_project_history_without_fake_run(tmp_path, monkeypatch):
+def test_file_only_results_join_project_history_without_fake_run(tmp_path, monkeypatch, make_job_source):
     from kkrunner.projects import ProjectRepository
     from ase2sprkkr_gui.gui.application.imported_project_results import assign
 
@@ -237,7 +232,7 @@ def test_file_only_results_join_project_history_without_fake_run(tmp_path, monke
     ) == 1
 
     manager = SimpleNamespace(store=Store(record(RunState.FINISHED)))
-    source = PersistentJobSource(manager, projects=projects)
+    source = make_job_source(manager, projects=projects)
     imported = next(job for job in source.jobs() if job.imported_path is not None)
     assert imported.id.startswith("external:")
     assert imported.dataset == "old-calculation.out"
@@ -268,7 +263,7 @@ def test_file_only_results_join_project_history_without_fake_run(tmp_path, monke
     assert output.exists()
 
 
-def test_missing_imported_file_remains_visible_for_removal(tmp_path):
+def test_missing_imported_file_remains_visible_for_removal(tmp_path, make_job_source):
     from kkrunner.projects import ProjectRepository
     from ase2sprkkr_gui.gui.application.imported_project_results import assign
 
@@ -279,7 +274,7 @@ def test_missing_imported_file_remains_visible_for_removal(tmp_path):
     assign(projects, [SimpleNamespace(output_path=path, output_version=None)], project.id)
     path.unlink()
 
-    source = PersistentJobSource(
+    source = make_job_source(
         SimpleNamespace(store=Store(record(RunState.FINISHED))), projects=projects,
     )
     imported = next(job for job in source.jobs() if job.imported_path is not None)
@@ -288,3 +283,107 @@ def test_missing_imported_file_remains_visible_for_removal(tmp_path):
     assert imported.is_final
     source.forget(imported.id)
     assert all(job.imported_path is None for job in source.jobs())
+
+
+def test_one_source_routes_equal_run_ids_to_their_own_store(tmp_path, monkeypatch, make_job_source):
+    from kkrunner import MemoryRunStore, RunManager, RunStore
+    disk = RunManager(RunStore(tmp_path / "history"))
+    session = RunManager(MemoryRunStore())
+    for manager in (disk, session):
+        manager.store.save(manager.new_record(
+            run_id="same", directory=tmp_path, metadata={"ase2sprkkr": {"task": "DOS"}},
+        ))
+    source = make_job_source(disk, session_manager=session)
+    assert {job.id for job in source.jobs()} == {"same", "session/same"}
+    changes = []
+    source.subscribe(changes.append)
+    record = session.store.get("same")
+    record = session.transition(record, state=RunState.RUNNING)
+    assert source.job_changed(record).id == "session/same"
+    assert changes == ["session/same"]
+    assert source.job("same").state == "new"
+    calls = []
+    monkeypatch.setattr(module, "attach_project_run",
+                        lambda manager, run_id, **kwargs: calls.append((manager, run_id)))
+    source.attach("session/same")
+    source.attach("same")
+    assert calls == [(session, "same"), (disk, "same")]
+    source.forget("session/same", force=True)
+    assert source.job("session/same") is None
+    assert source.job("same") is not None
+    assert disk.store.get("same").state == RunState.NEW
+
+
+def test_reload_cannot_overwrite_concurrent_record_notification(tmp_path, monkeypatch, make_job_source):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from kkrunner import RunManager, RunStore
+
+    store = RunStore(tmp_path / "runs")
+    manager = RunManager(store)
+    initial = manager.transition(manager.new_record(
+        directory=tmp_path, metadata={"ase2sprkkr": {"task": "DOS"}},
+    ), state=RunState.RUNNING)
+    source = make_job_source(manager)
+    entered, release, notified, reading = Event(), Event(), Event(), Event()
+    original = store.runs
+    original_get = store.get
+
+    def read(run_id):
+        reading.set()
+        return original_get(run_id)
+
+    def paused_snapshot(**kwargs):
+        snapshot = original(**kwargs)
+        entered.set()
+        assert release.wait(5)
+        return snapshot
+
+    def notify():
+        notified.set()
+        source.job_changed(initial.id)
+
+    monkeypatch.setattr(store, "runs", paused_snapshot)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reload_future = pool.submit(source.reload)
+        try:
+            assert entered.wait(5)
+            manager.transition(initial, state=RunState.FAILED)
+            monkeypatch.setattr(store, "get", read)
+            notify_future = pool.submit(notify)
+            assert notified.wait(5)
+            assert not reading.wait(0.1), "notification must wait for the in-flight snapshot"
+            # Readers do not block behind a filesystem reload.
+            assert source.job(initial.id).state == "running"
+        finally:
+            release.set()
+        reload_future.result(timeout=5)
+        notify_future.result(timeout=5)
+    assert source.job(initial.id).state == "failed"
+
+
+def test_result_loading_does_not_restore_stale_record(tmp_path, monkeypatch, make_job_source):
+    from kkrunner import RunManager, RunStore
+    manager = RunManager(RunStore(tmp_path / "runs"))
+    initial = manager.transition(manager.new_record(
+        directory=tmp_path, metadata={"ase2sprkkr": {"task": "DOS"}},
+    ), state=RunState.RUNNING)
+    source = make_job_source(manager)
+    result = SimpleNamespace(run_record=initial)
+
+    def load(*args, **kwargs):
+        manager.transition(initial, state=RunState.FAILED)
+        source.job_changed(initial.id)
+        return result
+
+    monkeypatch.setattr(module, "load_project_result", load)
+    assert source.load_result(initial.id) is result
+    assert source.job(initial.id).state == "failed"
+
+
+@pytest.mark.parametrize("state", [RunState.DOWNLOADING, RunState.POSTPROCESSING])
+def test_finalizing_run_can_be_observed_but_not_cancelled(state):
+    job = PersistentJob.from_run_record(record(state, return_code=0))
+    assert job.attachable
+    assert not job.cancelable
+    assert "Execution has finished" in job.cancel_unavailable_reason

@@ -45,14 +45,7 @@ def _job(
 
 
 class _Source:
-    available = True
-    unavailable_reason = None
-    supports_refresh = False
-    supports_results = False
-    supports_attach = True
-    supports_retry_download = True
-    supports_retry_postprocessing = False
-    supports_result_file_check = False
+    history_warning = None
 
     def __init__(self, jobs: tuple[PersistentJob, ...]) -> None:
         self._jobs = {job.id: job for job in jobs}
@@ -90,6 +83,12 @@ class _Source:
     def refresh(self):
         return self.jobs()
 
+    def check_result_files(self, job_id):
+        return self.job(job_id)
+
+    def load_result(self, job_id):
+        raise OSError(f"No result fixture for {job_id}")
+
 
 class _MonitorWindow(QWidget):
     def __init__(self) -> None:
@@ -103,8 +102,9 @@ class _MonitorWindow(QWidget):
     def show(self) -> None:
         self.show_calls += 1
 
-    def start(self) -> None:
+    def start(self, *, hidden=False) -> None:
         self.start_calls += 1
+        self.started_hidden = hidden
 
     def raise_(self) -> None:
         self.raise_calls += 1
@@ -231,7 +231,7 @@ def test_pending_launch_runner_is_reused_before_lifecycle_signal(monkeypatch):
     job = _job("run-17")
     source = _Source((job,))
     controller = PersistentJobsController(source)
-    launch_window = _LaunchWindow(SimpleNamespace(id=job.id))
+    launch_window = _LaunchWindow(SimpleNamespace(record=SimpleNamespace(id=job.id, store=None)))
     controller.track_launch_window(launch_window)
 
     def fail_create(*_args, **_kwargs):
@@ -423,7 +423,6 @@ def test_modal_result_loading_publishes_only_on_gui_thread(monkeypatch):
     _application = QApplication.instance() or QApplication([])
     gui_thread = get_ident()
     source = _Source((_job("completed", state="finished"),))
-    source.supports_results = True
     result = object()
     load_threads = []
     published = []
@@ -455,7 +454,7 @@ def test_untracked_launch_without_id_does_not_break_monitoring_other_run(monkeyp
     _application = QApplication.instance() or QApplication([])
     job = _job("project-run")
     controller = PersistentJobsController(_Source((job,)))
-    untracked = _LaunchWindow(SimpleNamespace())
+    untracked = _LaunchWindow(SimpleNamespace(record=None))
     controller.track_launch_window(untracked)
     created = []
 
@@ -479,7 +478,6 @@ def test_postprocessing_retry_button_runs_worker_and_adopts_result(monkeypatch):
     _application = QApplication.instance() or QApplication([])
     job = replace(_job('retry', state='failed'), failure_phase='postprocessing')
     source = _Source((job,))
-    source.supports_retry_postprocessing = True
     result = object()
     calls = []
 
@@ -512,9 +510,7 @@ def test_reconnect_action_is_visible_with_explanation_for_unknown_direct_run():
     )
     view = _view()
     view.set_jobs(
-        (job,), available=True, unavailable_reason=None,
-        supports_refresh=True, supports_results=True,
-        supports_attach=True, supports_retry_download=True,
+        (job,),
     )
     assert not view.monitor_button.isHidden()
     assert not view.monitor_button.isEnabled()
@@ -528,9 +524,6 @@ def test_reconnect_action_is_enabled_for_unknown_supervised_run():
     view = _view()
     view.set_jobs(
         (_job("supervised-run", state="unknown"),),
-        available=True, unavailable_reason=None,
-        supports_refresh=True, supports_results=True,
-        supports_attach=True, supports_retry_download=True,
     )
     assert not view.monitor_button.isHidden()
     assert view.monitor_button.isEnabled()
@@ -541,7 +534,6 @@ def test_unknown_run_can_be_forgotten_only_after_dangerous_confirmation(monkeypa
     _app = QApplication.instance() or QApplication([])
     job = _job("unresolved", state="unknown")
     source = _Source((job,))
-    source.supports_forget = True
     calls = []
 
     def forget(job_id, *, force=False):
@@ -574,7 +566,6 @@ def test_cancel_uses_native_backend_and_keeps_history(monkeypatch):
     _app = QApplication.instance() or QApplication([])
     job = replace(_job("active"), cancelable=True)
     source = _Source((job,))
-    source.supports_cancel = True
     calls = []
     source.cancel = lambda job_id: calls.append(job_id)
     controller = PersistentJobsController(source)
@@ -596,7 +587,6 @@ def test_delete_file_selection_is_explicit_and_displays_shared_references(monkey
 
     job = _job("completed", state="finished")
     source = _Source((job,))
-    source.supports_forget = True
     own = tmp_path / "output.dos"
     shared = tmp_path / "shared.pot"
     own.write_text("output")
@@ -706,7 +696,6 @@ def test_deletion_dialog_cancel_has_no_effect(monkeypatch):
     _app = QApplication.instance() or QApplication([])
     job = _job("finished", state="finished")
     source = _Source((job,))
-    source.supports_forget = True
     source.forget = lambda *_args, **_kwargs: pytest.fail("must not forget")
     controller = PersistentJobsController(source)
     view = _view()
@@ -822,7 +811,6 @@ def test_ssh_cleanup_starts_only_after_local_record_removal(monkeypatch, tmp_pat
     _app = QApplication.instance() or QApplication([])
     job = _job("finished", state="finished")
     source = _Source((job,))
-    source.supports_forget = True
     own = tmp_path / "output.out"
     own.write_text("local")
     remote = "/remote/output.out"
@@ -962,7 +950,6 @@ def test_open_job_by_id_loads_completed_result(monkeypatch):
     _application = QApplication.instance() or QApplication([])
     job = _job("run-17", state="finished")
     source = _Source((job,))
-    source.supports_results = True
     controller = PersistentJobsController(source)
     loaded = []
     monkeypatch.setattr(
@@ -1000,7 +987,6 @@ def test_open_job_download_failure_explains_retry(monkeypatch):
     _application = QApplication.instance() or QApplication([])
     job = _job("run-17", state="failed")
     source = _Source((job,))
-    source.supports_results = True
     controller = PersistentJobsController(source)
     parent = QWidget()
     warnings = []
@@ -1018,7 +1004,6 @@ def test_completed_job_can_reopen_result_window_without_restart(monkeypatch, tmp
     app = QApplication.instance() or QApplication([])
     job = _job("finished-run", state="finished")
     source = _Source((job,))
-    source.supports_results = True
     output = tmp_path / "Fe_SCF.out"
     output.write_text("native SCF stdout\n", encoding="utf-8")
     result = SimpleNamespace(output_values={}, result_values={}, output_file=output)
@@ -1064,7 +1049,6 @@ def test_completed_job_reuses_original_monitor_instead_of_reloading(monkeypatch)
     _app = QApplication.instance() or QApplication([])
     job = _job("finished-run", state="finished")
     source = _Source((job,))
-    source.supports_results = True
     controller = PersistentJobsController(source)
     view = _view()
     controller.bind_view(view)
@@ -1082,22 +1066,20 @@ def test_completed_job_reuses_original_monitor_instead_of_reloading(monkeypatch)
     assert controller._result_windows == {}
 
 
-def test_result_window_is_not_offered_for_active_or_unavailable_results():
+def test_result_window_is_not_offered_for_active_or_pending_download_results():
     _app = QApplication.instance() or QApplication([])
     running = _job("running")
     finished = _job("finished", state="finished")
-    source = _Source((running, finished))
+    download_failed = _job("download-failed", state="failed")
+    source = _Source((running, finished, download_failed))
     controller = PersistentJobsController(source)
     view = _view()
     controller.bind_view(view)
 
     view._show_job(running)
     assert view.open_result_window_button.isHidden()
-    view._show_job(finished)
+    view._show_job(download_failed)
     assert view.open_result_window_button.isHidden()
-
-    source.supports_results = True
-    controller.refresh_view(view)
     view._show_job(finished)
     assert not view.open_result_window_button.isHidden()
 
@@ -1106,7 +1088,6 @@ def test_closed_result_window_can_be_created_again(monkeypatch):
     app = QApplication.instance() or QApplication([])
     job = _job("finished-run", state="finished")
     source = _Source((job,))
-    source.supports_results = True
     result = SimpleNamespace(output_values={}, result_values={})
     source.load_result = lambda _job_id: result
     controller = PersistentJobsController(source)
@@ -1141,3 +1122,77 @@ def test_closed_result_window_can_be_created_again(monkeypatch):
     assert controller._result_windows[job.id] is created[-1]
     created[-1].close()
     app.processEvents()
+
+
+
+def test_one_controller_owns_both_stores_without_session_history_rows(monkeypatch, tmp_path, make_job_source):
+    from kkrunner import MemoryRunStore, RunManager, RunStore
+    from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
+
+    app = QApplication.instance() or QApplication([])
+    disk, memory = RunManager(RunStore(tmp_path / "runs")), RunManager(MemoryRunStore())
+    for manager in (disk, memory):
+        manager.transition(manager.new_record(run_id="same", directory=tmp_path,
+                           metadata={"ase2sprkkr": {"task": "SCF"}}), state="running")
+    source = make_job_source(disk, session_manager=memory)
+    controller = PersistentJobsController(source)
+    view = _view()
+    controller.bind_view(view)
+    assert {job.id for job in view.all_jobs} == {"same"}
+
+    first = _LaunchWindow(SimpleNamespace(id="same", record=disk.store.get("same")))
+    second = _LaunchWindow(SimpleNamespace(id="same", record=memory.store.get("same")))
+    controller.track_launch_window(first)
+    controller.track_launch_window(second)
+    # The pending monitor must be reused even before its queued launch signal.
+    monkeypatch.setattr(controller_module, "create_attached_run_monitor_window",
+                        lambda *a, **k: pytest.fail("unexpected second monitor"))
+    controller.open_monitor_window("same")
+    controller.open_monitor_window("session/same")
+    assert controller._monitor_windows == {"same": first, "session/same": second}
+    assert set(controller.monitor_windows()) == {first, second}
+
+    updated = memory.transition(memory.store.get("same"), state="failed")
+    source.job_changed(updated)
+    app.processEvents()
+    assert {job.id for job in view.all_jobs} == {"same"}
+    assert view.all_jobs[0].state == "running"
+    assert source.job("session/same").state == "failed"
+    controller.refresh_view(view)
+    assert {job.id for job in view.all_jobs} == {"same"}
+    view.close()
+
+
+def test_recovery_reuses_normal_monitor_registry_and_skips_live_launches(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    interrupted = _job("interrupted", state="postprocessing")
+    live = _job("live", state="downloading")
+    running = _job("running")
+    failed = _job("failed", state="failed")
+    source = _Source((interrupted, live, running, failed))
+    controller = PersistentJobsController(source)
+    launch = _LaunchWindow(SimpleNamespace(record=SimpleNamespace(id=live.id, store=None)))
+    controller.track_launch_window(launch)
+    created = []
+
+    def create_monitor(job, *args, **kwargs):
+        window = _MonitorWindow()
+        created.append((job.id, window))
+        return window
+
+    monkeypatch.setattr(controller_module, "create_attached_run_monitor_window", create_monitor)
+    controller.recover_incomplete()
+    controller.recover_incomplete()
+
+    assert len(created) == 1
+    job_id, window = created[0]
+    assert job_id == interrupted.id
+    assert window.started_hidden
+    assert window.show_calls == 0
+    assert set(controller.monitor_windows()) == {launch, window}
+
+    controller.open_monitor_window(interrupted.id)
+    assert len(created) == 1
+    assert window.show_calls == 1
+    assert window.start_calls == 1
+    assert app is QApplication.instance()

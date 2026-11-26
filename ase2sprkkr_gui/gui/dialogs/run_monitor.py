@@ -251,10 +251,31 @@ class RunMonitorWindow(QDialog):
         self._output_archive.close()
         super().closeEvent(event)
 
-    def start(self) -> None:
-        """Start the worker exactly once after the caller has established ownership."""
+    @property
+    def active_thread(self):
+        thread = self._thread
+        return thread if thread is not None and thread.isRunning() else None
+
+    @property
+    def shutdown_cancels_job(self) -> bool:
+        runner = self.runner
+        return (not self._cancellation.observation_only and
+                (runner is None or not runner.detached))
+
+    def request_shutdown(self) -> None:
+        if self.active_thread is not None:
+            self._stop_btn.setEnabled(False)
+            self._cancellation.request(shutdown=True)
+
+    def start(self, *, hidden: bool = False) -> None:
+        """Start once, optionally without showing the monitor.
+
+        A hidden monitor closes when its worker settles unless the user
+        opens it in the meantime, just like a monitor closed during a run.
+        """
         if self._thread is not None:
             raise RuntimeError("run monitor worker has already been started")
+        self._close_requested = hidden
         self._start_worker()
 
     def _start_worker(self) -> None:
@@ -273,9 +294,9 @@ class RunMonitorWindow(QDialog):
         worker.finished.connect(worker.deleteLater)
         worker.error.connect(worker.deleteLater)
         worker.cancelled.connect(worker.deleteLater)
-        worker.finished.connect(thread.quit)
-        worker.error.connect(thread.quit)
-        worker.cancelled.connect(thread.quit)
+        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        worker.error.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        worker.cancelled.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         thread.finished.connect(self._thread_finished)
 
         self._thread = thread
@@ -390,7 +411,8 @@ class RunMonitorWindow(QDialog):
 
     @pyqtSlot(str)
     def _on_warning(self, message: str) -> None:
-        QMessageBox.warning(self, self._warning_title, message)
+        if not self._cancellation.requested:
+            QMessageBox.warning(self, self._warning_title, message)
 
     @pyqtSlot(str)
     def _on_error(self, message: str) -> None:

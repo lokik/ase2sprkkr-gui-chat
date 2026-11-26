@@ -139,13 +139,13 @@ class PersistentJobsWidget(QWidget):
         self._visible_refs: frozenset[str] | None = None
         self._selected_job_id: str | None = None
         self._group_column = 2  # Initially group by start date as before.
-        self._supports_results = False
-        self._supports_attach = False
-        self._supports_retry_download = False
-        self._supports_retry_postprocessing = False
-        self._supports_cancel = False
-        self._supports_forget = False
-        self._supports_reassignment = False
+
+
+
+
+
+
+
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -420,10 +420,6 @@ class PersistentJobsWidget(QWidget):
             if (value := item.data(0, _JOB_ID_ROLE)) is not None
         }))
 
-    def set_project_assignment_available(self, available: bool) -> None:
-        self._supports_reassignment = available
-        self._update_project_actions()
-
     def set_add_result_available(self, available: bool) -> None:
         """Allow external-result import only when a real project is selected."""
         self.add_result_button.setEnabled(available)
@@ -431,11 +427,8 @@ class PersistentJobsWidget(QWidget):
     def _update_project_actions(self) -> None:
         selected = self.selected_persistent_refs
         self.select_all_jobs_button.setEnabled(bool(self._jobs))
-        self.move_jobs_button.setEnabled(bool(selected) and self._supports_reassignment)
-        if not self._supports_reassignment:
-            reason = "This kkrunner version cannot reassign calculation records."
-        else:
-            reason = "Move selected jobs or imported results to another project without changing their files or processes."
+        self.move_jobs_button.setEnabled(bool(selected))
+        reason = "Move selected jobs or imported results to another project without changing their files or processes."
         self.move_jobs_button.setToolTip(reason)
 
     def _request_move_runs(self) -> None:
@@ -447,15 +440,6 @@ class PersistentJobsWidget(QWidget):
         self,
         jobs: Collection[PersistentJob],
         *,
-        available: bool,
-        unavailable_reason: str | None,
-        supports_refresh: bool,
-        supports_results: bool,
-        supports_attach: bool,
-        supports_retry_download: bool,
-        supports_retry_postprocessing: bool = False,
-        supports_cancel: bool = False,
-        supports_forget: bool = False,
         history_warning: str | None = None,
     ) -> None:
         """Render a complete source snapshot while preserving view selection."""
@@ -463,22 +447,9 @@ class PersistentJobsWidget(QWidget):
             sorted(jobs, key=lambda job: job.started_at, reverse=True)
         )
         self._jobs_by_id = {job.id: job for job in self._all_jobs}
-        self._supports_results = supports_results
-        self._supports_attach = supports_attach
-        self._supports_retry_download = supports_retry_download
-        self._supports_retry_postprocessing = supports_retry_postprocessing
-        self._supports_cancel = supports_cancel
-        self._supports_forget = supports_forget
-        self.refresh_button.setEnabled(supports_refresh)
+        self.refresh_button.setEnabled(True)
 
-        if not available:
-            self.backend_notice.setText(
-                unavailable_reason
-                or "Persistent calculation jobs are not available in this "
-                "ASE2SPRKKR version yet."
-            )
-            self.backend_notice.show()
-        elif history_warning:
+        if history_warning:
             self.backend_notice.setText(history_warning)
             self.backend_notice.show()
         elif not self._all_jobs:
@@ -703,31 +674,27 @@ class PersistentJobsWidget(QWidget):
         # Keep the action visible for unverified jobs. Otherwise users have
         # no explanation why a still-running direct SSH job cannot be reopened.
         self.monitor_button.setVisible(not job.is_final)
-        self.monitor_button.setEnabled(job.attachable and self._supports_attach)
-        reason = (
-            job.reattach_unavailable_reason
-            if self._supports_attach
-            else "This installation cannot reattach to persistent calculations."
-        )
+        self.monitor_button.setEnabled(job.attachable)
+        reason = job.reattach_unavailable_reason
         self.monitor_button.setToolTip(
             "Reconnect without submitting another calculation."
-            if job.attachable and self._supports_attach
+            if job.attachable
             else (reason or "Reattachment is not available for this calculation.")
         )
         self.cancel_button.setVisible(not job.is_final)
         self.cancel_button.setEnabled(
-            not job.is_final and job.cancelable and self._supports_cancel
+            not job.is_final and job.cancelable
         )
         self.cancel_button.setToolTip(
             "Request termination of the original calculation process."
-            if job.cancelable and self._supports_cancel
+            if job.cancelable
             else (
                 job.cancel_unavailable_reason
-                or "Cancelling persisted processes is not supported by this installation."
+                or "Cancelling is not available for this calculation."
             )
         )
-        self.forget_button.setVisible(self._supports_forget)
-        self.forget_button.setEnabled(self._supports_forget)
+        self.forget_button.setVisible(True)
+        self.forget_button.setEnabled(True)
         if job.imported_path is not None:
             self.forget_button.setText("Remove result reference…")
             self.forget_button.setToolTip(
@@ -741,15 +708,14 @@ class PersistentJobsWidget(QWidget):
         self.reattach_notice.setText(reason or "")
         self.reattach_notice.setVisible(not job.is_final and bool(reason))
         self.retry_download_button.setVisible(
-            job.can_retry_download and self._supports_retry_download
+            job.can_retry_download
         )
         self.retry_postprocessing_button.setVisible(
-            job.can_retry_postprocessing and self._supports_retry_postprocessing
+            job.can_retry_postprocessing
         )
         can_load_result = (
             job.is_final
             and not job.can_retry_download
-            and self._supports_results
         )
         self.load_result_button.setVisible(can_load_result)
         self.open_result_window_button.setVisible(can_load_result)
@@ -797,11 +763,11 @@ class PersistentJobsWidget(QWidget):
         job = self._job_for_item(item)
         if job is None:
             return
-        if job.can_retry_download and self._supports_retry_download:
+        if job.can_retry_download:
             self.retryDownloadRequested.emit(job.id)
-        elif job.can_retry_postprocessing and self._supports_retry_postprocessing:
+        elif job.can_retry_postprocessing:
             self.retryPostprocessingRequested.emit(job.id)
-        elif job.is_final and self._supports_results:
+        elif job.is_final:
             self.loadResultRequested.emit(job.id)
-        elif job.attachable and self._supports_attach:
+        elif job.attachable:
             self.monitorRequested.emit(job.id)

@@ -142,9 +142,6 @@ class ProjectBrowserDialog(QWidget):
         self.jobs.backend_notice.setText("Loading saved calculations…")
         self.jobs.backend_notice.show()
         self.jobs.tree.setEnabled(False)
-        self.jobs.set_project_assignment_available(
-            self._persistent_jobs_controller.supports_reassignment
-        )
         self.jobs.moveRunsRequested.connect(self._move_selected_runs)
         self.jobs.addResultRequested.connect(self._request_add_result)
         self.jobs.jobsChanged.connect(self._refresh_project_projection)

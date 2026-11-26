@@ -10,7 +10,7 @@ from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, Persis
 
 def _record(*, result_files=None):
     return SimpleNamespace(
-        id="1234567890abcdef",
+        id="1234567890abcdef", store=None, project_id=None,
         state="finished",
         created_at="2026-10-13T06:00:00+00:00",
         updated_at="2026-10-13T06:30:00+00:00",
@@ -92,7 +92,7 @@ def test_unavailable_execution_keeps_local_history_visible(tmp_path):
     assert "unavailable" in job.target
 
 
-def test_explicit_result_file_check_marks_state_as_verified():
+def test_explicit_result_file_check_marks_state_as_verified(make_job_source):
     stored = _record(
         result_files=SimpleNamespace(state=SimpleNamespace(value="current")),
     )
@@ -102,7 +102,7 @@ def test_explicit_result_file_check_marks_state_as_verified():
 
     class Store:
         @staticmethod
-        def runs():
+        def runs(*, on_error=None):
             return (stored,)
 
         @staticmethod
@@ -110,7 +110,7 @@ def test_explicit_result_file_check_marks_state_as_verified():
             assert run_id == stored.id
             return checked
 
-    source = PersistentJobSource(SimpleNamespace(store=Store()))
+    source = make_job_source(SimpleNamespace(store=Store()))
 
     listed = source.jobs()[0]
     verified = source.check_result_files(stored.id)
@@ -119,17 +119,16 @@ def test_explicit_result_file_check_marks_state_as_verified():
     assert not listed.result_files_verified
     assert verified.result_files_state == "overwritten"
     assert verified.result_files_verified
-    assert source.supports_result_file_check
 
 
-def test_result_file_check_uses_persisted_store():
+def test_result_file_check_uses_persisted_store(make_job_source):
     record = _record(
         result_files=SimpleNamespace(state=SimpleNamespace(value="current")),
     )
 
     class Store:
         @staticmethod
-        def runs():
+        def runs(*, on_error=None):
             return (record,)
 
         @staticmethod
@@ -137,12 +136,11 @@ def test_result_file_check_uses_persisted_store():
             assert run_id == record.id
             return record
 
-    source = PersistentJobSource(SimpleNamespace(store=Store()))
+    source = make_job_source(SimpleNamespace(store=Store()))
 
-    assert source.supports_result_file_check
     assert source.check_result_files(record.id).result_files_verified
 
-def test_result_file_check_detects_changed_historical_output(tmp_path):
+def test_result_file_check_detects_changed_historical_output(tmp_path, make_job_source):
     from kkrunner.files import FileEntry, FileManifest, FileVersion
 
     output = tmp_path / "result.out"
@@ -154,14 +152,14 @@ def test_result_file_check_detects_changed_historical_output(tmp_path):
     ))
 
     class Store:
-        def runs(self):
+        def runs(self, *, on_error=None):
             return (record,)
 
         def get(self, run_id):
             assert run_id == record.id
             return record
 
-    source = PersistentJobSource(SimpleNamespace(store=Store()))
+    source = make_job_source(SimpleNamespace(store=Store()))
     output.write_text("after")
     checked = source.check_result_files(record.id)
     assert checked.result_files_state == "overwritten"

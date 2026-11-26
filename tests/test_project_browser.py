@@ -37,13 +37,7 @@ def _job(job_id: str, *, dataset: str, project_id=None, profile=None) -> Persist
 
 
 class _JobSource:
-    available = True
-    unavailable_reason = None
-    supports_refresh = False
-    supports_results = False
-    supports_attach = False
-    supports_retry_download = False
-    supports_result_file_check = False
+    history_warning = None
 
     def __init__(self, jobs):
         self._jobs = tuple(jobs)
@@ -66,6 +60,12 @@ class _JobSource:
 
     def refresh(self):
         return self._jobs
+
+    def check_result_files(self, job_id):
+        return self.job(job_id)
+
+    def load_result(self, job_id):
+        raise OSError(f"No result fixture for {job_id}")
 
     def job_changed(self, job_id):
         for listener in tuple(self._listeners):
@@ -410,7 +410,6 @@ def test_project_browser_moves_multiple_completed_records_to_another_project(tmp
     target = projects.create("Target")
 
     class MovingSource(_JobSource):
-        supports_reassignment = True
 
         def __init__(self, jobs):
             super().__init__(jobs)
@@ -465,10 +464,7 @@ def test_project_browser_allows_reassignment_for_running_runs(tmp_path):
     projects = ProjectRepository(tmp_path / "projects")
     project = projects.create("Project")
 
-    class ReassignSource(_JobSource):
-        supports_reassignment = True
-
-    source = ReassignSource((_job("one", dataset="One", project_id=project.id),))
+    source = _JobSource((_job("one", dataset="One", project_id=project.id),))
     browser = _dialog(projects, source)
     browser.show()
     application.processEvents()

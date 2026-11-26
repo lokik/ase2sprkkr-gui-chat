@@ -9,11 +9,12 @@ from typing import Any, Callable
 from ase2sprkkr import SPRKKR
 from kkrunner.backends.contracts import SubmissionNotStarted
 from kkrunner.files import FileManifest
-from kkrunner.runs import MpiNotFoundWarning
+from kkrunner.runs import MpiNotFoundWarning, Run, RunRecord, RunState
+from kkrunner.projects import ProjectRunManager
+from kkrunner.runs.manager import RunManager
 
 from ase2sprkkr_gui.gui.application.execution_cancellation import (
     Cancellation,
-    ExecutionCancelled,
     register_runner,
     wait_for_runner,
 )
@@ -40,7 +41,7 @@ class SprkkrExecution:
         output: Callable[[str, str], None] | None = None,
         status: Callable[[str], None] | None = None,
         warning: Callable[[str], None] | None = None,
-        persistent_job_changed: Callable[[str], None] | None = None,
+        persistent_job_changed: Callable[[RunRecord], None] | None = None,
         submitted: Callable[[str | None], None] | None = None,
     ) -> None:
         self.request = request
@@ -88,17 +89,19 @@ class SprkkrExecution:
 
     def _project_context(self):
         if self.project_id is None:
+            if isinstance(self.execution_manager, RunManager) and not isinstance(self.execution_manager, ProjectRunManager):
+                return self.execution_manager
             # Even an unassigned clean-cache run needs the same reservation
             # store as project runs. Without an injected manager, ASE2SPRKKR
             # supplies its default persistent manager for clear_cache=True.
             if not self.request.clear_cache or self.execution_manager is None:
                 return None
-            from kkrunner.runs.manager import RunManager
             # ProjectRunManager cannot create unassigned jobs; an ordinary
             # RunManager can reserve against the very same shared RunStore.
             return RunManager(
                 self.execution_manager.store,
                 client_pool=self.execution_manager.client_pool,
+                conflict_stores=self.execution_manager.conflict_stores,
             )
         if self.execution_manager is None:
             return self.project_id
@@ -157,12 +160,17 @@ class SprkkrExecution:
             return {"potential": str(source.path)}
         return {"atoms": self.request.atoms, "potential_file": potential_file}
 
-    def _notify_persistent_job_changed(self, runner: Any) -> None:
+    def _notify_persistent_job_changed(self, runner: Run) -> None:
         callback = self._persistent_job_changed
-        if callback is None or self.project_id is None:
+        record = runner.record
+        if callback is None or record is None:
+            return
+        # A rejected reservation has an in-memory NEW record, but was never
+        # inserted into the store. Do not bind the monitor to that attempt.
+        if record.state == RunState.NEW:
             return
         try:
-            callback(str(runner.id))
+            callback(record)
         except Exception:  # noqa: BLE001 - observer must never fail execution
             logger.exception("Persistent-job change observer failed for %s", runner.id)
 
@@ -182,8 +190,8 @@ class SprkkrExecution:
                 self._with_mpi_warnings(runner.submit)
         finally:
             # Submission is the first point at which ASE2SPRKKR may have written
-            # the persistent RunRecord. The observer receives only its stable id
-            # and must reload authoritative metadata from the store.
+            # the RunRecord. The observer receives its identity and reloads
+            # authoritative metadata from the owning store.
             self._notify_persistent_job_changed(runner)
         # submit() returned successfully: ASE2SPRKKR has prepared its input
         # files and handed the calculation to the backend. Result completion
@@ -191,13 +199,12 @@ class SprkkrExecution:
         if self._submitted is not None:
             try:
                 # Exact staged input, not an inferred filename template.
-                spec = getattr(runner, "spec", None)
-                path = FileManifest.from_spec(spec).input_file if spec is not None else None
+                path = FileManifest.from_spec(runner.spec).input_file
                 self._submitted(str(path) if path is not None else None)
             except Exception:  # noqa: BLE001 - observers must not fail a launched job
                 logger.exception("Submission observer failed")
-        if self.cancellation.requested:
-            raise ExecutionCancelled
+        # A successfully accepted run owns files and a completion observer.
+        # Even cancellation/detachment must wait for that lifecycle to settle.
         return runner
 
     def _validate_file_input(self, manifest):
@@ -228,7 +235,7 @@ class SprkkrExecution:
         self._status("Preparing calculation…")
         runner = self._submit(self._calculator())
 
-        record = runner.record if self.project_id is not None else None
+        record = runner.record
         if record is not None and not record.execution.transport.is_local:
             transport = record.execution.transport
             self._status(f"Running on {transport.host}…")

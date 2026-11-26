@@ -11,7 +11,9 @@ from weakref import ReferenceType, ref
 from PyQt6.QtCore import QObject, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
-from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, PersistentJobSource
+from ase2sprkkr_gui.gui.application.persistent_jobs import (
+    PersistentJob, PersistentJobSource, is_session_job_id, job_id_for_record,
+)
 from ase2sprkkr_gui.gui.application.result_cache import ResultLRU
 from ase2sprkkr_gui.gui.application.saved_output import read_saved_output
 from ase2sprkkr_gui.gui.dialogs.attached_run import create_attached_run_monitor_window
@@ -47,21 +49,19 @@ def _result_version(job: PersistentJob) -> tuple[Any, ...]:
     )
 
 
-def _can_load_result(job: PersistentJob | None, source: PersistentJobSource) -> bool:
+def _can_load_result(job: PersistentJob | None) -> bool:
     return bool(
         job is not None and job.is_final and not job.can_retry_download
-        and source.supports_results
     )
 
 
 class PersistentJobsController(QObject):
     """Coordinate persistent-job GUI workflows across all registered views.
 
-    ``PersistentJobSource`` owns persistent metadata, cache/recovery semantics,
-    and backend operations. This controller is application-owned and owns the
-    Qt-facing workflow shared by all persistent-job views: one source
-    subscription, modal progress/error presentation, lazy result-file checks,
-    result loading, and exactly one monitor window per persistent process.
+    The job source owns metadata, cache/recovery semantics and backend operations.
+    This controller owns the Qt-facing workflow across both stores: one source
+    subscription, one result cache, lazy result-file checks and exactly one
+    monitor window per tracked run. History views are a filtered projection.
 
     A newly launched monitor is owned here *before* its worker starts. Once its
     runner exists, its stable id can promote that pending monitor even before a
@@ -179,17 +179,8 @@ class PersistentJobsController(QObject):
     def refresh_view(self, view: PersistentJobsWidget) -> None:
         """Project the complete cached source state into one registered view."""
         view.set_jobs(
-            self._source.jobs(),
-            available=self._source.available,
-            unavailable_reason=self._source.unavailable_reason,
-            history_warning=getattr(self._source, "history_warning", None),
-            supports_refresh=self._source.supports_refresh,
-            supports_results=self._source.supports_results,
-            supports_attach=self._source.supports_attach,
-            supports_retry_download=self._source.supports_retry_download,
-            supports_retry_postprocessing=getattr(self._source, "supports_retry_postprocessing", False),
-            supports_cancel=getattr(self._source, "supports_cancel", False),
-            supports_forget=getattr(self._source, "supports_forget", False),
+            tuple(job for job in self._source.jobs() if not is_session_job_id(job.id)),
+            history_warning=self._source.history_warning,
         )
 
     def refresh_views(self) -> None:
@@ -218,7 +209,7 @@ class PersistentJobsController(QObject):
 
     def _cached_result(self, job_id: str) -> tuple[bool, Any]:
         job = self._source.job(job_id)
-        if not _can_load_result(job, self._source):
+        if not _can_load_result(job):
             return False, None
         return self._result_cache.lookup(job_id, _result_version(job))
 
@@ -232,12 +223,10 @@ class PersistentJobsController(QObject):
 
     def preload_results(self, job_ids: Any) -> None:
         """Queue a bounded slice of the selected project's history for background parsing."""
-        if not self._source.supports_results:
-            return
         eligible = []
         for job_id in job_ids:
             job_id = str(job_id)
-            if _can_load_result(self._source.job(job_id), self._source):
+            if _can_load_result(self._source.job(job_id)):
                 eligible.append(job_id)
             if len(eligible) == self._result_cache.max_entries:
                 break
@@ -256,7 +245,7 @@ class PersistentJobsController(QObject):
 
     def _load_in_background(self, job_id: str) -> None:
         job = self._source.job(job_id)
-        if not _can_load_result(job, self._source):
+        if not _can_load_result(job):
             return
         version = _result_version(job)
         found, result = self._result_cache.lookup(job_id, version)
@@ -298,7 +287,7 @@ class PersistentJobsController(QObject):
         if job_id not in wanted or future.cancelled():
             return
         job = self._source.job(job_id)
-        if not _can_load_result(job, self._source) or _result_version(job) != version:
+        if not _can_load_result(job) or _result_version(job) != version:
             if job_id == self._selected_preload_id:
                 self._load_in_background(job_id)
             return
@@ -324,7 +313,8 @@ class PersistentJobsController(QObject):
             self._result_cache.invalidate(job_id)
             self._load_errors.pop(job_id, None)
             self._loads.pop(job_id, None)
-            self.refresh_views()
+            if not is_session_job_id(job_id):
+                self.refresh_views()
             return
         failed = self._load_errors.get(job_id)
         if failed is not None and failed[0] != _result_version(job):
@@ -334,10 +324,46 @@ class PersistentJobsController(QObject):
             self._cached_presentations.pop(job_id, None)
             self._result_cache.invalidate(job_id)
             self._set_result_in_views(job_id, None)
-        for view in self._live_views():
-            view.update_job(job)
+        if not is_session_job_id(job_id):
+            for view in self._live_views():
+                view.update_job(job)
         if job_id in self._preload_ids or job_id == self._selected_preload_id:
             self._load_in_background(job_id)
+
+    def monitor_windows(self):
+        """Own every live launch and attached monitor, including hidden ones."""
+        return tuple(set(self._monitor_windows.values()) | self._launch_monitor_windows)
+
+    @staticmethod
+    def _runner_job_id(runner):
+        if runner is None or runner.record is None:
+            return None
+        return job_id_for_record(runner.record)
+
+    def visible_run_ids(self):
+        """Return the identities of visible monitors and result windows."""
+        visible = {
+            job_id for windows in (self._result_windows, self._monitor_windows)
+            for job_id, window in windows.items() if window.isVisible()
+        }
+        for window in self._pending_monitor_windows:
+            job_id = self._runner_job_id(window.runner)
+            if window.isVisible() and job_id is not None:
+                visible.add(job_id)
+        return tuple(sorted(visible))
+
+    def restore_window(self, job_id, parent):
+        """Reopen a recorded result or attach without launching a new job."""
+        job = self._source.job_changed(job_id)
+        if job is None:
+            return
+        if job.is_final and not job.can_retry_download:
+            self.open_result_window(job_id, parent)
+        elif job.attachable or job.can_retry_download:
+            if job.can_retry_download:
+                self.retry_download(job_id)
+            else:
+                self.open_monitor_window(job_id)
 
     def track_launch_window(self, monitor_window: SprkkrRunWindow) -> None:
         """Own and observe a launch monitor before its worker is started."""
@@ -370,7 +396,7 @@ class PersistentJobsController(QObject):
         """Find a pending launch whose already-created runner owns ``job_id``."""
         for monitor_window in tuple(self._pending_monitor_windows):
             runner = monitor_window.runner
-            if runner is not None and str(getattr(runner, "id", "")) == job_id:
+            if self._runner_job_id(runner) == job_id:
                 return monitor_window
         return None
 
@@ -441,11 +467,11 @@ class PersistentJobsController(QObject):
             self._selected_preload_id = None if job_id is None else str(job_id)
             self._keep_relevant_loads()
             if job_id is not None and _can_load_result(
-                self._source.job(str(job_id)), self._source
+                self._source.job(str(job_id))
             ):
                 self._load_in_background(str(job_id))
                 return
-        if job_id is None or not self._source.supports_result_file_check:
+        if job_id is None:
             return
         job = self._source.job(str(job_id))
         if (
@@ -473,11 +499,13 @@ class PersistentJobsController(QObject):
             )
         except Exception as exc:  # noqa: BLE001 - execution backend boundary
             QMessageBox.warning(view, "Status Refresh Failed", str(exc))
+        else:
+            self.recover_incomplete()
 
     def _cancel_requested(self, view: PersistentJobsWidget, job_id: str) -> None:
         """Cancel a native process, not its historical metadata."""
         job = self._source.job(job_id)
-        if job is None or job.is_final or not job.cancelable or not self._source.supports_cancel:
+        if job is None or job.is_final or not job.cancelable:
             return
         answer = QMessageBox.question(
             view,
@@ -515,7 +543,7 @@ class PersistentJobsController(QObject):
     def _forget_requested(self, view: PersistentJobsWidget, job_id: str) -> None:
         """Local removal is independent of the optional, background SSH cleanup."""
         job = self._source.job(job_id)
-        if job is None or not self._source.supports_forget:
+        if job is None:
             return
         active = not job.is_final
         plan = None
@@ -613,12 +641,31 @@ class PersistentJobsController(QObject):
         monitor_window.raise_()
         monitor_window.activateWindow()
 
-    def _create_attached_monitor(self, job: PersistentJob) -> None:
+    def recover_incomplete(self) -> None:
+        """Resume interrupted finalization through ordinary monitor ownership.
+
+        Only call after startup/session restore or explicit status refresh.
+        Ordinary source notifications may refer to a still-live local worker.
+        """
+        for job in self._source.jobs():
+            if job.state not in ("downloading", "postprocessing") or not job.attachable:
+                continue
+            if job.id in self._monitor_windows or self._pending_launch_for_job(job.id) is not None:
+                continue
+            try:
+                self._create_attached_monitor(job, visible=False)
+            except Exception:
+                logger.exception("Could not resume finalization for %s", job.id)
+                self._reload_job(job.id)
+
+    def _create_attached_monitor(self, job: PersistentJob, *, visible: bool = True) -> None:
         job_id = job.id
 
         def finished(result: Any) -> None:
-            self._reload_job(job_id)
-            self._publish_result(job_id, result, select_result=False)
+            # Automatic recovery updates history without adopting an unseen
+            # result into the workspace. An opened monitor behaves normally.
+            if visible or monitor_window.isVisible():
+                self._publish_result(job_id, result, select_result=False)
 
         monitor_window = create_attached_run_monitor_window(
             job,
@@ -630,8 +677,11 @@ class PersistentJobsController(QObject):
         try:
             self._watch_monitor_window(monitor_window)
             self._monitor_windows[job_id] = monitor_window
-            monitor_window.show()
-            monitor_window.start()
+            if visible:
+                monitor_window.show()
+                monitor_window.start()
+            else:
+                monitor_window.start(hidden=True)
         except BaseException:
             if self._monitor_windows.get(job_id) is monitor_window:
                 self._monitor_windows.pop(job_id, None)
@@ -653,7 +703,7 @@ class PersistentJobsController(QObject):
             return
 
         job = self._source.job(job_id)
-        if job is None or not job.attachable or not self._source.supports_attach:
+        if job is None or not job.attachable:
             return
         self._create_attached_monitor(job)
 
@@ -671,7 +721,7 @@ class PersistentJobsController(QObject):
             return
 
         job = self._source.job(job_id)
-        if not _can_load_result(job, self._source):
+        if not _can_load_result(job):
             return
 
         def display(loaded: tuple[Any, Any]) -> None:
@@ -757,18 +807,12 @@ class PersistentJobsController(QObject):
                     "Use Retry download in the project browser.",
                 )
                 return False
-            if not self._source.supports_results:
-                QMessageBox.warning(
-                    parent, "Cannot Open Job",
-                    "The persistent result loader is unavailable.",
-                )
-                return False
             # The existing handler loads in the modal worker, adopts the result
             # on the GUI thread and emits resultOpened to display the workspace.
             self._load_result_requested(parent, job_id)
             return True
 
-        if not job.attachable or not self._source.supports_attach:
+        if not job.attachable:
             QMessageBox.warning(
                 parent, "Cannot Follow Job",
                 job.reattach_unavailable_reason
@@ -798,14 +842,13 @@ class PersistentJobsController(QObject):
         if (
             job is None
             or not job.can_retry_download
-            or not self._source.supports_retry_download
         ):
             return
         self._create_attached_monitor(job)
 
     def _retry_postprocessing_requested(self, view: PersistentJobsWidget, job_id: str) -> None:
         job = self._source.job(str(job_id))
-        if job is None or not job.can_retry_postprocessing or not self._source.supports_retry_postprocessing:
+        if job is None or not job.can_retry_postprocessing:
             return
         try:
             result = run_modal_task(
@@ -829,7 +872,7 @@ class PersistentJobsController(QObject):
     ) -> None:
         job = self._source.job(job_id)
         self._load_errors.pop(job_id, None)
-        if _can_load_result(job, self._source):
+        if _can_load_result(job):
             self._result_cache.store(job_id, _result_version(job), result)
             self._cached_presentations[job_id] = _result_version(job)
         if self._result_adopter is not None:
@@ -841,8 +884,9 @@ class PersistentJobsController(QObject):
             job = self._source.job(job_id)
             if job is not None:
                 self._cached_presentations[job_id] = _result_version(job)
-        for view in self._live_views():
-            view.set_result(job_id, result)
+        if not is_session_job_id(job_id):
+            for view in self._live_views():
+                view.set_result(job_id, result)
 
     def _load_result_requested(
         self,
@@ -854,7 +898,6 @@ class PersistentJobsController(QObject):
             job is None
             or not job.is_final
             or job.can_retry_download
-            or not self._source.supports_results
         ):
             return
         def publish(result: Any) -> Any:
@@ -891,7 +934,7 @@ class PersistentJobsController(QObject):
     ) -> None:
         """Force a file reread for browser preview, without adopting it in the workspace."""
         job = self._source.job(job_id)
-        if not _can_load_result(job, self._source):
+        if not _can_load_result(job):
             return
         revision = _result_version(job)
         self._load_errors.pop(job_id, None)  # Explicit Refresh retries failed parses.
@@ -930,10 +973,6 @@ class PersistentJobsController(QObject):
             self._load_errors[job_id] = (revision, str(exc))
             view.set_result_error(job_id, str(exc))
             QMessageBox.warning(view, "Result Refresh Failed", str(exc))
-
-    @property
-    def supports_reassignment(self) -> bool:
-        return bool(getattr(self._source, "supports_reassignment", False))
 
     def reassign_runs(
         self, projects, job_ids: tuple[str, ...], project_id: str | None,

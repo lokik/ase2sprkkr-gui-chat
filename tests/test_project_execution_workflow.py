@@ -12,7 +12,7 @@ from ase2sprkkr_gui.gui.application import persistent_jobs as jobs_module
 
 def record(state=RunState.RUNNING, *, phase=None, code=None, backend_id="backend-42"):
     return SimpleNamespace(
-        id="project-run-1", state=state, created_at="2026-10-19T10:00:00+00:00",
+        id="project-run-1", store=None, project_id=None, state=state, created_at="2026-10-19T10:00:00+00:00",
         updated_at="2026-10-19T10:01:00+00:00", finished_at=None,
         metadata={"ase2sprkkr": {"task": "DOS"}}, return_code=code, message=None,
         failure_phase=phase, files=FileManifest(),
@@ -42,11 +42,11 @@ def test_only_completed_execution_download_can_be_retried():
     ).can_retry_download
 
 
-def test_attach_and_result_loading_delegate_to_backend(monkeypatch):
+def test_attach_and_result_loading_delegate_to_backend(monkeypatch, make_job_source):
     item = record(RunState.FINISHED)
 
     class Store:
-        def runs(self):
+        def runs(self, *, on_error=None):
             return (item,)
 
         def get(self, job_id):
@@ -63,7 +63,7 @@ def test_attach_and_result_loading_delegate_to_backend(monkeypatch):
     )
     monkeypatch.setattr(jobs_module, "attach_project_run", lambda _manager, ref, **kwargs: calls.append(("attach", ref)) or runner)
     monkeypatch.setattr(jobs_module, "load_project_result", lambda _manager, ref, *, allow_unparsed: calls.append(("load", ref, allow_unparsed)) or result)
-    source = PersistentJobSource(manager)
+    source = make_job_source(manager)
     assert source.attach(item.id) is runner
     assert source.load_result(item.id) is result
     assert calls == [("attach", item.id), ("load", item.id, True)]

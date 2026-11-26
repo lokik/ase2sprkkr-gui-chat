@@ -3,25 +3,34 @@ from __future__ import annotations
 from ase2sprkkr.sprkkr.projects import default_project_repository
 
 import sys
+import logging
+from threading import Event
 from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QEvent, QObject, Qt
 from PyQt6.QtWidgets import QApplication, QCheckBox, QFileDialog, QMessageBox, QWidget
+from kkrunner import MemoryRunStore, RunManager
 from kkrunner.projects import ProjectRepository
 from ase2sprkkr_gui.gui.application.persistent_jobs import project_run_manager
 
 from ase2sprkkr_gui.gui.application.console_interrupt import ConsoleInterrupt
 from ase2sprkkr_gui.gui.application.imported_project_results import assign
-from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
+from ase2sprkkr_gui.gui.application.persistent_jobs import (
+    PersistentJobSource, is_session_job_id, job_id_for_record,
+)
 from ase2sprkkr_gui.gui.application.potential_version import PotentialFileVersion
 from ase2sprkkr_gui.gui.application.recent_files import RecentFiles
 from ase2sprkkr_gui.gui.application.saved_output import read_saved_output
 from ase2sprkkr_gui.gui.application.result_loading import (
     PotentialVersionChanged,
+    load_result_file,
     load_result as interpret_result,
 )
 from ase2sprkkr_gui.gui.application.settings import ApplicationSettings
+from ase2sprkkr_gui.gui.application.run_session import (
+    WindowReference, output_reference, recoverable_session_run, save_session, take_session,
+)
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import (
     WorkspaceConflict,
@@ -38,6 +47,9 @@ from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 from ase2sprkkr_gui.gui.flows import custom_calculation as custom_flow
 from ase2sprkkr_gui.gui.flows import files as file_flows
 from ase2sprkkr_gui.gui.presenters.result_actions import ResultActionsPresenter
+
+
+logger = logging.getLogger(__name__)
 
 
 class GuiApplication(QObject):
@@ -75,14 +87,23 @@ class GuiApplication(QObject):
             else default_project_repository()
         )
         self.execution_manager = project_run_manager(self.projects)
+        self.session_store = MemoryRunStore()
+        self.execution_manager.conflict_stores = (self.session_store,)
+        self.session_manager = RunManager(
+            self.session_store,
+            client_pool=self.execution_manager.client_pool,
+            conflict_stores=(self.execution_manager.store,),
+        )
+        self._run_session_path = self.settings.path.with_suffix(".runstore.json")
         self.persistent_jobs = (
             persistent_jobs
             if persistent_jobs is not None
-            else PersistentJobSource(self.execution_manager, projects=self.projects)
+            else PersistentJobSource(self.execution_manager, projects=self.projects,
+                                     session_manager=self.session_manager)
         )
         self.persistent_jobs_controller = PersistentJobsController(
             self.persistent_jobs,
-            result_adopter=self._adopt_persistent_result,
+            result_adopter=self._adopt_job_result,
             parent=self,
         )
         self._workflow_window: WorkflowWindow | None = None
@@ -206,12 +227,14 @@ class GuiApplication(QObject):
             QMessageBox.warning(parent, "Cannot Open Result", "Result is no longer available.")
             return
 
-        if record.persistent_ref is not None and self.persistent_jobs.supports_results:
-            job = self.persistent_jobs.job(record.persistent_ref)
+        job_id = record.persistent_ref
+        run_record = getattr(record.result, "run_record", None)
+        if job_id is None and getattr(run_record, "store", None) is self.session_store:
+            job_id = job_id_for_record(run_record)
+        if job_id is not None:
+            job = self.persistent_jobs.job(job_id)
             if job is not None and job.is_final and not job.can_retry_download:
-                self.persistent_jobs_controller.open_result_window(
-                    record.persistent_ref, parent,
-                )
+                self.persistent_jobs_controller.open_result_window(job_id, parent)
                 return
 
         existing = self._result_windows.get(result_id)
@@ -277,16 +300,18 @@ class GuiApplication(QObject):
             return
         self.persistent_jobs.reload()
 
-    def _adopt_persistent_result(
+    def _adopt_job_result(
         self,
         job_id: str,
         result: Any,
         select_result: bool,
     ) -> None:
-        """Bridge persistent execution results into normal workspace history."""
-        existing = self.controller.result_store.result_for_external_source(
-            None, persistent_ref=job_id,
-        )
+        """Bridge any tracked execution result into normal workspace history."""
+        persistent_ref = None if is_session_job_id(job_id) else job_id
+        existing = (None if persistent_ref is None else
+                    self.controller.result_store.result_for_external_source(
+                        None, persistent_ref=persistent_ref,
+                    ))
         if existing is not None:
             if select_result:
                 self.controller.resultSelectionRequested.emit(existing.id)
@@ -295,7 +320,7 @@ class GuiApplication(QObject):
         loaded = interpret_result(
             result,
             fallback_directory=None if job is None else job.directory,
-            persistent_ref=job_id,
+            persistent_ref=persistent_ref,
         )
         self.controller.adopt_external_result(
             loaded,
@@ -327,12 +352,10 @@ class GuiApplication(QObject):
 
     def _track_launch_monitor(self, monitor_window: SprkkrRunWindow) -> None:
         """Capture execution/project context before the monitor starts its worker."""
-        monitor_window.set_execution_context(
-            self.execution_manager,
-            project_id=getattr(
-                monitor_window, "launch_project_id", self.controller.active_project_id
-            ),
-        )
+        project_id = getattr(monitor_window, "launch_project_id", self.controller.active_project_id)
+        manager = self.session_manager if project_id is None else self.execution_manager
+        monitor_window.set_execution_context(manager, project_id=project_id)
+        monitor_window.conflictJobChanged.connect(self.persistent_jobs.job_changed)
         self.persistent_jobs_controller.track_launch_window(monitor_window)
 
     def open_startup_selection(
@@ -501,6 +524,136 @@ class GuiApplication(QObject):
         if self._project_browser is not None:
             self._project_browser.close()
 
+    def _save_run_session(self):
+        records = tuple(record for record in self.session_store.runs(active=True)
+                        if recoverable_session_run(record))
+        recoverable_ids = {record.id for record in records}
+        windows = []
+        for job_id in self.persistent_jobs_controller.visible_run_ids():
+            if not is_session_job_id(job_id):
+                windows.append(WindowReference("persistent", job_id))
+                continue
+            try:
+                record = self.persistent_jobs.record(job_id)
+            except FileNotFoundError:
+                continue
+            if record.state.is_terminal:
+                reference = output_reference(record)
+                if reference is not None:
+                    windows.append(reference)
+            elif record.id in recoverable_ids:
+                windows.append(WindowReference("memory", record.id))
+        for result_id, window in self._result_windows.items():
+            if not window.isVisible():
+                continue
+            try:
+                record = self.controller.result_store.result(result_id)
+            except KeyError:
+                continue
+            if record.persistent_ref is not None:
+                windows.append(WindowReference("persistent", record.persistent_ref))
+            elif record.output_version is not None and record.output_version.is_current():
+                windows.append(WindowReference.output(record.output_version))
+        try:
+            save_session(self._run_session_path, records, windows)
+        except (OSError, TypeError, ValueError):
+            logger.exception("Could not save result-window session")
+
+    def restore_result_windows(self):
+        parent = self.create_workflow_window()
+        references = take_session(self._run_session_path, self.session_store)
+        self.persistent_jobs.reload()
+        for reference in references:
+            try:
+                if reference.kind == "persistent":
+                    self.persistent_jobs_controller.restore_window(reference.value, parent)
+                elif reference.kind == "memory":
+                    record = self.session_store.get(reference.value)
+                    self.persistent_jobs_controller.restore_window(job_id_for_record(record), parent)
+                elif reference.version.is_current():
+                    version = reference.version
+                    def load():
+                        loaded = load_result_file(version.path)
+                        if not version.is_current():
+                            raise ValueError("Saved output changed during session restore")
+                        return loaded
+                    loaded = run_modal_task(parent, load, title="Restoring Results")
+                    self.controller.adopt_external_result(loaded, select_result=False)
+                    record = self.controller.result_store.result_for_external_source(version.path)
+                    if record is not None:
+                        self._show_result_window(record.id)
+            except Exception:
+                logger.warning("Could not restore result window %s", reference.value, exc_info=True)
+        self.persistent_jobs_controller.recover_incomplete()
+
+    def _stop_run_monitors_for_exit(self):
+        def active_monitors():
+            monitors = self.persistent_jobs_controller.monitor_windows()
+            return [(monitor, thread) for monitor in monitors
+                    if (thread := monitor.active_thread) is not None]
+
+        active = active_monitors()
+        if not active:
+            return True
+        parent = self._workflow_window or active[0][0]
+        if any(monitor.shutdown_cancels_job for monitor, _ in active):
+            answer = QMessageBox.question(
+                parent, "Exit While Calculations Are Running",
+                "Calculations tied to this GUI will be stopped. Independent jobs will "
+                "continue without monitoring. Close the GUI?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+            # The confirmation dialog runs an event loop; hidden monitors may
+            # have finished and destroyed their windows during that dialog.
+            active = active_monitors()
+            if not active:
+                return True
+
+        # Qt delivers finished signals on the GUI thread. The modal worker
+        # waits for a single event, not on widgets or individual QThreads.
+        done = Event()
+        pending = {thread for _, thread in active}
+        connections = []
+
+        def finished(thread):
+            pending.discard(thread)
+            if not pending:
+                done.set()
+
+        try:
+            for _, thread in active:
+                callback = lambda thread=thread: finished(thread)
+                thread.finished.connect(callback)
+                connections.append((thread, callback))
+                if not thread.isRunning():
+                    finished(thread)
+            for monitor, _ in active:
+                monitor.request_shutdown()
+            if done.is_set():
+                return True
+            completed = run_modal_task(
+                parent, lambda: done.wait(5),
+                title="Closing GUI", label="Stopping calculation monitors…",
+                modality=Qt.WindowModality.ApplicationModal,
+            )
+            if not completed:
+                QMessageBox.warning(
+                    parent, "Calculations Still Active",
+                    "Shutdown was requested, but some monitors have not stopped yet. "
+                    "Some jobs may already have stopped or detached. Close the GUI again "
+                    "after the remaining monitors settle.",
+                )
+            return completed
+        finally:
+            for thread, callback in connections:
+                try:
+                    thread.finished.disconnect(callback)
+                except (TypeError, RuntimeError):
+                    pass  # The monitor may have closed after its worker finished.
+
     def request_exit(self) -> bool:
         """Quit only after the unsaved-work check, closing auxiliary windows."""
         if self._exit_in_progress:
@@ -509,6 +662,9 @@ class GuiApplication(QObject):
         try:
             if not self._confirm_unsaved_work():
                 return False
+            if not self._stop_run_monitors_for_exit():
+                return False
+            self._save_run_session()
             self._exit_approved = True
             self._close_project_browser()
             if self._workflow_window is not None:
@@ -616,6 +772,7 @@ def main(argv: list[str] | None = None) -> int:
     gui = GuiApplication(parent=app)
     gui.show_workflow_window()
     gui.open_startup_selection(kind, file_path)
+    gui.restore_result_windows()
     def shutdown_from_console() -> None:
         if (gui.controller.has_unsaved_structure
                 or gui.controller.has_unsaved_input_parameters):

@@ -52,7 +52,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: lokik/kkrunner-chat
-          ref: 1526476b847d37eb5787e5cf5e240cf9e66232e7
+          ref: 27a8ca94385cbdf2dbebb9516a88a2b8d8cae56f
           path: .ci/kkrunner
 
       # The embedding and editor branches use the native cluster backend,
@@ -81,4 +81,4 @@ jobs:
           python -m pip install -e ./.ci/kkrunner -e ./.ci/ase2sprkkr -e . pytest 'setuptools>=61'
 
       - name: Run tests
-        run: python -m pytest -q
+        run: python -m pytest -v --tb=short
