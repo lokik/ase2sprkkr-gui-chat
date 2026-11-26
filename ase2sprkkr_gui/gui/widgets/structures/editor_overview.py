@@ -25,15 +25,11 @@ def _symmetry_description(atoms):
     from ase2sprkkr.sprkkr.symmetry import analyze_symmetry
     try:
         dataset = analyze_symmetry(atoms, equivalence="occupation").dataset
-    except (ValueError, TypeError, AttributeError) as error:
+    except ValueError as error:
         return f"Unavailable: {error}"
-    international = getattr(dataset, "international", "?")
-    number = getattr(dataset, "number", "?")
-    hall = getattr(dataset, "hall", "?")
-    hall_number = getattr(dataset, "hall_number", "?")
     return (
-        f"Space group: {international} (No. {number})\n"
-        f"Hall symbol: {hall} (No. {hall_number})"
+        f"Space group: {dataset.international} (No. {dataset.number})\n"
+        f"Hall symbol: {dataset.hall} (No. {dataset.hall_number})"
     )
 
 
@@ -89,6 +85,7 @@ class EditorOverviewWidget(QWidget):
         super().__init__(parent)
         self._atoms = None
         self._host_atoms = None
+        self._populated_scope = None
         root = QVBoxLayout(self)
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
@@ -222,7 +219,7 @@ class EditorOverviewWidget(QWidget):
         # changes, but begin at the first site when switching table scope.
         previous_row = (
             self.site_table.currentRow()
-            if getattr(self, "_populated_scope", None) == scope else 0
+            if self._populated_scope == scope else 0
         )
         self._populated_scope = scope
         self.site_table.blockSignals(True)

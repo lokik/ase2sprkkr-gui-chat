@@ -584,9 +584,9 @@ def test_overview_reports_hall_number_for_3d_and_left_right_bulk_for_2d():
     from ase.build import bulk
     from ase2sprkkr.sprkkr.build import semiinfinite_system
     dialog = _dialog()
-    assert "Space group:" in dialog.overview.symmetry.text()
+    assert "Space group: Im-3m (No. 229)" in dialog.overview.symmetry.text()
     assert "Hall symbol:" in dialog.overview.symmetry.text()
-    assert "No." in dialog.overview.symmetry.text()
+    assert "?" not in dialog.overview.symmetry.text()
     dialog.close()
 
     slab = semiinfinite_system(bulk("Cu", "sc", a=2.0), (0, 0))
