@@ -159,6 +159,7 @@ class RunMonitorWindow(QDialog):
         self._thread: QThread | None = None
         self._worker: RunMonitorWorker | None = None
         self._close_requested = False
+        self.completed_output_path = None
         self._output_line_length = 0
         # The on-screen log is bounded; keep the complete, unwrapped stream
         # in a spooled file for copying and saving without unbounded RAM use.
@@ -467,6 +468,7 @@ class RunMonitorWindow(QDialog):
             if self._finished_callback is not None:
                 self._finished_callback(result)
             # Adoption has completed, so output files and provenance are ready.
+            self.completed_output_path = getattr(result, "output_path", None)
             native_result = getattr(result, "result", result)
             if hasattr(native_result, "output_values") and not self._close_requested:
                 try:
