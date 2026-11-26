@@ -15,11 +15,8 @@ from ase2sprkkr_gui.gui.dialogs.attached_run import (
     create_attached_run_monitor_window,
 )
 from ase2sprkkr_gui.gui.dialogs.run_calculation import SprkkrRunWindow
-from ase2sprkkr_gui.gui.dialogs.run_monitor import (
-    MAX_LOGICAL_LINE_LENGTH,
-    MAX_OUTPUT_BLOCKS,
-    RunMonitorWindow,
-)
+from ase2sprkkr_gui.gui.dialogs.run_display import MAX_LOGICAL_LINE_LENGTH, MAX_OUTPUT_BLOCKS
+from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow
 
 
 class _Source:
@@ -744,7 +741,7 @@ def test_saved_dos_replay_matches_live_monitor_with_mpi_energy_total(_qt_applica
     from ase2sprkkr_gui.gui.application.saved_output import SavedOutput
     from ase2sprkkr_gui.gui.application.result_store import ResultRecord
     from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
-    from ase2sprkkr_gui.gui.dialogs.run_monitor import info_page_settings
+    from ase2sprkkr_gui.gui.dialogs.run_display import info_page_settings
 
     parameters = SimpleNamespace(ENERGY=SimpleNamespace(NE=lambda: 300))
     result = SimpleNamespace(
