@@ -26,8 +26,9 @@ def _cleanup_qt_widgets(_qt_application: QApplication):
     """
     yield
 
+    # Cleanup is destruction, not a user-initiated close: closeEvent may
+    # open a modal confirmation even on an already rejected, hidden dialog.
     for widget in QApplication.topLevelWidgets():
-        widget.close()
         widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
