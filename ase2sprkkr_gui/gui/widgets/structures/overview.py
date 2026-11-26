@@ -19,6 +19,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ase2sprkkr import SPRKKRAtoms
+from ase2sprkkr.potentials.potentials import PeriodicPotential
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_HOST, host_atoms
 from ase2sprkkr_gui.gui.presentation import structure_kind_label
 from ase2sprkkr_gui.gui.misc.colors import blend
 from ase2sprkkr_gui.gui.style import action_card_stylesheet
@@ -36,16 +39,10 @@ _CELL_CORNERS = np.array(
 )
 
 
-def _host_atoms(host):
-    """Resolve a periodic host Potential or geometrical host reference."""
-    return getattr(host, "atoms", host) if host is not None else None
-
-
 def _host_status(host) -> str | None:
-    try:
-        status = host.SCF_INFO.SCFSTATUS()
-    except (AttributeError, TypeError, KeyError):
+    if not isinstance(host, PeriodicPotential):
         return None
+    status = host.SCF_INFO.SCFSTATUS()
     return str(status).strip().upper() if status is not None else None
 
 
@@ -59,13 +56,12 @@ def _periodicity(atoms) -> str:
 def _element_symbols(atoms) -> str:
     """Include mixed-occupancy species, not only ASE's representative atoms."""
     symbols = set(atoms.get_chemical_symbols())
-    occupancies = getattr(atoms, "info", {}).get("occupancy")
+    occupancies = atoms.info.get("occupancy")
     if isinstance(occupancies, Mapping):
         for occupation in occupancies.values():
             if isinstance(occupation, Mapping):
                 symbols.update(str(symbol) for symbol in occupation)
-    if (getattr(atoms, "are_sites_inited", None) is not None
-            and atoms.are_sites_inited()):
+    if isinstance(atoms, SPRKKRAtoms) and atoms.are_sites_inited():
         for site in atoms.sites:
             symbols.update(t.symbol for t in site.occupation.atomic_types())
     return ", ".join(sorted(symbols))
@@ -247,14 +243,14 @@ class StructureOverviewWidget(QFrame):
     def set_structure(self, atoms, *, kind=None, scf_status=None) -> None:
         """Refresh latest structure and its host, including in-place SCF updates."""
         self._atoms = atoms
-        self._host = getattr(atoms, "embedding_host", None)
+        self._host = atoms.info.get(EMBEDDING_HOST) if atoms is not None else None
         self.details.setText(structure_facts(atoms, kind=kind, status=scf_status))
-        host_atoms = _host_atoms(self._host)
-        has_host = host_atoms is not None
+        reference = host_atoms(self._host) if self._host is not None else None
+        has_host = reference is not None
         self.host_heading.setVisible(has_host)
         self._host_info.setVisible(has_host)
         summary, geometry = _host_fact_columns(
-            host_atoms, status=_host_status(self._host)
+            reference, status=_host_status(self._host)
         )
         self.host_details.setText(summary)
         self.host_geometry.setText(geometry)
@@ -281,7 +277,7 @@ class StructureOverviewWidget(QFrame):
 
     def _render_preview(self, *_args) -> None:
         atoms = (
-            _host_atoms(self._host)
+            host_atoms(self._host)
             if self.host_radio.isChecked() and self._host is not None
             else self._atoms
         )
@@ -293,7 +289,7 @@ class StructureOverviewWidget(QFrame):
         atomic_numbers = np.asarray(atoms.get_atomic_numbers(), dtype=int)
         potential = (
             self._host if self.host_radio.isChecked()
-            and hasattr(self._host, 'SCF_INFO') else None
+            and isinstance(self._host, PeriodicPotential) else None
         )
         sizes = marker_areas(atoms, 48, potential=potential)
         if len(positions) > _MAX_PREVIEW_SITES:

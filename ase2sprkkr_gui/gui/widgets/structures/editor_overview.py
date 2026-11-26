@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
     QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ase2sprkkr import SPRKKRAtoms
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_ARRAY, EMBEDDING_HOST, host_atoms
 from ase2sprkkr_gui.gui.widgets.structures.editor_preview import atom_colors
 from ase2sprkkr_gui.gui.widgets.structures.editor_section import EditorSection
 from ase2sprkkr_gui.gui.widgets.structures.overview import structure_facts
@@ -276,10 +278,10 @@ class EditorOverviewWidget(QWidget):
             self.site_scope.hide()
             self._populate_sites()
             return
-        is_cluster = "sprkkr_embedding" in getattr(atoms, "arrays", {})
+        is_cluster = EMBEDDING_ARRAY in atoms.arrays
         info = atoms.info
-        host = info.get("sprkkr_embedding_host") if is_cluster else None
-        self._host_atoms = getattr(host, "atoms", host)
+        host = info.get(EMBEDDING_HOST) if is_cluster else None
+        self._host_atoms = host_atoms(host) if host is not None else None
         self.site_scope.show()
         self.cluster_radio.setVisible(self._host_atoms is not None)
         self.host_radio.setVisible(self._host_atoms is not None)
@@ -301,9 +303,8 @@ class EditorOverviewWidget(QWidget):
                 _symmetry_description(self._host_atoms),
             )
             self.host_facts.setText(_fact_table(summary, details))
-        regions = getattr(
-            self._host_atoms if is_cluster else atoms, "regions", {},
-        )
+        reference = self._host_atoms if is_cluster else atoms
+        regions = reference.regions if isinstance(reference, SPRKKRAtoms) else {}
         for name, (box, label) in self.bulk_boxes.items():
             region = regions.get(name)
             box.setVisible(region is not None)

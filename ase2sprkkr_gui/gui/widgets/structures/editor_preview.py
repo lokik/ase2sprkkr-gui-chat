@@ -15,7 +15,8 @@ from matplotlib.colors import to_hex
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
-from ase2sprkkr.sprkkr.embedding import embedding_data, host_atoms
+from ase2sprkkr.potentials.potentials import PeriodicPotential
+from ase2sprkkr.sprkkr.embedding import EMBEDDING_ARRAY, EMBEDDING_HOST, embedding_data, host_atoms
 from ase2sprkkr_gui.gui.plots.atom_sizes import marker_areas
 from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
 
@@ -24,7 +25,7 @@ def site_type_group_keys(atoms):
     """Use actual shared SiteType objects, falling back to ASE symmetry kinds."""
     if atoms is None:
         return ()
-    sites = getattr(atoms, "arrays", {}).get("sprkkr_sites_data")
+    sites = atoms.arrays.get("sprkkr_sites_data")
     if sites is not None and len(sites) == len(atoms):
         return tuple(("site_type", id(site.site_type)) for site in sites)
     kinds = atoms.arrays.get("spacegroup_kinds")
@@ -152,10 +153,12 @@ class EditorClusterHostPreviews(QWidget):
     def _render_host(self):
         if self._host is None:
             return
+        host = self._cluster.info[EMBEDDING_HOST]
+        potential = host if isinstance(host, PeriodicPotential) else None
         self.host_preview.set_points(
             self._host.get_positions(),
             atom_colors(self._host, self._color_mode),
-            marker_areas(self._host, 55.0, potential=self._cluster.embedding_host),
+            marker_areas(self._host, 55.0, potential=potential),
             cell_corners=_cell_corners(self._host),
             outlines="#333a42", widths=0.65,
         )
@@ -165,9 +168,9 @@ class EditorClusterHostPreviews(QWidget):
         self._cluster = cluster
         embedded = (
             cluster is not None
-            and "sprkkr_embedding" in getattr(cluster, "arrays", {})
+            and EMBEDDING_ARRAY in cluster.arrays
         )
-        self._host = host_atoms(cluster.embedding_host) if embedded else None
+        self._host = host_atoms(cluster.info[EMBEDDING_HOST]) if embedded else None
         self.cluster_label.setText("Embedded cluster" if embedded else "Structure")
         self.host_page.setVisible(self._host is not None)
         self._render_host()
