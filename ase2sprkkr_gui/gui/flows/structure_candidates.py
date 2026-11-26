@@ -68,8 +68,11 @@ def load_structure_candidate(
     """Load a detached structure and present reader failures at the UI boundary."""
     path = Path(file_path).resolve()
     read = reader or ase_read
+    publishing = False
 
     def prepare_candidate(atoms):
+        nonlocal publishing
+        publishing = True
         candidate = StructureCandidate(atoms=atoms, source_path=path)
         if on_loaded is not None:
             on_loaded(candidate)
@@ -84,6 +87,8 @@ def load_structure_candidate(
             on_success=prepare_candidate,
         )
     except Exception as exc:  # noqa: BLE001 - ASE/backend readers vary
+        if publishing:
+            raise
         QMessageBox.critical(
             parent,
             "Load Error",

@@ -217,7 +217,7 @@ class EmbeddingPreview(QWidget):
         ax = self.axes
         ax.clear()
         ax.set_axis_off()
-        ax.set_aspect("equal", adjustable="datalim")
+        ax.set_aspect("equal", adjustable="box")
         self._scatter = None
         self._label_artists = []
         points, depth = self.project(self._positions)
@@ -276,7 +276,11 @@ class EmbeddingPreview(QWidget):
     def _apply_limits(self, *_):
         if not len(self._extent):
             return
-        width, height = max(self.canvas.width(), 1), max(self.canvas.height(), 1)
+        # A hidden Qt widget may already report its requested size while
+        # Matplotlib still renders at its previous size until resizeEvent.
+        # Use the actual figure dimensions for the transform and the padding.
+        dpr = max(self.canvas.devicePixelRatioF(), 1.)
+        width, height = np.maximum(self.figure.bbox.size / dpr, 1.)
         span = np.ptp(self._extent, axis=0)
         # Fit projected positions and cell corners, including visible marker
         # diameters. Leave a small extra gap beyond the outermost atom.

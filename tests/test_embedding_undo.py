@@ -48,7 +48,10 @@ def focus(dialog, widget):
 
 def type_number(spin, value):
     spin.lineEdit().selectAll()
-    QTest.keyClicks(spin.lineEdit(), str(value))
+    # QDoubleSpinBox interprets text according to its locale (e.g. decimal
+    # comma in Czech). Keep exercising real keyboard edits, not setValue().
+    text = str(value).replace(".", spin.locale().decimalPoint())
+    QTest.keyClicks(spin.lineEdit(), text)
 
 
 def shortcut(dialog, key):
@@ -343,7 +346,7 @@ def test_centre_change_undo_restores_summary_and_has_no_host_side_effects(dialog
     assert dialog.draft.center == HostSite(0, (1, 0, 0))
     dialog._undo()
     assert dialog.draft.center == original
-    assert "in (0, 0, 0)" in dialog.centre_label.text()
+    assert "in cell (0, 0, 0)" in dialog.centre_label.text()
     assert not dialog.draft.entries
     np.testing.assert_array_equal(atoms.positions, [[0, 0, 0]])
 

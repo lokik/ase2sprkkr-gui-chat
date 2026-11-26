@@ -72,10 +72,21 @@ def test_fullscreen_copy_refits_the_same_marker_diameters_on_resize():
     preview.set_view(90, -90)
     _set_atoms(preview, [2500., 4900.], [1., 3.])
 
+    from PyQt6.QtWidgets import QApplication
+
     fullscreen = preview._fullscreen_copy()
+    # A hidden widget can defer resizeEvent; Fit must use the figure size
+    # actually being rendered rather than the pending Qt widget dimensions.
     fullscreen.canvas.resize(440, 260)
     fullscreen._fit()
     assert fullscreen._fit_padding() == pytest.approx(preview._fit_padding())
+    _assert_markers_inside_canvas(fullscreen)
+
+    # Once visible, resizing the widget must refit automatically.
+    fullscreen.show()
+    QApplication.processEvents()
+    fullscreen.resize(600, 300)
+    QApplication.processEvents()
     _assert_markers_inside_canvas(fullscreen)
     fullscreen.close()
     preview.close()
