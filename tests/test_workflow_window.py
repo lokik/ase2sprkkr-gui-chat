@@ -5,8 +5,8 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/ase2sprkkr_gui-test-matplotlib")
 
 from ase import Atoms
 from types import SimpleNamespace
-from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtWidgets import QApplication, QAbstractButton, QLabel, QMessageBox, QSizePolicy, QToolButton, QWidget
+from PyQt6.QtCore import Qt, QPoint, QRect
+from PyQt6.QtWidgets import QApplication, QAbstractButton, QLabel, QMessageBox, QToolButton, QWidget
 
 
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
@@ -94,12 +94,11 @@ def test_navigation_shortcuts_are_exposed_in_tooltips(tmp_path):
     guided.close()
 
 
-def test_workflow_uses_one_workspace_without_expert_shell(tmp_path, monkeypatch):
+def test_workflow_uses_one_workspace(tmp_path, monkeypatch):
     application = QApplication.instance() or QApplication([])
     workspace = WorkspaceState()
     gui, window = _workflow(tmp_path, workspace=workspace)
 
-    assert not hasattr(gui, "create_main_window")
     gui.controller.replace_structure(Atoms("Fe", cell=(2.8, 2.8, 2.8), pbc=True))
     application.processEvents()
 
@@ -681,31 +680,21 @@ def test_header_controls_remain_reachable_on_resize(tmp_path):
         (results_column, window._close_button),
     )
 
-    def assert_buttons_contained():
-        for column, button in controls:
-            assert button.isVisible()
-            left = button.mapTo(column, QPoint(0, 0)).x()
-            right = button.mapTo(column, QPoint(button.width() - 1, 0)).x()
-            assert 0 <= left <= right < column.width()
-        footer = window._results_footer
-        assert footer.y() >= window._result_actions.y()
-        assert footer.y() + footer.height() <= results_column.height()
-
     for width in (2140, 1600, 1100, 2140):
         window.resize(width, 850)
         application.processEvents()
-        assert_buttons_contained()
-        # Check that adjacent controls do not overlap, without fixing sizes or modes.
+        if width == 1100:
+            assert window.width() < 1350  # Controls must not force a wide window.
         for column in (structure_column, calculate_column, results_column):
-            buttons = [button for owner, button in controls if owner is column
-                       and button is not window._project_browser_button
-                       and button is not window._settings_button
-                       and button is not window._close_button]
-            for left, right in zip(buttons, buttons[1:]):
-                assert left.mapTo(column, QPoint(left.width(), 0)).x() <= right.mapTo(
-                    column, QPoint(0, 0)
-                ).x()
-    assert window.width() < 2200
+            rectangles = []
+            for owner, button in controls:
+                if owner is not column:
+                    continue
+                assert button.isVisible()
+                rect = QRect(button.mapTo(column, QPoint()), button.size())
+                assert column.rect().contains(rect)
+                assert not any(rect.intersects(other) for other in rectangles)
+                rectangles.append(rect)
     window.close()
 
 

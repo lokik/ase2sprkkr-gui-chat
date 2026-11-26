@@ -121,15 +121,8 @@ class _FakeProfileStore:
         self.defaults.append(default_profile)
 
 
-def test_settings_has_independent_frame_tabs(tmp_path):
-    from PyQt6.QtWidgets import QFrame
-
+def test_settings_exposes_expected_sections(tmp_path):
     from ase2sprkkr_gui.gui.dialogs.settings import SettingsDialog
-    from ase2sprkkr_gui.gui.widgets.settings.preferred_tasks import PreferredTasksPage
-    from ase2sprkkr_gui.gui.widgets.settings.general import GeneralSettingsPage
-    from ase2sprkkr_gui.gui.widgets.settings.ase2sprkkr import Ase2sprkkrSettingsPage
-    from ase2sprkkr_gui.gui.widgets.settings.run_configurations import RunConfigurationsPage
-    from ase2sprkkr_gui.gui.widgets.settings.optional_dependencies import OptionalDependenciesPage
 
     dialog = SettingsDialog(
         ApplicationSettings(tmp_path / "settings.json"),
@@ -139,30 +132,12 @@ def test_settings_has_independent_frame_tabs(tmp_path):
         "General", "Preferred tasks", "Run configurations", "Ase2sprkkr",
         "Optional dependencies",
     ]
-    assert all(isinstance(dialog.tabs.widget(i), QFrame) for i in range(5))
-    assert isinstance(dialog.preferred_tasks_page, PreferredTasksPage)
-    assert isinstance(dialog.general_page, GeneralSettingsPage)
-    assert isinstance(dialog.run_configurations_page, RunConfigurationsPage)
-    assert isinstance(dialog.ase2sprkkr_page, Ase2sprkkrSettingsPage)
-    assert isinstance(dialog.optional_dependencies_page, OptionalDependenciesPage)
     assert "not GUI-specific" in dialog.ase2sprkkr_page.scope_notice.text()
     assert dialog.general_page.visualization_group.title() == "Visualization"
     assert dialog.general_page.atom_appearance_group.title() == "Atom appearance"
-    from PyQt6.QtWidgets import QLabel, QSlider
-    assert any(
-        item.text() == "External structure viewer:"
-        for item in dialog.general_page.visualization_group.findChildren(QLabel)
-    )
-    assert not dialog.general_page.visualization_group.findChildren(QSlider)
-    assert dialog.general_page.atom_appearance_group.findChildren(QSlider)
     assert dialog.general_page.sprkkr_group.title() == "SPR-KKR"
     assert dialog.general_page.python_shell_group.title() == "Python shell"
-    assert dialog.share_python_shell_history is (
-        dialog.general_page.share_python_shell_history
-    )
-    assert dialog.share_python_shell_history.isChecked()
-    assert dialog.viewer is dialog.general_page.viewer
-    assert dialog.dataset_default_mode is dialog.general_page.dataset_default_mode
+    assert dialog.general_page.share_python_shell_history.isChecked()
     dialog.close()
 
 

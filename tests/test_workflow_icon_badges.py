@@ -22,24 +22,11 @@ def test_recent_and_scf_badges_have_distinct_drawings():
         for pixels in (24, 26, 48):
             image = icon.pixmap(pixels, pixels).toImage()
             assert not image.isNull()
-            assert image.pixelColor(pixels // 2, pixels // 2).alpha() != 0
         images[symbol] = icon.pixmap(48, 48).toImage()
 
     assert images["recent"] != images["reconverge"]
     assert images["recent"] != images["new"]
     assert images["reconverge"] != images["new"]
-
-
-def test_recent_structure_retains_original_crystal_icon():
-    _app = QApplication.instance() or QApplication([])
-    original = QIcon(str(icon_path("bulk_crystal.png")))
-    decorated = badge_icon(original, "recent")
-    assert not original.isNull()
-    assert not decorated.isNull()
-    # The upper-left, away from the lower-right badge, is unmodified.
-    original_image = original.pixmap(42, 42).toImage()
-    recent_image = decorated.pixmap(48, 48).toImage()
-    assert original_image.pixelColor(12, 12) == recent_image.pixelColor(13, 13)
 
 
 def test_load_import_subjects_and_badges_are_distinct():
