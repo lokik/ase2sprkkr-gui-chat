@@ -108,6 +108,7 @@ def edit_custom_parameters(
     input_directory: Path | None = None,
     track_launch_monitor=None,
     project_repository=None,
+    preparation_manager=None,
     prepared_dialog: QDialog | None = None,
 ) -> bool:
     """Edit an isolated input file, then optionally submit a single run."""
@@ -152,6 +153,7 @@ def edit_custom_parameters(
         position_like_window="guided-input",
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        preparation_manager=preparation_manager,
     )
     return True
 
@@ -164,6 +166,7 @@ def load_custom_input(
     *,
     track_launch_monitor=None,
     project_repository=None,
+    preparation_manager=None,
 ) -> bool:
     """Read input into a local editor session, never a workspace document."""
     path = Path(path).expanduser().resolve()
@@ -191,6 +194,7 @@ def load_custom_input(
         prepared_dialog=dialog,
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        preparation_manager=preparation_manager,
     )
 
 
@@ -201,6 +205,7 @@ def choose_custom_input(
     *,
     track_launch_monitor=None,
     project_repository=None,
+    preparation_manager=None,
 ) -> bool:
     path, _ = QFileDialog.getOpenFileName(
         parent, "Load SPR-KKR Input File", "", _INPUT_FILTER
@@ -209,6 +214,7 @@ def choose_custom_input(
         controller, recent_files, parent, path,
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        preparation_manager=preparation_manager,
     ))
 
 
@@ -220,6 +226,7 @@ def choose_custom_task(
     dataset_default_mode: str,
     track_launch_monitor=None,
     project_repository=None,
+    preparation_manager=None,
 ) -> bool:
     picker = TaskChooserDialog(
         controller.atoms, parent, settings=getattr(parent, "settings", None),
@@ -236,4 +243,5 @@ def choose_custom_task(
         controller, recent_files, parent, parameters,
         track_launch_monitor=track_launch_monitor,
         project_repository=project_repository,
+        preparation_manager=preparation_manager,
     )

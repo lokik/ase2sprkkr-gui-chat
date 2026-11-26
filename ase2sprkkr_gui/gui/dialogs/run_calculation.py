@@ -256,10 +256,10 @@ class SprkkrRunWindow(RunMonitorWindow):
     def _conflict_manager(self):
         if self._execution_manager is not None:
             return self._execution_manager
-        from ase2sprkkr.sprkkr.projects import default_project_repository
-        from ase2sprkkr_gui.gui.application.persistent_jobs import project_run_manager
+        from ase2sprkkr.sprkkr.projects import memory_execution_manager, project_execution_manager
 
-        return project_run_manager(default_project_repository())
+        return (memory_execution_manager() if self._project_id is None
+                else project_execution_manager(project=self._project_id))
 
     @pyqtSlot(str, object)
     def _on_conflict_action(self, action: str, selected: object) -> None:
@@ -305,10 +305,8 @@ class SprkkrRunWindow(RunMonitorWindow):
                                 manager.cancel(record)
                         elif action == "fail":
                             if not record.state.is_terminal:
-                                result = manager.transition(
+                                result = manager.mark_failed(
                                     record,
-                                    state=RunState.FAILED,
-                                    expected_record=record,
                                     message=(
                                         "Manually marked failed to clear a file "
                                         "reservation; process termination was NOT verified."

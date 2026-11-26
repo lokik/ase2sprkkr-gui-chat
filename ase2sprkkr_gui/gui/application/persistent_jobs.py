@@ -519,7 +519,7 @@ class PersistentJobSource:
         run_ids = tuple(job_id for job_id in job_ids if job_id not in imported_ids)
         if run_ids:
             records = projects.reassign_runs(
-                run_ids, project_id, store=self._manager.store,
+                run_ids, project_id,
                 expected_project_ids={key: expected_project_ids[key] for key in run_ids},
             )
             for record in records:
