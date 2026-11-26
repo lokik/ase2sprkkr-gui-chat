@@ -297,6 +297,7 @@ def test_host_load_cancel_or_cluster_file_preserves_current_cluster(
 def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from contextlib import nullcontext
+    from ase2sprkkr_gui.gui.application.result_loading import LoadedResult
 
     latest = tmp_path / "new.out"
     earlier = tmp_path / "old.out"
@@ -319,10 +320,8 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
 
         def adopt_external_result(self, result):
             return SimpleNamespace(
-                record=SimpleNamespace(id=result),
-                potential_path=(
-                    earlier_potential if result == 1 else latest_potential
-                ),
+                record=SimpleNamespace(id=result.result.id),
+                potential_path=result.potential_path,
                 potential_error=None,
             )
 
@@ -330,7 +329,14 @@ def test_load_all_recent_results_reads_once_and_selects_latest(tmp_path, monkeyp
         parsed.append(path)
         if path == broken:
             raise ValueError("invalid output")
-        return 1 if path == earlier else 2
+        return LoadedResult(
+            result=SimpleNamespace(id=1 if path == earlier else 2),
+            output_path=path,
+            potential_path=earlier_potential if path == earlier else latest_potential,
+            atoms=None,
+            potential_error=None,
+            directory=str(tmp_path),
+        )
 
     calls = []
     def modal(parent, operation, **kwargs):
