@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ase2sprkkr import TaskResult
 from ase2sprkkr.sprkkr.projects import default_project_repository
 
 import sys
@@ -228,9 +229,10 @@ class GuiApplication(QObject):
             return
 
         job_id = record.persistent_ref
-        run_record = getattr(record.result, "run_record", None)
-        if job_id is None and getattr(run_record, "store", None) is self.session_store:
-            job_id = job_id_for_record(run_record)
+        if job_id is None and isinstance(record.result, TaskResult):
+            run_record = record.result.run_record
+            if run_record is not None and run_record.store is self.session_store:
+                job_id = job_id_for_record(run_record)
         if job_id is not None:
             job = self.persistent_jobs.job(job_id)
             if job is not None and job.is_final and not job.can_retry_download:

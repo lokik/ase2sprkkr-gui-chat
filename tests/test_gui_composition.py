@@ -3,6 +3,7 @@ import json
 import os
 
 from ase import Atoms
+from ase2sprkkr import TaskResult
 from ase2sprkkr.input_parameters.input_parameters import InputParameters
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -66,7 +67,7 @@ def test_workspace_result_window_can_be_reopened_without_recreating(monkeypatch,
     gui = GuiApplication(recent_files_path=tmp_path / "recent.json")
     output = tmp_path / "Fe_DOS.out"
     output.write_text("native DOS stdout\n", encoding="utf-8")
-    result = SimpleNamespace(output_values={}, result_values={})
+    result = TaskResult(None, None, tmp_path, output_file=output, task_name="DOS")
     record = SimpleNamespace(
         result=result, persistent_ref=None, task_name="dos",
         output_path=output, output_version=None,
@@ -101,3 +102,36 @@ def test_workspace_result_window_can_be_reopened_without_recreating(monkeypatch,
     assert len(created) == 1
     assert gui._result_windows[42] is created[0]
     created[0].close()
+
+
+def test_workspace_result_window_reopens_the_associated_session_run(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from kkrunner import RunState
+    from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob
+
+    _application = QApplication.instance() or QApplication([])
+    gui = GuiApplication(recent_files_path=tmp_path / "recent.json",
+                         settings_path=tmp_path / "settings.json")
+    run = gui.session_manager.new_record(directory=tmp_path, detached=True)
+    run = gui.session_manager.transition(
+        run, state=RunState.RUNNING, execution=run.execution.submitted("native-42"),
+    )
+    run = gui.session_manager.transition(run, state=RunState.FINISHED, return_code=0)
+    run = gui.session_store.get(run.id)
+    result = TaskResult(None, None, tmp_path, task_name="DOS")
+    result.run_record = run
+    record = SimpleNamespace(result=result, persistent_ref=None)
+    monkeypatch.setattr(gui.controller.result_store, "result", lambda _id: record)
+    job = PersistentJob.from_run_record(run)
+    looked_up = []
+    opened = []
+
+    def find_job(job_id):
+        looked_up.append(job_id)
+        return job
+
+    monkeypatch.setattr(gui.persistent_jobs, "job", find_job)
+    monkeypatch.setattr(gui.persistent_jobs_controller, "open_result_window",
+                        lambda job_id, _parent: opened.append(job_id))
+    gui._show_result_window(42)
+    assert looked_up == opened == ["session/" + run.id]
