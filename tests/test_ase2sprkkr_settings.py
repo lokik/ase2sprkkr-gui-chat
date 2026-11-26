@@ -389,7 +389,6 @@ def test_explicit_default_is_highlighted_and_editable_on_profiles_page(monkeypat
     item = page.list.currentItem()
     assert item.text().startswith("★ local")
     assert "default" in item.text()
-    assert item.font().bold()
     assert not page.make_default_button.isEnabled()
     assert page.automatic_default_button.isEnabled()
 

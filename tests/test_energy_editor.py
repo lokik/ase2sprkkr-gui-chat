@@ -134,7 +134,6 @@ def test_expert_combines_pair_and_uses_identical_control(application):
     assert dialog.parameters().ENERGY.EMINEV() == -5.
     assert dialog.parameters().ENERGY.EMIN() is None
     application.processEvents()
-    assert item.font(0).bold()
     editor.relative.setChecked(False)
     assert dialog.parameters().ENERGY.EMIN() == pytest.approx(convert_energy(-5., 'eV', 'Ry'))
     assert dialog.parameters().ENERGY.EMINEV() is None

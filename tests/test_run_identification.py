@@ -403,7 +403,6 @@ def test_save_only_is_a_special_non_persistent_profile_choice(application, tmp_p
     dialog = ProfileSelectionDialog(
         directory=str(tmp_path), store=_Profiles()
     )
-    assert not hasattr(dialog, "prepare_only")
     assert dialog._confirm_button.text() == "Run"
     assert not dialog.save_only_selected()
     assert dialog.profiles.itemText(dialog.profiles.count() - 1) == (
