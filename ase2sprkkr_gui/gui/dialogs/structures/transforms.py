@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 import numpy as np
-from ase2sprkkr.ase.build import aperiodic_times
-from ase2sprkkr.ase.build import rotate as rotate_by_hkl
 from matplotlib.figure import Figure
 from PyQt6.QtWidgets import (
     QDialog,
@@ -265,6 +263,8 @@ class _RepeatDialog(QDialog):
         repeated = None
         if self._preview_atoms is not None:
             try:
+                from ase2sprkkr.ase.build import aperiodic_times
+
                 repeated = aperiodic_times(self._preview_atoms, list(self.values()))
             except Exception:
                 repeated = None
@@ -326,6 +326,8 @@ class _RotateDialog(QDialog):
         h, k, l = self.values()
         if self._preview_atoms is not None and not (h == 0 and k == 0 and l == 0):
             try:
+                from ase2sprkkr.ase.build import rotate as rotate_by_hkl
+
                 rotated = rotate_by_hkl(self._preview_atoms, (h, k, l))
             except Exception:
                 rotated = None
@@ -409,6 +411,8 @@ def repeat_atoms(atoms: Any, *, parent: Optional[QWidget] = None) -> Optional[An
     if np.all(factors == 1):
         return atoms
 
+    from ase2sprkkr.ase.build import aperiodic_times
+
     return aperiodic_times(atoms, factors.tolist())
 
 
@@ -420,5 +424,7 @@ def rotate_atoms(atoms: Any, *, parent: Optional[QWidget] = None) -> Optional[An
     h, k, l = values
     if h == 0 and k == 0 and l == 0:
         raise ValueError("h, k, l cannot all be zero.")
+
+    from ase2sprkkr.ase.build import rotate as rotate_by_hkl
 
     return rotate_by_hkl(atoms, (h, k, l))

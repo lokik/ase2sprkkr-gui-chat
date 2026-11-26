@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import (
 from ase2sprkkr_gui.ase.element_assignment import (
     ElementAssignmentDraft, OccupancyEntry,
 )
-from ase2sprkkr_gui.gui.dialogs.structures.element_selector import select_element
 
 
 class OccupationEditor(QWidget):
@@ -39,7 +38,7 @@ class OccupationEditor(QWidget):
         on_restore: Callable[[list[OccupancyEntry]], Iterable[OccupancyEntry]] | None = None,
         on_validation: Callable[[str | None], None] | None = None,
         on_focus: Callable[[], None] | None = None,
-        selector: Callable | None = select_element,
+        selector: Callable | None = None,
     ):
         super().__init__(parent)
         self.require_full = require_full

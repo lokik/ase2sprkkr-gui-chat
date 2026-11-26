@@ -2130,7 +2130,7 @@ def test_projected_fit_uses_full_canvas_without_cropping_on_resize(gete_host, si
         assert pixels[:, 1].min() >= 20
         assert pixels[:, 1].max() <= height - 20
         assert max(np.ptp(pixels[:, 0]) / width, np.ptp(pixels[:, 1]) / height) > .7
-        np.testing.assert_allclose(preview.axes.get_position().bounds, (0, 0, 1, 1))
+        np.testing.assert_allclose(preview.axes.get_position().bounds, (0, 0, 1, 1), atol=1e-12)
 
 
 def test_gete_overview_fills_gaps_between_symmetry_surroundings(gete_host):

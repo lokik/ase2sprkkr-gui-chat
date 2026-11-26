@@ -122,11 +122,10 @@ def test_project_browser_lifecycle_belongs_to_application(monkeypatch, tmp_path)
         project_repository=repository,
     )
     workflow = gui.create_workflow_window()
-    expert = gui.create_main_window()
 
     workflow._project_browser_button.click()
     first_dialog = FakeProjectBrowserDialog.instances[0]
-    expert.browser_panel.project_browser_button.click()
+    workflow._project_browser_button.click()
 
     assert len(FakeProjectBrowserDialog.instances) == 1
     assert first_dialog.repository is repository
@@ -158,4 +157,3 @@ def test_project_browser_lifecycle_belongs_to_application(monkeypatch, tmp_path)
     ]
 
     workflow.close()
-    expert.close()

@@ -42,6 +42,7 @@ from ase2sprkkr_gui.ase.embedding import (
     fill_cell_hull,
     occupation_label,
 )
+from ase2sprkkr_gui.gui.dialogs.structures.element_selector import select_element
 from ase2sprkkr_gui.gui.dialogs.structures.embedding_history import EmbeddingUndoStack
 from ase2sprkkr_gui.gui.plots.lattice import corner_indices
 from ase2sprkkr_gui.gui.widgets.structures.embedding_preview import EmbeddingPreview
@@ -312,7 +313,8 @@ class BuildEmbeddingDialog(QDialog):
         self.occupation_group = occupation_group
         right_v.addWidget(occupation_group)
         self.occupation = OccupationEditor(
-            occupation_group, require_full=True, allow_duplicates=False
+            occupation_group, require_full=True, allow_duplicates=False,
+            selector=select_element,
         )
         # An incomplete mixture stays in this control. Once its fractions
         # are valid, publish the edit to the cluster without another button.

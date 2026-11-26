@@ -8,9 +8,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from ase.io import read as ase_read
-from ase.io import write as ase_write
-from ase.io.formats import ioformats
+from ase2sprkkr_gui.ase.io import read as ase_read, write as ase_write
 from ase2sprkkr import InputParameters, PeriodicPotential, Potential
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
@@ -786,6 +784,8 @@ def save_structure(
     # save_embedded_cluster diagnoses a missing host rather than losing data.
     if "sprkkr_embedding" in getattr(atoms, "arrays", {}):
         return save_embedded_cluster(controller, recent_files, parent)
+    from ase.io.formats import ioformats
+
     generation = controller.structure_generation
     formats = {
         " ".join(f"*.{ext}" for ext in file_format.extensions): file_format.name
