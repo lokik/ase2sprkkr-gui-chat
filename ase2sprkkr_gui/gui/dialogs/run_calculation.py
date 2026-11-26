@@ -17,9 +17,8 @@ from ase2sprkkr_gui.gui.application.execution_cancellation import (
 )
 from ase2sprkkr_gui.gui.application.sprkkr_execution import SprkkrExecution
 from ase2sprkkr_gui.gui.application.workspace_controller import CalculationRequest
-from ase2sprkkr_gui.gui.dialogs.run_monitor import (
-    RunMonitorWindow, RunMonitorWorker, info_page_settings,
-)
+from ase2sprkkr_gui.gui.dialogs.run_display import info_page_settings
+from ase2sprkkr_gui.gui.dialogs.run_monitor import RunMonitorWindow, RunMonitorWorker
 from ase2sprkkr_gui.gui.dialogs.run_conflict import SubmissionConflictDialog
 
 

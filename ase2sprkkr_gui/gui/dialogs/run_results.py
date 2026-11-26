@@ -12,6 +12,9 @@ from ase2sprkkr_gui.gui.application.result_presentation import present_result
 from ase2sprkkr_gui.gui.application.saved_output import SavedOutput
 from ase2sprkkr_gui.gui.application.result_store import ResultRecord, ResultStore
 from ase2sprkkr_gui.gui.dialogs.object_view import execute_value_action
+from ase2sprkkr_gui.gui.dialogs.run_display import (
+    MAX_OUTPUT_BLOCKS, create_info_page, has_info_page, info_page_settings,
+)
 from ase2sprkkr_gui.gui.widgets.result_actions import (
     ResultActionsWidget,
     result_action_icon,
@@ -277,11 +280,6 @@ class CompletedResultWindow(QDialog):
         layout.addWidget(self._tabs, 1)
         # Reconstruct the same INFO and Output pages as a live monitor.
         # Replay comes from the captured OUT file, never from a restarted job.
-        from ase2sprkkr_gui.gui.dialogs.run_monitor import (
-            _INFO_PAGE_FACTORIES, MAX_OUTPUT_BLOCKS,
-            create_info_page, info_page_settings,
-        )
-
         replay = saved_output or SavedOutput(
             warning="Saved output has not been loaded."
         )
@@ -296,7 +294,7 @@ class CompletedResultWindow(QDialog):
             except (AttributeError, OSError, ValueError, TypeError, KeyError):
                 logger.warning("Cannot recover input parameters for saved INFO", exc_info=True)
         self._info_page: QWidget | None = None
-        if task in _INFO_PAGE_FACTORIES:
+        if has_info_page(task):
             info_error = replay.warning or "The saved output is empty."
             if replay.text:
                 info_page = None
