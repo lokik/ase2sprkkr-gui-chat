@@ -195,6 +195,14 @@ class ProfileForm(QWidget):
         )
         self.supervised.toggled.connect(self._supervision_changed)
         run_form.addRow(self.supervised)
+        self.detached = QCheckBox("Detached (keep running after the GUI closes)", run_box)
+        self.detached.setToolTip(
+            "The directly launched process will not be terminated when the GUI "
+            "or its SSH connection closes. Explicitly stopping the calculation "
+            "still terminates it. Without a supervisor, recovery of the exit "
+            "status is not guaranteed."
+        )
+        run_form.addRow(self.detached)
         self.mpi = MpiEditor(run_box)
         self.mpi.mode.currentIndexChanged.connect(self._update_mpi_warning_visibility)
         run_form.addRow("MPI:", self.mpi)
@@ -298,6 +306,7 @@ class ProfileForm(QWidget):
                 else "Run directly on another computer connected over SSH."
             )
         self.run_target_description.setText(description)
+        self.detached.setVisible(kind in {"local", "ssh"} and not self.supervised.isChecked())
 
     def _update_visibility(self) -> None:
         kind = str(self.kind.currentData())
@@ -339,6 +348,7 @@ class ProfileForm(QWidget):
             if self._backend_explicit else kind == "ssh"
         )
         self._last_kind = kind
+        self.detached.setChecked(bool(values.get("detached", False)))
         self.mpi.set_value(values.get("mpi"))
         self.mpi_warning.setChecked(bool(values.get("mpi_warning", True)))
         self.executable_dir.setText(str(values.get("executable_dir") or ""))
@@ -369,6 +379,8 @@ class ProfileForm(QWidget):
             default_backend = "kkrunner" if kind == "ssh" else "direct"
             if self._backend_explicit or backend != default_backend:
                 values["backend"] = backend
+            if backend == "direct" and self.detached.isChecked():
+                values["detached"] = True
         elif kind == "ssh-psij" or (kind == "psij" and self._loaded_backend == "psij"):
             values["backend"] = "psij"
         for name, edit in (
