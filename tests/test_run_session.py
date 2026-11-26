@@ -68,3 +68,36 @@ def test_hidden_independent_runs_roundtrip_without_windows(tmp_path):
     assert take_session(path, again) == ()
     assert again.get(independent.id).store is again
     assert len(again.runs()) == 1
+
+
+def test_startup_only_reopens_visible_independent_run_windows(tmp_path):
+    from types import SimpleNamespace
+    from ase2sprkkr_gui.main import GuiApplication
+
+    path = tmp_path / "session.json"
+    old = RunManager(MemoryRunStore())
+
+    def running():
+        record = old.new_record(directory=tmp_path, detached=True)
+        return old.transition(record, state=RunState.RUNNING,
+                              execution=record.execution.submitted("native-" + record.id))
+
+    visible, hidden = running(), running()
+    save_session(path, old.store.runs(), (WindowReference("memory", visible.id),))
+    opened = []
+    recovered = []
+    restored = MemoryRunStore()
+    gui = SimpleNamespace(
+        create_workflow_window=lambda: None,
+        _run_session_path=path,
+        session_store=restored,
+        persistent_jobs=SimpleNamespace(reload=lambda: None),
+        persistent_jobs_controller=SimpleNamespace(
+            restore_window=lambda job_id, _parent: opened.append(job_id),
+            recover_incomplete=lambda: recovered.extend(restored.runs()),
+        ),
+    )
+    GuiApplication.restore_result_windows(gui)
+    assert opened == ["session/" + visible.id]
+    assert {record.id for record in recovered} == {visible.id, hidden.id}
+    assert not path.exists()

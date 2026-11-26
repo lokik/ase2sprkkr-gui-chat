@@ -357,13 +357,16 @@ class PersistentJobsController(QObject):
         job = self._source.job_changed(job_id)
         if job is None:
             return
-        if job.is_final and not job.can_retry_download:
-            self.open_result_window(job_id, parent)
-        elif job.attachable or job.can_retry_download:
-            if job.can_retry_download:
-                self.retry_download(job_id)
-            else:
-                self.open_monitor_window(job_id)
+        if job.is_final:
+            # A terminal download failure requires the explicit Retry
+            # download command; restoring a window is not that command.
+            if not job.can_retry_download:
+                self.open_result_window(job_id, parent)
+        elif job.attachable:
+            self.open_monitor_window(job_id)
+        else:
+            logger.warning("Cannot restore monitor %s: %s", job_id,
+                           job.reattach_unavailable_reason)
 
     def track_launch_window(self, monitor_window: SprkkrRunWindow) -> None:
         """Own and observe a launch monitor before its worker is started."""

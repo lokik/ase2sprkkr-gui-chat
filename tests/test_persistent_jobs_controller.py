@@ -1168,8 +1168,9 @@ def test_recovery_reuses_normal_monitor_registry_and_skips_live_launches(monkeyp
     interrupted = _job("interrupted", state="postprocessing")
     live = _job("live", state="downloading")
     running = _job("running")
+    session = _job("session/hidden")
     failed = _job("failed", state="failed")
-    source = _Source((interrupted, live, running, failed))
+    source = _Source((interrupted, live, running, session, failed))
     controller = PersistentJobsController(source)
     launch = _LaunchWindow(SimpleNamespace(record=SimpleNamespace(id=live.id, store=None)))
     controller.track_launch_window(launch)
@@ -1196,3 +1197,18 @@ def test_recovery_reuses_normal_monitor_registry_and_skips_live_launches(monkeyp
     assert window.show_calls == 1
     assert window.start_calls == 1
     assert app is QApplication.instance()
+
+
+def test_restoring_windows_does_not_retry_terminal_download(monkeypatch):
+    failed = _job("failed-download", state="failed")
+    running = _job("running")
+    source = _Source((failed, running))
+    controller = PersistentJobsController(source)
+    calls = []
+    monkeypatch.setattr(controller, "retry_download", lambda job_id: calls.append(("retry", job_id)))
+    monkeypatch.setattr(controller, "open_result_window", lambda job_id, parent: calls.append(("result", job_id)))
+    monkeypatch.setattr(controller, "open_monitor_window", lambda job_id: calls.append(("monitor", job_id)))
+
+    controller.restore_window(failed.id, None)
+    controller.restore_window(running.id, None)
+    assert calls == [("monitor", running.id)]

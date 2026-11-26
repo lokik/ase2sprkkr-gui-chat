@@ -29,7 +29,7 @@ def test_execution_forwards_mpi_warning_from_submit(monkeypatch, tmp_path):
     execution = SprkkrExecution(request, _Cancellation(), warning=seen.append)
 
     class Runner:
-        reference = None
+        record = None
         id = "test-run"
 
         def submit(self):

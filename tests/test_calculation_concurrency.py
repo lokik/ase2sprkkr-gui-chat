@@ -137,7 +137,7 @@ def test_backend_preparation_does_not_block_new_workspace_version(
     execution = SprkkrExecution(request, _Cancellation())
 
     class Runner:
-        reference = None
+        record = None
         id = "concurrency-test"
 
         def submit(self):

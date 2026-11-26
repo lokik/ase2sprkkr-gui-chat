@@ -5,7 +5,7 @@ import logging
 from collections.abc import Callable, Sequence
 from shutil import copyfileobj
 from tempfile import SpooledTemporaryFile
-from threading import Thread
+from threading import Event, Thread
 from typing import Any
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal, pyqtSlot
@@ -65,6 +65,7 @@ class RunMonitorWindow(QDialog):
     """
 
     refreshed = pyqtSignal(str)
+    _background_finished = pyqtSignal(str, object, object, object)
 
     def __init__(
         self,
@@ -99,13 +100,17 @@ class RunMonitorWindow(QDialog):
         self._thread: QThread | None = None
         self._worker: RunMonitorWorker | None = None
         self._close_requested = False
+        self._confirming_close = False
+        self._shutting_down = False
+        self._background_operations: dict[str, Event] = {}
+        self._background_finished.connect(self._on_background_finished)
         self._output_line_length = 0
         # The on-screen log is bounded; keep the complete, unwrapped stream
         # in a spooled file for copying and saving without unbounded RAM use.
         self._output_archive = SpooledTemporaryFile(
             max_size=1024 * 1024, mode="w+t", encoding="utf-8", newline=""
         )
-        self.refreshed.connect(self._set_status)
+        self.refreshed.connect(self._on_refreshed)
 
         layout = QVBoxLayout(self)
         # Keep labels aligned independently from their variable-length values.
@@ -242,8 +247,42 @@ class RunMonitorWindow(QDialog):
         self._close_requested = False
         super().showEvent(event)
 
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        # QDialog normally handles Escape via reject(), bypassing closeEvent.
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._thread is not None and self._thread.isRunning():
+        if self._confirming_close:
+            event.ignore()
+            return
+        if self.active_thread is not None and self.shutdown_cancels_job:
+            if not self._cancellation.requested:
+                self._confirming_close = True
+                try:
+                    answer = QMessageBox.question(
+                        self, "Stop Calculation?",
+                        "Closing this window will stop the calculation. Continue?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                finally:
+                    self._confirming_close = False
+                if answer != QMessageBox.StandardButton.Yes:
+                    event.ignore()
+                    return
+            # Keep the window alive (and visible) until the worker has
+            # acknowledged cancellation. The application uses the same worker
+            # lifetime when quitting.
+            if self.active_thread is not None and self.shutdown_cancels_job:
+                self._close_requested = True
+                self._on_stop()
+                event.ignore()
+                return
+        if self.active_thread is not None or self._background_operations:
             self._close_requested = True
             self.hide()
             event.ignore()
@@ -257,15 +296,70 @@ class RunMonitorWindow(QDialog):
         return thread if thread is not None and thread.isRunning() else None
 
     @property
+    def shutdown_blocked(self) -> bool:
+        """Whether a modal operation must be resolved before application exit."""
+        return self._confirming_close
+
+    @property
     def shutdown_cancels_job(self) -> bool:
         runner = self.runner
         return (not self._cancellation.observation_only and
                 (runner is None or not runner.detached))
 
-    def request_shutdown(self) -> None:
+    def request_shutdown(self) -> tuple[Event, ...]:
+        """Stop the worker and return completion events for auxiliary operations."""
+        self._shutting_down = True
+        self._refresh_btn.setEnabled(False)
         if self.active_thread is not None:
             self._stop_btn.setEnabled(False)
             self._cancellation.request(shutdown=True)
+        return tuple(self._background_operations.values())
+
+    def resume_after_aborted_shutdown(self) -> None:
+        """Restore monitor interaction without undoing requested cancellation."""
+        self._shutting_down = False
+        self._refresh_btn.setEnabled("run-refresh" not in self._background_operations)
+
+    def _start_background_operation(
+        self, name: str, operation: Callable[[], Any],
+        finished: Callable[[Any, BaseException | None], None],
+    ) -> None:
+        """Deliver an auxiliary operation's result before releasing its monitor."""
+        if self._shutting_down or name in self._background_operations:
+            return
+        self._background_operations[name] = Event()
+
+        def run():
+            result, error = None, None
+            try:
+                result = operation()
+            except BaseException as exc:
+                # A worker must deliver a completion even for cancellation
+                # (asyncio.CancelledError is not an Exception).
+                logger.exception("Background operation %s failed", name)
+                error = exc
+            finally:
+                self._background_finished.emit(name, finished, result, error)
+
+        try:
+            self._background_thread_factory(target=run, name=name, daemon=True).start()
+        except Exception as exc:
+            logger.exception("Could not start background operation %s", name)
+            self._on_background_finished(name, finished, None, exc)
+
+    @pyqtSlot(str, object, object, object)
+    def _on_background_finished(self, name: str, finished, result, error) -> None:
+        done = self._background_operations.pop(name)
+        try:
+            finished(result, error)
+        except Exception:
+            logger.exception("Could not display background operation %s result", name)
+        finally:
+            try:
+                if self._close_requested and self.active_thread is None and not self._background_operations:
+                    self.close()
+            finally:
+                done.set()
 
     def start(self, *, hidden: bool = False) -> None:
         """Start once, optionally without showing the monitor.
@@ -391,23 +485,19 @@ class RunMonitorWindow(QDialog):
     @pyqtSlot()
     def _on_refresh(self) -> None:
         runner = self._cancellation.runner
-        if runner is None:
+        if runner is None or self._shutting_down or "run-refresh" in self._background_operations:
             return
 
-        def refresh() -> None:
-            try:
-                state = runner.state
-            except Exception as exc:  # noqa: BLE001 - backend status boundary
-                logger.exception("Failed to refresh calculation run state")
-                self.refreshed.emit(f"Refresh failed: {exc}")
-                return
-            self.refreshed.emit(state_label(state))
+        def finished(result, error):
+            self.refreshed.emit(result if error is None else f"Refresh failed: {error}")
 
-        self._background_thread_factory(
-            target=refresh,
-            name="run-refresh",
-            daemon=True,
-        ).start()
+        self._refresh_btn.setEnabled(False)
+        self._start_background_operation("run-refresh", lambda: state_label(runner.state), finished)
+
+    @pyqtSlot(str)
+    def _on_refreshed(self, message: str) -> None:
+        self._set_status(message)
+        self._refresh_btn.setEnabled(not self._shutting_down)
 
     @pyqtSlot(str)
     def _on_warning(self, message: str) -> None:

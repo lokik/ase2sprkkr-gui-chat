@@ -52,6 +52,8 @@ def test_failed_submission_does_not_publish_a_new_workspace_revision(tmp_path, m
     original = controller.atoms
 
     class ConflictingRun:
+        record = None
+
         def submit(self):
             raise RuntimeError("conflicting calculation")
 
