@@ -687,8 +687,10 @@ def test_workflow_has_fixed_header_actions_and_results_utility_footer(
         workflow_module.custom_flow, "choose_custom_task",
         lambda *_args, **_kwargs: actions.append("custom"),
     )
+    from ase2sprkkr_gui.gui.dialogs import settings as settings_dialog
+
     monkeypatch.setattr(
-        workflow_module, "edit_settings",
+        settings_dialog, "edit_settings",
         lambda settings, parent: actions.append(("settings", settings, parent)),
     )
     window.projectBrowserRequested.connect(lambda: actions.append("projects"))

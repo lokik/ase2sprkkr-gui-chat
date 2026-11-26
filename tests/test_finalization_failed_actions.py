@@ -32,14 +32,6 @@ def _job() -> PersistentJob:
 
 
 class _Source:
-    available = True
-    unavailable_reason = None
-    supports_refresh = False
-    supports_results = True
-    supports_attach = True
-    supports_retry_download = True
-    supports_result_file_check = False
-
     def __init__(self, job):
         self._job = job
 
@@ -58,15 +50,7 @@ def test_finalization_failure_offers_retry_instead_of_load_result():
     job = _job()
     view = PersistentJobsWidget(lambda _value, _action: None)
 
-    view.set_jobs(
-        (job,),
-        available=True,
-        unavailable_reason=None,
-        supports_refresh=False,
-        supports_results=True,
-        supports_attach=True,
-        supports_retry_download=True,
-    )
+    view.set_jobs((job,))
 
     assert not view.retry_download_button.isHidden()
     assert view.load_result_button.isHidden()

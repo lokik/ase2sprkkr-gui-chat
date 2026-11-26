@@ -187,6 +187,9 @@ class CompletedRunPages(QObject):
         self._tabs = tabs
         self._parent = parent
         self._pending_plots: set[ResultFilePage] = set()
+        self._plot_timer = QTimer(self)
+        self._plot_timer.setSingleShot(True)
+        self._plot_timer.timeout.connect(self._render_current_plot)
         self.file_pages: list[ResultFilePage] = []
         self.execution_widget: ResultActionsWidget | None = None
         tabs.currentChanged.connect(self._tab_changed)
@@ -245,10 +248,13 @@ class CompletedRunPages(QObject):
         if page not in self._pending_plots:
             return
         # Wait for the tab to become visible before rendering a heavy plot.
-        QTimer.singleShot(0, lambda p=page: self._render_plot(p))
+        # A parent-owned timer is cancelled by Qt when the result window
+        # is destroyed, unlike a context-free singleShot Python closure.
+        self._plot_timer.start(0)
 
-    def _render_plot(self, page: ResultFilePage) -> None:
-        if page not in self._pending_plots or self._tabs.currentWidget() is not page:
+    def _render_current_plot(self) -> None:
+        page = self._tabs.currentWidget()
+        if page not in self._pending_plots:
             return
         self._pending_plots.remove(page)
         page.render()

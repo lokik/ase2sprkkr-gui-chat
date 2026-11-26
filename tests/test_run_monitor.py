@@ -92,7 +92,7 @@ def test_generic_monitor_has_cancellation_state_before_worker_start():
     assert not window._stop_btn.isEnabled()
 
 
-def test_generic_monitor_close_hides_without_cancelling():
+def test_detached_monitor_close_hides_without_cancelling():
     app = QApplication.instance() or QApplication([])
 
     class RunningThread:
@@ -101,6 +101,7 @@ def test_generic_monitor_close_hides_without_cancelling():
             return True
 
     window = RunMonitorWindow(lambda cancellation: object(), autostart=False)
+    window._cancellation.register(SimpleNamespace(detached=True))
     window._thread = RunningThread()
     window.show()
     app.processEvents()
@@ -723,7 +724,7 @@ def test_reopening_hidden_active_monitor_restores_completion_presentation():
         def isRunning():
             return True
 
-    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    window = RunMonitorWindow(lambda _: object(), autostart=False, observation_only=True)
     window._thread = RunningThread()
     window.show()
     app.processEvents()
@@ -816,3 +817,176 @@ def test_saved_dos_partial_output_displays_info_warning(_qt_application):
     assert "Partial INFO" in window._info_page.layout().itemAt(0).widget().text()
     assert "Earlier output was omitted" in window._output.toPlainText()
     window.close()
+
+
+def test_closing_result_window_cancels_pending_plot(_qt_application):
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    from ase2sprkkr_gui.gui.dialogs.run_results import CompletedResultWindow
+
+    calls = []
+
+    class PlotFile:
+        name = "DOS"
+        display_name = "DOS"
+        info = ""
+
+        def value_label(self):
+            return "DOS"
+
+        def actions(self):
+            return ("plot",)
+
+        def path(self):
+            return "/tmp/example.dos"
+
+        def parsed_file(self):
+            calls.append("parsed")
+            raise AssertionError("A closed window must not parse a plot")
+
+    value = PlotFile()
+    window = CompletedResultWindow(SimpleNamespace(
+        output_values={"DOS": value}, result_values={"DOS": value},
+    ))
+    window.close()
+    QCoreApplication.sendPostedEvents(window, QEvent.Type.DeferredDelete)
+    _qt_application.processEvents()
+    assert not calls
+
+
+def test_closing_owned_running_monitor_requires_confirmation_and_stops(monkeypatch, _qt_application):
+    class RunningThread:
+        running = True
+
+        def isRunning(self):
+            return self.running
+
+    window = RunMonitorWindow(lambda _: object(), autostart=False)
+    thread = RunningThread()
+    window._thread = thread
+    window.show()
+    answers = iter((QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes))
+    blocked = []
+
+    def confirm(*_args):
+        blocked.append(window.shutdown_blocked)
+        return next(answers)
+
+    monkeypatch.setattr(QMessageBox, "question", confirm)
+    assert not window.close()
+    assert window.isVisible()
+    assert not window._cancellation.requested
+
+    assert not window.close()
+    assert window.isVisible()
+    assert window._cancellation.requested
+    assert blocked == [True, True]
+    assert not window.shutdown_blocked
+
+    thread.running = False
+    window._thread_finished()
+    assert not window.isVisible()
+
+
+def test_close_waits_for_refresh_result_before_destroying_monitor(_qt_application):
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    from PyQt6 import sip
+
+    pending = []
+
+    class DeferredThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            pending.append(self.target)
+
+    window = RunMonitorWindow(
+        lambda _: object(), autostart=False, background_thread_factory=DeferredThread,
+    )
+    window._cancellation.register(SimpleNamespace(state="running", detached=True))
+    window.show()
+    received = []
+    window.refreshed.connect(received.append)
+    window._refresh_btn.click()
+    assert not window._refresh_btn.isEnabled()
+
+    window.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not sip.isdeleted(window)
+    assert not window.isVisible()
+    pending.pop()()
+    assert received == ["Running"]
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert sip.isdeleted(window)
+
+
+def test_exit_waits_for_pending_refresh_even_without_run_thread(_qt_application):
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QWidget
+    from ase2sprkkr_gui.main import GuiApplication
+
+    class DeferredThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            QTimer.singleShot(0, self.target)
+
+    parent = QWidget()
+    window = RunMonitorWindow(
+        lambda _: object(), autostart=False, background_thread_factory=DeferredThread,
+    )
+    window._cancellation.register(SimpleNamespace(state="finished", detached=True))
+    received = []
+    window.refreshed.connect(received.append)
+    window._refresh_btn.click()
+    gui = SimpleNamespace(
+        persistent_jobs_controller=SimpleNamespace(monitor_windows=lambda: (window,)),
+        _workflow_window=parent,
+    )
+    assert received == []
+    assert GuiApplication._stop_run_monitors_for_exit(gui)
+    assert received == ["Finished"]
+    window._on_refresh()
+    assert not window._background_operations
+    window.close()
+    parent.close()
+
+
+def test_failed_refresh_releases_monitor_and_allows_exit(_qt_application):
+    from asyncio import CancelledError
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QWidget
+    from ase2sprkkr_gui.main import GuiApplication
+
+    class DeferredThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            QTimer.singleShot(0, self.target)
+
+    class Runner:
+        detached = True
+
+        @property
+        def state(self):
+            raise CancelledError("status request cancelled")
+
+    parent = QWidget()
+    window = RunMonitorWindow(
+        lambda _: object(), autostart=False, background_thread_factory=DeferredThread,
+    )
+    window._cancellation.register(Runner())
+    received = []
+    window.refreshed.connect(received.append)
+    window._refresh_btn.click()
+    gui = SimpleNamespace(
+        persistent_jobs_controller=SimpleNamespace(monitor_windows=lambda: (window,)),
+        _workflow_window=parent,
+    )
+    assert GuiApplication._stop_run_monitors_for_exit(gui)
+    assert received == ["Refresh failed: status request cancelled"]
+    assert not window._background_operations
+    window.close()
+    parent.close()

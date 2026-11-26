@@ -1,14 +1,13 @@
 """Incomplete native output remains inspectable without inventing parsed data."""
 from __future__ import annotations
 
-from threading import RLock
 from types import SimpleNamespace
 
 import pytest
+from kkrunner import RunManager, RunStore
 from kkrunner.files import FileVersion
 
 from ase2sprkkr.outputs import OutputOnlyResult
-from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, PersistentJobSource
 from ase2sprkkr_gui.gui.application.result_presentation import present_result
 
 
@@ -50,23 +49,17 @@ def test_output_only_result_exposes_just_captured_output(tmp_path):
     assert "Unexpected end of output" in presentation.file_warning
 
 
-def _source(record, *, current=True):
-    manager = SimpleNamespace(
-        store=SimpleNamespace(get=lambda _job_id: record),
-        retrieve_result_files=lambda _record: None,
-        output_file_is_current=lambda _record: current,
-    )
-    source = object.__new__(PersistentJobSource)
-    source._manager = manager
-    source._lock = RLock()
-    source._jobs = {}
-    source._replace_cached_job = lambda _job: False
-    return source
+def _source(tmp_path, record, make_job_source):
+    manager = RunManager(RunStore(tmp_path / "runs"))
+    manager.store.save(manager.new_record(
+        run_id=record.id, directory=tmp_path, metadata=record.metadata,
+    ))
+    return make_job_source(manager), manager
 
 
-def test_persistent_source_requests_backend_fallback(tmp_path, monkeypatch):
+def test_persistent_source_requests_backend_fallback(tmp_path, monkeypatch, make_job_source):
     record = _record(tmp_path)
-    source = _source(record)
+    source, manager = _source(tmp_path, record, make_job_source)
     expected = OutputOnlyResult(record, EOFError("Unexpected end of output"))
     seen = []
 
@@ -78,16 +71,12 @@ def test_persistent_source_requests_backend_fallback(tmp_path, monkeypatch):
         "ase2sprkkr_gui.gui.application.persistent_jobs.load_project_result",
         load_backend,
     )
-    monkeypatch.setattr(
-        PersistentJob, "from_run_record",
-        classmethod(lambda cls, _record, **_kwargs: None),
-    )
     assert source.load_result("run") is expected
-    assert seen == [(source._manager, "run", True)]
+    assert seen == [(manager, "run", True)]
 
 
 @pytest.mark.parametrize("error", [ValueError("Bug"), EOFError("Truncated")])
-def test_persistent_source_does_not_translate_backend_errors(tmp_path, monkeypatch, error):
+def test_persistent_source_does_not_translate_backend_errors(tmp_path, monkeypatch, error, make_job_source):
     record = _record(tmp_path)
 
     def load_backend(_manager, _run_id, *, allow_unparsed=False):
@@ -98,6 +87,7 @@ def test_persistent_source_does_not_translate_backend_errors(tmp_path, monkeypat
         "ase2sprkkr_gui.gui.application.persistent_jobs.load_project_result",
         load_backend,
     )
+    source, _manager = _source(tmp_path, record, make_job_source)
     with pytest.raises(type(error)) as caught:
-        _source(record).load_result("run")
+        source.load_result("run")
     assert caught.value is error

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from threading import Event
 from typing import Any, Callable
 from collections.abc import Sequence
 
@@ -91,7 +92,6 @@ class SprkkrRunWindow(RunMonitorWindow):
 
     persistentJobChanged = pyqtSignal(str)
     conflictJobChanged = pyqtSignal(object)
-    conflictActionFinished = pyqtSignal(object)
 
     def __init__(
         self,
@@ -155,16 +155,23 @@ class SprkkrRunWindow(RunMonitorWindow):
             **info_page_settings(task_name, parameters),
             autostart=False,
         )
-        self._conflict_cancellation_pending = False
         self._conflict_dialog: SubmissionConflictDialog | None = None
-        self.conflictActionFinished.connect(self._on_conflict_action_finished)
+
+    def request_shutdown(self) -> tuple[Event, ...]:
+        operations = super().request_shutdown()
+        if self._conflict_dialog is not None:
+            # Abandon this rejected launch even if another monitor later
+            # prevents the application from exiting.
+            self._close_requested = True
+            if "resolve-conflicting-runs" not in self._background_operations:
+                self._conflict_dialog.reject()
+        return operations
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._conflict_cancellation_pending:
-            # A background SSH cancellation still owns this signal receiver.
-            # Let the user hide the monitor without destroying it mid-request.
-            self._close_requested = True
-            self.hide()
+        if self._conflict_dialog is not None:
+            # A conflict dialog is modal and may outlive the submission
+            # worker. Neither a close request nor thread.finished may destroy
+            # its parent. The dialog's own Cancel remains available when idle.
             event.ignore()
             return
         super().closeEvent(event)
@@ -214,7 +221,7 @@ class SprkkrRunWindow(RunMonitorWindow):
 
     def _show_submission_error(self) -> None:
         message = self._submission_error
-        if message is None or self._close_requested or self._cancellation.requested:
+        if message is None or self._close_requested or self._cancellation.requested or self._shutting_down:
             return
         self._submission_error = None
         QMessageBox.critical(self, "Could Not Start Calculation", message)
@@ -223,7 +230,7 @@ class SprkkrRunWindow(RunMonitorWindow):
     @pyqtSlot(object)
     def _on_conflict(self, conflict: DuplicateSubmissionError) -> None:
         """Keep the resolution dialog available while any conflict remains."""
-        if self._cancellation.requested:
+        if self._cancellation.requested or self._shutting_down:
             return
         self._set_status("New calculation not started — files are in use")
         dialog = SubmissionConflictDialog(conflict, parent=self)
@@ -234,6 +241,11 @@ class SprkkrRunWindow(RunMonitorWindow):
         finally:
             self._conflict_dialog = None
             dialog.deleteLater()
+        if self._shutting_down:
+            return
+        if self._close_requested:
+            self.close()
+            return
         if decision == dialog.DialogCode.Accepted:
             self._set_status("Conflicts resolved — starting calculation…")
             self._retry_after_conflict()
@@ -251,20 +263,19 @@ class SprkkrRunWindow(RunMonitorWindow):
 
     @pyqtSlot(str, object)
     def _on_conflict_action(self, action: str, selected: object) -> None:
-        if self._conflict_cancellation_pending or self._conflict_dialog is None:
+        if self._shutting_down or self._conflict_dialog is None:
             return
-        self._conflict_cancellation_pending = True
         proposed = self._conflict_dialog.proposed_record
         records = self._conflict_dialog.conflicting_records
-        self._background_thread_factory(
-            target=lambda: self._resolve_conflict_action(action, tuple(selected), proposed, records),
-            name="resolve-conflicting-runs",
-            daemon=True,
-        ).start()
+        self._start_background_operation(
+            "resolve-conflicting-runs",
+            lambda: self._resolve_conflict_action(action, tuple(selected), proposed, records),
+            self._on_conflict_action_finished,
+        )
 
     def _resolve_conflict_action(
         self, action: str, selected: tuple, proposed, records
-    ) -> None:
+    ) -> tuple:
         """Resolve only selected records, then recheck the global reservations.
 
         An overridden FAILED state or a deleted record does not terminate a
@@ -330,33 +341,37 @@ class SprkkrRunWindow(RunMonitorWindow):
         except Exception as exc:  # noqa: BLE001 - manager/storage boundary
             logger.exception("Could not check run reservation conflicts")
             errors["Reservation check"] = str(exc)
-        self.conflictActionFinished.emit((action, conflicts, errors, updated))
+        return action, conflicts, errors, updated
 
-    @pyqtSlot(object)
-    def _on_conflict_action_finished(self, outcome: object) -> None:
-        action, conflicts, errors, updated = outcome
-        self._conflict_cancellation_pending = False
-        if self._close_requested:
-            self.close()
-            return
+    def _on_conflict_action_finished(self, outcome: object, error: BaseException | None) -> None:
         dialog = self._conflict_dialog
         if dialog is None:
             return
-        if conflicts is not None:
-            dialog.set_conflicts(
-                conflicts,
-                errors=errors,
-                manually_changed=updated and action in ("fail", "delete"),
-            )
-        elif errors:
-            # A failed store check cannot justify enabling Calculate.
-            dialog.set_verification_error(errors)
-        dialog.set_busy(False)
+        try:
+            if self._shutting_down:
+                return
+            if error is not None:
+                dialog.set_verification_error({"Conflict resolution": str(error)})
+                return
+            action, conflicts, errors, updated = outcome
+            if conflicts is not None:
+                dialog.set_conflicts(
+                    conflicts,
+                    errors=errors,
+                    manually_changed=updated and action in ("fail", "delete"),
+                )
+            elif errors:
+                # A failed store check cannot justify enabling Calculate.
+                dialog.set_verification_error(errors)
+        finally:
+            dialog.set_busy(False)
+            if self._shutting_down:
+                dialog.reject()
 
     @pyqtSlot()
     def _retry_after_conflict(self) -> None:
         """Retry only a rejected preflight submission, with fresh runner state."""
-        if self._close_requested:
+        if self._close_requested or self._shutting_down or self._cancellation.requested:
             return
         previous = self._thread
         if previous is not None and previous.isRunning():

@@ -10,7 +10,6 @@ from kkrunner.files import FileEntry, FileManifest, FileVersion
 from kkrunner.projects import ProjectRepository, ProjectRunManager
 from kkrunner.runs import RunState, RunStore
 
-from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
 from ase2sprkkr_gui.gui.application.workspace import WorkspaceState
 from ase2sprkkr_gui.gui.application.workspace_controller import WorkspaceController
 from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
@@ -19,6 +18,7 @@ from ase2sprkkr_gui.gui.flows import calculation as calculation_flow
 def test_persistent_task_identity_round_trip_drives_recompute_editor(
     monkeypatch,
     tmp_path,
+    make_job_source,
 ):
     """Preserve effective task and schema across persistence and Guy routing."""
     parameters = InputParameters.create("ARPES")
@@ -80,7 +80,7 @@ def test_persistent_task_identity_round_trip_drives_recompute_editor(
 
     monkeypatch.setattr(reader_registry, "class_for_task", reader_class_for_task)
 
-    loaded = PersistentJobSource(manager).load_result(run.id)
+    loaded = make_job_source(manager, projects=projects).load_result(run.id)
 
     assert len(resolved_tasks) == 1
     assert resolved_tasks[0].name == "SPLEED"

@@ -587,15 +587,27 @@ class GuiApplication(QObject):
         self.persistent_jobs_controller.recover_incomplete()
 
     def _stop_run_monitors_for_exit(self):
-        def active_monitors():
-            monitors = self.persistent_jobs_controller.monitor_windows()
+        def monitor_dialog_open():
+            for monitor in self.persistent_jobs_controller.monitor_windows():
+                if monitor.shutdown_blocked:
+                    QMessageBox.warning(
+                        monitor, "Calculation Dialog",
+                        "Finish or cancel the open calculation dialog before closing the GUI.",
+                    )
+                    return True
+            return False
+
+        def active_monitors(monitors):
             return [(monitor, thread) for monitor in monitors
                     if (thread := monitor.active_thread) is not None]
 
-        active = active_monitors()
-        if not active:
+        if monitor_dialog_open():
+            return False
+        monitors = self.persistent_jobs_controller.monitor_windows()
+        if not monitors:
             return True
-        parent = self._workflow_window or active[0][0]
+        active = active_monitors(monitors)
+        parent = self._workflow_window or monitors[0]
         if any(monitor.shutdown_cancels_job for monitor, _ in active):
             answer = QMessageBox.question(
                 parent, "Exit While Calculations Are Running",
@@ -606,16 +618,19 @@ class GuiApplication(QObject):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return False
-            # The confirmation dialog runs an event loop; hidden monitors may
-            # have finished and destroyed their windows during that dialog.
-            active = active_monitors()
-            if not active:
-                return True
+            # The confirmation dialog runs an event loop; refresh ownership
+            # before requesting shutdown, including idle conflict dialogs.
+            if monitor_dialog_open():
+                return False
+            monitors = self.persistent_jobs_controller.monitor_windows()
+            active = active_monitors(monitors)
 
         # Qt delivers finished signals on the GUI thread. The modal worker
         # waits for a single event, not on widgets or individual QThreads.
         done = Event()
         pending = {thread for _, thread in active}
+        if not pending:
+            done.set()
         connections = []
 
         def finished(thread):
@@ -630,13 +645,21 @@ class GuiApplication(QObject):
                 connections.append((thread, callback))
                 if not thread.isRunning():
                     finished(thread)
-            for monitor, _ in active:
-                monitor.request_shutdown()
-            if done.is_set():
+            # An idle conflict dialog closes immediately; an ongoing action
+            # is allowed to finish before its signal receiver is destroyed.
+            operations = [event for monitor in monitors
+                          for event in monitor.request_shutdown()]
+            if done.is_set() and all(event.is_set() for event in operations):
                 return True
+
+            def wait_for_shutdown():
+                for event in operations:
+                    event.wait()
+                return done.wait(5)
+
             completed = run_modal_task(
-                parent, lambda: done.wait(5),
-                title="Closing GUI", label="Stopping calculation monitors…",
+                parent, wait_for_shutdown,
+                title="Closing GUI", label="Finishing pending operations and stopping calculation monitors…",
                 modality=Qt.WindowModality.ApplicationModal,
             )
             if not completed:
@@ -646,7 +669,11 @@ class GuiApplication(QObject):
                     "Some jobs may already have stopped or detached. Close the GUI again "
                     "after the remaining monitors settle.",
                 )
-            return completed
+            if completed and not monitor_dialog_open():
+                return True
+            for monitor in self.persistent_jobs_controller.monitor_windows():
+                monitor.resume_after_aborted_shutdown()
+            return False
         finally:
             for thread, callback in connections:
                 try:

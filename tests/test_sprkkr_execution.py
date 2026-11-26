@@ -33,7 +33,7 @@ def test_raw_execution_outcome_is_reported_before_result_loading(monkeypatch, tm
         error_file=str(tmp_path / "Fe_SCF.out.err"),
         return_code=code,
     )
-    runner = SimpleNamespace(wait=lambda: outcome, id="failed-run", failure_message="Native execution stopped")
+    runner = SimpleNamespace(record=None, wait=lambda: outcome, id="failed-run", failure_message="Native execution stopped")
     statuses = []
     execution = SprkkrExecution(_request(tmp_path), _Cancellation(), status=statuses.append)
     monkeypatch.setattr(execution, "_calculator", lambda: object())
@@ -96,7 +96,7 @@ def test_file_based_submission_uses_geometry_from_validated_launch_files(tmp_pat
         launched.append(True)
 
     monkeypatch.setattr(
-        execution, "_create_runner", lambda _calculator: SimpleNamespace(submit=submit),
+        execution, "_create_runner", lambda _calculator: SimpleNamespace(record=None, submit=submit),
     )
     execution._submit(object())
     assert set(execution._file_backed_input.atoms.get_chemical_symbols()) == {"Fe"}

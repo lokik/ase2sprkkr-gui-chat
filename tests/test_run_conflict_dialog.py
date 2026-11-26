@@ -133,7 +133,7 @@ def test_mark_failed_updates_only_history_and_keeps_dialog_open(monkeypatch, tmp
     assert dialog.details.topLevelItemCount() == 1
     assert not dialog.calculate_button.isEnabled()
     assert dialog.result() == QDialog.DialogCode.Rejected
-    assert not window._conflict_cancellation_pending
+    assert not window._background_operations
     assert app is QApplication.instance()
 
 
@@ -259,7 +259,7 @@ def test_refresh_rechecks_new_conflicts_not_only_initial_ids(tmp_path):
 
     assert ids == {first.id, second.id}
     assert not dialog.calculate_button.isEnabled()
-    assert not window._conflict_cancellation_pending
+    assert not window._background_operations
     assert app is QApplication.instance()
 
 
@@ -278,7 +278,7 @@ def test_failed_conflict_recheck_never_enables_calculate(monkeypatch, tmp_path):
 
     assert "history unavailable" in dialog.status_label.text()
     assert not dialog.calculate_button.isEnabled()
-    assert not window._conflict_cancellation_pending
+    assert not window._background_operations
     assert app is QApplication.instance()
 
 
@@ -395,4 +395,129 @@ def test_same_id_conflicts_select_independently(tmp_path, monkeypatch):
     assert disk.store.get(old.id).state == RunState.RUNNING
     assert memory.store.get(other.id).state == RunState.FAILED
     assert dialog.details.topLevelItemCount() == 1
+    assert app is QApplication.instance()
+
+
+def test_submission_thread_end_cannot_destroy_open_conflict_dialog(monkeypatch, tmp_path):
+    app = QApplication.instance() or QApplication([])
+    _manager, conflict = _conflict(tmp_path)
+    window = calculation.SprkkrRunWindow(SimpleNamespace(directory=str(tmp_path)))
+    window.show()
+    window._close_requested = True
+    restarted = []
+    monkeypatch.setattr(window, "_retry_after_conflict", lambda: restarted.append(True))
+
+    def resolve(dialog):
+        # The old submission thread can finish while the conflict dialog is
+        # nested in its modal event loop, even if a close was already latched.
+        window._thread_finished()
+        assert window.isVisible()
+        assert not window.close()
+        assert not window.shutdown_blocked
+        dialog.set_busy(True)
+        window._on_conflict_action_finished(("refresh", conflict, {}, False), None)
+        assert dialog.cancel_button.isEnabled()
+        dialog.reject()
+        return dialog.result()
+
+    monkeypatch.setattr(SubmissionConflictDialog, "exec", resolve)
+    window._on_conflict(conflict)
+
+    assert not restarted
+    assert not window.isVisible()
+    assert not window.shutdown_blocked
+    assert app is QApplication.instance()
+
+
+def test_shutdown_closes_idle_conflict_dialog_without_reopening_setup(monkeypatch, tmp_path):
+    app = QApplication.instance() or QApplication([])
+    _manager, conflict = _conflict(tmp_path)
+    window = calculation.SprkkrRunWindow(SimpleNamespace(directory=str(tmp_path)))
+    returned = []
+    monkeypatch.setattr(window, "_return_to_setup", lambda: returned.append(True))
+
+    def resolve(dialog):
+        assert not window.shutdown_blocked
+        assert window.request_shutdown() == ()
+        assert dialog.result() == QDialog.DialogCode.Rejected
+        return dialog.result()
+
+    monkeypatch.setattr(SubmissionConflictDialog, "exec", resolve)
+    window._on_conflict(conflict)
+    assert not returned
+    window.close()
+    assert app is QApplication.instance()
+
+
+def test_shutdown_waits_for_current_conflict_action_and_closes_dialog(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QWidget
+    from ase2sprkkr_gui.main import GuiApplication
+
+    app = QApplication.instance() or QApplication([])
+    manager, conflict = _conflict(tmp_path)
+    parent = QWidget()
+    window = calculation.SprkkrRunWindow(SimpleNamespace(directory=str(tmp_path)))
+    window._execution_manager = manager
+    calls = []
+
+    class DeferredThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            QTimer.singleShot(0, self.target)
+
+    window._background_thread_factory = DeferredThread
+    monkeypatch.setattr(window, "_return_to_setup", lambda: calls.append("setup"))
+    monkeypatch.setattr(window, "_retry_after_conflict", lambda: calls.append("retry"))
+    original_refresh = manager.refresh
+
+    def refresh(records):
+        calls.append("refresh")
+        return original_refresh(records)
+
+    monkeypatch.setattr(manager, "refresh", refresh)
+    gui = SimpleNamespace(
+        persistent_jobs_controller=SimpleNamespace(monitor_windows=lambda: (window,)),
+        _workflow_window=parent,
+    )
+
+    def resolve(dialog):
+        dialog.refresh_button.click()
+        assert window._background_operations
+        assert calls == []
+        assert GuiApplication._stop_run_monitors_for_exit(gui)
+        assert calls == ["refresh"]
+        assert dialog.result() == QDialog.DialogCode.Rejected
+        assert not window._background_operations
+        return dialog.result()
+
+    monkeypatch.setattr(SubmissionConflictDialog, "exec", resolve)
+    window._on_conflict(conflict)
+    assert calls == ["refresh"]
+    window.close()
+    parent.close()
+    assert app is QApplication.instance()
+
+
+def test_conflict_action_failure_releases_dialog_and_prevents_calculate(monkeypatch, tmp_path):
+    app = QApplication.instance() or QApplication([])
+    manager, conflict = _conflict(tmp_path)
+    window, dialog = _window(tmp_path, manager, conflict)
+    dialog.set_conflicts(DuplicateSubmissionError(conflict.record, ()))
+    assert dialog.calculate_button.isEnabled()
+
+    def fail(*_args):
+        raise RuntimeError("unexpected worker failure")
+
+    monkeypatch.setattr(window, "_resolve_conflict_action", fail)
+    dialog.refresh_button.click()
+    assert "unexpected worker failure" in dialog.status_label.text()
+    assert dialog.cancel_button.isEnabled()
+    assert not dialog.calculate_button.isEnabled()
+    assert not window._background_operations
+    assert window.request_shutdown() == ()
+    window._conflict_dialog = None
+    window.close()
     assert app is QApplication.instance()
