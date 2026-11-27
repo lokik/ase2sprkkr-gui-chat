@@ -5,6 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from ase import Atoms
+from ase2sprkkr import InputParameters
 from types import SimpleNamespace
 import pytest
 from kkrunner import ExecutionOutcome, ExecutionSpec
@@ -58,7 +59,7 @@ def test_raw_execution_outcome_is_reported_before_result_loading(monkeypatch, tm
 def _request(tmp_path, *, restart_scf: bool = False, clear_cache: bool = False) -> CalculationRequest:
     return CalculationRequest(
         atoms=Atoms("Fe"),
-        input_parameters=object(),
+        input_parameters=InputParameters.for_task("SCF"),
         directory=str(tmp_path),
         structure_id=1,
         state_id=1,
@@ -513,7 +514,7 @@ def test_embedded_execution_uses_native_result_interpretation(
         host, [(0, (0, 0, 0), "Fe")]
     )
     request = CalculationRequest(
-        atoms=cluster, input_parameters=object(), directory=str(tmp_path),
+        atoms=cluster, input_parameters=InputParameters.for_task("SCF"), directory=str(tmp_path),
         structure_id=1, state_id=1,
     )
     calls = []
