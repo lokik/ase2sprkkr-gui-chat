@@ -188,3 +188,29 @@ def test_profile_summary_detached_direct_execution(monkeypatch):
         profile = replace(profile, executor=executor, host=host)
         assert execution_profiles.profile_summary_fields(None)[0] == ("Execution", expected)
         assert execution_profiles.profile_description(None).startswith(expected + " · MPI ")
+
+
+def test_shared_filesystem_profile_disables_transfer_controls_and_round_trips():
+    _application = _app()
+    form = ProfileForm()
+    form.load(ProfileDraft("cluster", {
+        "executor": "ssh", "host": "cluster",
+        "shared_filesystem": True, "input_sync": "always", "output_sync": "missing",
+        "local_root": "/mnt/work", "remote_root": "/scratch/work",
+    }))
+    assert form.shared_filesystem.isChecked()
+    assert not form.input_sync.isEnabled()
+    assert not form.output_sync.isEnabled()
+    values = form.values()
+    assert values["shared_filesystem"] is True
+    assert values["local_root"] == "/mnt/work"
+    assert values["remote_root"] == "/scratch/work"
+    form.shared_filesystem.setChecked(False)
+    assert form.input_sync.isEnabled()
+    assert form.output_sync.isEnabled()
+    assert form.values().get("shared_filesystem", False) is False
+    assert form.values()["input_sync"] == "always"
+    assert form.values()["output_sync"] == "missing"
+    form.kind.setCurrentIndex(form.kind.findData("local"))
+    assert not form.values().get("shared_filesystem", False)
+    form.close()

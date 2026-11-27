@@ -62,7 +62,7 @@ def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, jo
         candidate_kinds = declared_local_kinds(record.files, directory)
         remote = (
             referenced_remote_paths(record.files)
-            if not record.execution.target.is_local else ()
+            if not record.execution.target.is_local and not record.files.shared_filesystem else ()
         )
         ignored_key = None
         ignored_run_key = record.key
@@ -122,8 +122,9 @@ def remote_file_review(manager: RunManager, job_id: str, job: Any) -> RemoteFile
     if job is None or job.imported_path is not None or not job.is_final:
         raise ValueError("Remote deletion is available only for finished tracked SSH runs")
     record = manager.store.get(str(job_id))
-    if record.execution.target.is_local or not record.execution.available:
-        raise ValueError("This run has no remote files")
+    if (record.execution.target.is_local or record.files.shared_filesystem
+            or not record.execution.available):
+        raise ValueError("This run has no separate remote files")
     candidates = referenced_remote_paths(record.files)
     referrers = _remote_reference_details(manager, record)
     replies = manager.client_for(record).inspect_remote_files(record, candidates)
@@ -160,8 +161,9 @@ def capture_remote_cleanup(manager: RunManager, job_id: str, job: Any) -> Any:
     if job is None or not job.is_final or job.imported_path is not None:
         raise ValueError("Remote cleanup requires a finished persisted run")
     record = manager.store.get(str(job_id))
-    if record.execution.target.is_local or not record.execution.available:
-        raise ValueError("The selected run has no SSH connection")
+    if (record.execution.target.is_local or record.files.shared_filesystem
+            or not record.execution.available):
+        raise ValueError("The selected run has no separate remote files")
     return record
 
 
