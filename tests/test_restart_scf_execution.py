@@ -93,6 +93,12 @@ def test_execution_forwards_restart_scf_to_create_run(monkeypatch, tmp_path):
         record = None
         id = "test-run"
 
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
+
         def submit(self):
             submitted.append(True)
 

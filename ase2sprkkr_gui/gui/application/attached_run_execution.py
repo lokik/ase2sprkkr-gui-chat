@@ -42,8 +42,8 @@ class AttachedRunExecution:
         # including when Stop was requested before registration finished.
         if not self._cancellation.register(runner):
             runner.stop_observation()
-            # The observer was already started by attach(); do not leave it
-            # running after the Qt worker has exited.
+            # No observer was started by attach(); the explicit wait settles
+            # the already-stopped client handle without cancelling the job.
             return runner
         self._attached(runner)
         return runner
