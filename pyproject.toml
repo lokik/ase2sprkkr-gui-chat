@@ -9,7 +9,7 @@ description = "PyQt6 GUI for building/editing ASE structures and running SPR-KKR
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-  "kkrunner>=0.3.0b5,<0.4",
+  "kkrunner>=0.4.0b1,<0.5",
   "PyQt6",
   "qonsole>=3.3,<4",
   "matplotlib",
