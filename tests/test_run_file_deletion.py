@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from kkrunner.backends import BackendConfig
-from kkrunner.transports import SshTransport
+from kkrunner.targets import SshTarget
 from kkrunner.files import CacheEntry, FileEntry, FileManifest
 from kkrunner.projects import ProjectRepository
 from kkrunner.runs import ExecutionMetadata, RunState, WorkingDirectory
@@ -41,7 +41,7 @@ def _record(ref, directory, files, state=RunState.FINISHED):
         metadata={"ase2sprkkr": {"task": "DOS", "dataset": ref}},
         files=files,
         execution=ExecutionMetadata(
-            SshTransport(host="cluster"),
+            SshTarget(host="cluster"),
             WorkingDirectory(str(directory), "/remote/directory"),
             backend=BackendConfig("psij", options={"executor_name": "slurm"}),
         ),
@@ -362,7 +362,7 @@ def test_ssh_preview_uses_manifest_and_detects_shared_remote_references(tmp_path
         "second", tmp_path,
         FileManifest(inputs=(FileEntry(remote_path=path),), mapping=mapping),
     )
-    second.execution = replace(second.execution, transport=SshTransport(other_host))
+    second.execution = replace(second.execution, target=SshTarget(other_host))
     source, _store = _source(make_job_source, first, second)
 
     class Client:

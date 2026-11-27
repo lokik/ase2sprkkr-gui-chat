@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from kkrunner.runs import RunState, FailurePhase, ExecutionMetadata, WorkingDirectory
 from kkrunner.runs.records import RunRecord
-from kkrunner.transports import SshTransport
+from kkrunner.targets import SshTarget
 from kkrunner.backends import BackendConfig
 from kkrunner.files import FileManifest, FileEntry
 import ase2sprkkr_gui.gui.application.persistent_jobs as module
@@ -25,7 +25,7 @@ def record(state=RunState.RUNNING, *, backend_id="pid-42", failure_phase=None, r
         message=None, failure_phase=failure_phase,
         files=FileManifest(),
         execution=ExecutionMetadata(
-            SshTransport(host="cluster"),
+            SshTarget(host="cluster"),
             WorkingDirectory("/tmp/calc", "/remote/calc"), backend_id=backend_id,
             backend=BackendConfig(name="psij", options={"executor_name": "slurm"}),
         ),
@@ -58,7 +58,7 @@ def test_persistent_job_projects_validated_run_record(tmp_path):
         created_at="2026-10-19T10:00:00+00:00",
         updated_at="2026-10-19T11:00:00+00:00",
         execution=ExecutionMetadata(
-            SshTransport(host="cluster"),
+            SshTarget(host="cluster"),
             WorkingDirectory(str(tmp_path), "/remote/calc"),
             backend_id="42",
             backend=BackendConfig(name="psij", options={"executor_name": "slurm"}),

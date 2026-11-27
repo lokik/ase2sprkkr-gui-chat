@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from kkrunner.runs import ExecutionMetadata, WorkingDirectory
-from kkrunner.transports import LocalTransport
+from kkrunner.targets import LocalTarget
 from types import SimpleNamespace
 
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, PersistentJobSource
@@ -16,7 +16,7 @@ def _record(*, result_files=None):
         updated_at="2026-10-13T06:30:00+00:00",
         finished_at="2026-10-13T06:20:00+00:00",
         metadata={"ase2sprkkr": {"task": "DOS", "dataset": "Fe-DOS"}},
-        execution=ExecutionMetadata(LocalTransport(), WorkingDirectory("/tmp/calc")),
+        execution=ExecutionMetadata(LocalTarget(), WorkingDirectory("/tmp/calc")),
         failure_phase=None,
         return_code=0,
         message=None,
@@ -77,12 +77,12 @@ def test_unavailable_execution_keeps_local_history_visible(tmp_path):
     from dataclasses import replace
 
     from kkrunner.backends import BackendConfig
-    from kkrunner.transports import transport_from_dict
+    from kkrunner.targets import target_from_dict
 
     record = _record()
     record.execution = replace(
         record.execution, backend=BackendConfig("unknown-backend"),
-        transport=transport_from_dict({"kind": "unknown-connection", "host": "old-host"}),
+        target=target_from_dict({"kind": "unknown-connection", "host": "old-host"}),
         backend_id="saved-id",
     )
     record.state = "running"

@@ -151,7 +151,7 @@ def test_embedded_source_round_trips_through_backend_file_manifest(tmp_path, nat
     from ase2sprkkr import InputParameters, SPRKKR
     from ase2sprkkr.sprkkr.input_sources import load_existing_potential_input
     from ase2sprkkr.sprkkr.profile import SPRKKRProfile
-    from kkrunner.client import EndpointClient
+    from kkrunner.client import ExecutionClient
     from kkrunner.files import FileManifest
     from kkrunner.runs.files import snapshot_file_entries
     from kkrunner.backends.contracts import SubmissionNotStarted
@@ -173,7 +173,7 @@ def test_embedded_source_round_trips_through_backend_file_manifest(tmp_path, nat
     try:
         runner = prepared.create_run(
             result_context=calculator, profile=calculator.profile,
-            executor=EndpointClient(),
+            executor=ExecutionClient(),
         )
         # This comes from the actual SPRKKR -> KKRunner execution spec, not
         # a test-authored SimpleNamespace with manually selected input paths.
@@ -308,7 +308,7 @@ def test_execution_binds_persistent_manager_to_launch_project(monkeypatch, tmp_p
         id = "run-1"
         record = SimpleNamespace(
             execution=SimpleNamespace(
-                transport=SimpleNamespace(is_local=True, host=None)
+                target=SimpleNamespace(is_local=True, host=None)
             )
         )
 

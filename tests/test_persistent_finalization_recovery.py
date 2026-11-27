@@ -4,7 +4,7 @@ import ase2sprkkr_gui.gui.application.persistent_jobs as module
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
 from kkrunner.runs import RunState, ExecutionMetadata, WorkingDirectory
 from kkrunner.files import FileManifest
-from kkrunner.transports import LocalTransport
+from kkrunner.targets import LocalTarget
 from kkrunner.backends import BackendConfig
 
 
@@ -16,7 +16,7 @@ def test_source_has_no_implicit_recovery_on_construction_reload_or_refresh(monke
         finished_at=None, metadata={"ase2sprkkr": {"task": "DOS"}},
         return_code=0, message=None, failure_phase=None,
         files=FileManifest(),
-        execution=ExecutionMetadata(LocalTransport(), WorkingDirectory("/tmp/calc"),
+        execution=ExecutionMetadata(LocalTarget(), WorkingDirectory("/tmp/calc"),
                                     "pid-42", backend=BackendConfig("kkrunner")),
     )
     store = SimpleNamespace(runs=lambda **kwargs: (record,), get=lambda _id: record)
