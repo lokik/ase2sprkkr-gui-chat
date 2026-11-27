@@ -681,10 +681,10 @@ def test_execution_notifies_with_authoritative_run_record(tmp_path):
     assert changes[0].store is manager.store
 
 
-def test_save_only_uses_the_same_session_store(tmp_path, monkeypatch):
-    from kkrunner import MemoryRunStore, RunManager
+def test_save_only_uses_ordinary_execution_manager(tmp_path, monkeypatch):
+    from kkrunner import RunManager, RunStore
 
-    manager = RunManager(MemoryRunStore())
+    manager = RunManager(RunStore(tmp_path / "history"))
     execution = SprkkrExecution(
         _request(tmp_path), _Cancellation(), execution_manager=manager,
     )
@@ -698,15 +698,6 @@ def test_save_only_uses_the_same_session_store(tmp_path, monkeypatch):
     monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
     execution.prepare_files()
     assert captured["run_manager"] is manager
-
-
-def test_save_only_does_not_fall_back_to_another_store(tmp_path):
-    from kkrunner import RunManager, RunStore
-
-    manager = RunManager(RunStore(tmp_path / "history"))
-    execution = SprkkrExecution(_request(tmp_path), _Cancellation(), execution_manager=manager)
-    with pytest.raises(ValueError, match="session memory manager"):
-        execution.prepare_files()
 
 
 @pytest.mark.parametrize("clear_cache", [False, True])

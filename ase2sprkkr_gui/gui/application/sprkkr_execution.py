@@ -120,9 +120,6 @@ class SprkkrExecution:
     def prepare_files(self):
         """Write native input/potential files without submitting a runner."""
         input_file, potential_file, _output_file = self.file_names()
-        manager = self.execution_manager
-        if manager is not None and not isinstance(manager.store, MemoryRunStore):
-            raise ValueError("Saving inputs requires the session memory manager")
         return self._calculator().save_input(
             **self._input_source(potential_file),
             input_parameters=self.request.input_parameters,
@@ -132,7 +129,7 @@ class SprkkrExecution:
             empty_spheres=False,
             restart_scf=self.request.restart_scf,
             create_subdirs=True,
-            run_manager=manager,
+            run_manager=self.execution_manager,
         )
 
     def _input_source(self, potential_file):
