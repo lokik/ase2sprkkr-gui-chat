@@ -163,38 +163,41 @@ class SprkkrExecution:
         except Exception:  # noqa: BLE001 - observer must never fail execution
             logger.exception("Persistent-job change observer failed for %s", runner.id)
 
-    def _submit(self, calculator: SPRKKR):
+    def _execute(self, calculator: SPRKKR):
         runner = self._create_runner(calculator)
         register_runner(self.cancellation, runner)
 
-        try:
-            if (
-                self.request.potential is False
-                or (self.request.potential is None
-                    and self.request.reusable_potential_version is not None
-                    and not self.request.restart_scf)
-            ):
-                self._with_mpi_warnings(lambda: runner.submit(validate_inputs=self._validate_file_input))
+        def submitted(current):
+            self._notify_persistent_job_changed(current)
+            if self._submitted is not None:
+                try:
+                    path = FileManifest.from_spec(current.spec).input_file
+                    self._submitted(str(path) if path is not None else None)
+                except Exception:
+                    logger.exception("Submission observer failed")
+            record = current.record
+            if record is not None and not record.execution.transport.is_local:
+                self._status(f"Running on {record.execution.transport.host}…")
             else:
-                self._with_mpi_warnings(runner.submit)
+                self._status("Running…")
+
+        validate = None
+        if (
+            self.request.potential is False
+            or (self.request.potential is None
+                and self.request.reusable_potential_version is not None
+                and not self.request.restart_scf)
+        ):
+            validate = self._validate_file_input
+        try:
+            # The GUI already owns the worker thread. Run must execute here.
+            result = self._with_mpi_warnings(lambda: wait_for_runner(
+                self.cancellation, runner,
+                lambda: runner.run(validate_inputs=validate, on_submitted=submitted),
+            ))
         finally:
-            # Submission is the first point at which ASE2SPRKKR may have written
-            # the RunRecord. The observer receives its identity and reloads
-            # authoritative metadata from the owning store.
             self._notify_persistent_job_changed(runner)
-        # submit() returned successfully: ASE2SPRKKR has prepared its input
-        # files and handed the calculation to the backend. Result completion
-        # and parsing are unrelated to whether those inputs were saved.
-        if self._submitted is not None:
-            try:
-                # Exact staged input, not an inferred filename template.
-                path = FileManifest.from_spec(runner.spec).input_file
-                self._submitted(str(path) if path is not None else None)
-            except Exception:  # noqa: BLE001 - observers must not fail a launched job
-                logger.exception("Submission observer failed")
-        # A successfully accepted run owns files and a completion observer.
-        # Even cancellation/detachment must wait for that lifecycle to settle.
-        return runner
+        return runner, result
 
     def _validate_file_input(self, manifest):
         """Verify all reused source bytes against their staged manifest entries."""
@@ -222,20 +225,7 @@ class SprkkrExecution:
     def run(self) -> LoadedResult:
         """Execute the request and return its loaded result."""
         self._status("Preparing calculation…")
-        runner = self._submit(self._calculator())
-
-        record = runner.record
-        if record is not None and not record.execution.transport.is_local:
-            transport = record.execution.transport
-            self._status(f"Running on {transport.host}…")
-        else:
-            self._status("Running…")
-
-        try:
-            result = wait_for_runner(self.cancellation, runner)
-        finally:
-            # A project runner persists its terminal record while waiting.
-            self._notify_persistent_job_changed(runner)
+        runner, result = self._execute(self._calculator())
 
         self._status("Loading result…")
         loaded = load_result(

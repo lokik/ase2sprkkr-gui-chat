@@ -34,11 +34,11 @@ def test_raw_execution_outcome_is_reported_before_result_loading(monkeypatch, tm
         error_file=str(tmp_path / "Fe_SCF.out.err"),
         return_code=code,
     )
-    runner = SimpleNamespace(record=None, wait=lambda: outcome, id="failed-run", failure_message="Native execution stopped")
+    runner = SimpleNamespace(record=None, run=lambda **kwargs: outcome, id="failed-run", failure_message="Native execution stopped")
     statuses = []
     execution = SprkkrExecution(_request(tmp_path), _Cancellation(), status=statuses.append)
     monkeypatch.setattr(execution, "_calculator", lambda: object())
-    monkeypatch.setattr(execution, "_submit", lambda _calculator: runner)
+    monkeypatch.setattr(execution, "_create_runner", lambda _calculator: runner)
 
     def forbid_load(*_args, **_kwargs):
         raise AssertionError("Raw execution diagnostics must not be adopted as TaskResult")
@@ -92,20 +92,21 @@ def test_file_based_submission_uses_geometry_from_validated_launch_files(tmp_pat
     execution = SprkkrExecution(request, _Cancellation())
     launched = []
 
-    def submit(*, validate_inputs):
+    def run(*, validate_inputs, on_submitted):
         validate_inputs(manifest)
         launched.append(True)
+        return object()
 
     monkeypatch.setattr(
-        execution, "_create_runner", lambda _calculator: SimpleNamespace(record=None, submit=submit),
+        execution, "_create_runner", lambda _calculator: SimpleNamespace(record=None, run=run),
     )
-    execution._submit(object())
+    execution._execute(object())
     assert set(execution._file_backed_input.atoms.get_chemical_symbols()) == {"Fe"}
     assert execution._file_backed_input.input_versions == source.versions
 
     path.write_text("changed after staging")
     with pytest.raises(SubmissionNotStarted, match="does not match the launch input"):
-        execution._submit(object())
+        execution._execute(object())
     assert launched == [True]
 
 
@@ -214,6 +215,12 @@ def test_execution_constructs_sprkkr_with_selected_profile(monkeypatch, tmp_path
         record = None
         id = "run-1"
 
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
+
         def submit(self):
             pass
 
@@ -270,6 +277,12 @@ def test_execution_requests_persistent_backend_run(monkeypatch, tmp_path):
         record = None
         id = "run-1"
 
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
+
         def submit(self):
             pass
 
@@ -313,6 +326,12 @@ def test_execution_binds_persistent_manager_to_launch_project(monkeypatch, tmp_p
             )
         )
 
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
+
         def submit(self):
             pass
 
@@ -348,6 +367,12 @@ def test_cancel_before_registration_never_submits(monkeypatch, tmp_path):
         def cancel(self):
             events.append("cancel")
 
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
+
         def submit(self):  # pragma: no cover - contract forbids this
             events.append("submit")
 
@@ -374,6 +399,12 @@ def test_cancel_racing_with_submit_is_not_cancelled_twice(monkeypatch, tmp_path)
 
     class Runner:
         record = None
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
+
         def submit(self):
             events.append("submit")
             cancellation.requested = True
@@ -411,6 +442,12 @@ def test_persistent_reference_is_forwarded_to_result_loader(monkeypatch, tmp_pat
         record = None
         id = "persistent-run-42"
 
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
+
         def submit(self):
             pass
 
@@ -445,6 +482,12 @@ def test_execution_notifies_persistent_job_id_after_submit_and_completion(
         record = manager.new_record(directory=tmp_path)
         id = record.id
 
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
+
         def submit(self):
             self.record = manager.transition(self.record, state=RunState.RUNNING)
 
@@ -478,6 +521,12 @@ def test_persistent_job_observer_failure_does_not_fail_calculation(
     class Runner:
         record = manager.new_record(directory=tmp_path)
         id = record.id
+
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
 
         def submit(self):
             self.record = manager.transition(self.record, state=RunState.RUNNING)
@@ -522,6 +571,12 @@ def test_embedded_execution_uses_native_result_interpretation(
     class Runner:
         record = None
         id = "cluster-run"
+
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
 
         def submit(self):
             pass
@@ -583,6 +638,12 @@ def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_lau
             directory=str(tmp_path),
             input_file=str(tmp_path / "Fe_SCF.inp"),
         )
+
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
 
         def submit(self):
             events.append("submit")
@@ -649,6 +710,12 @@ def test_unassigned_gui_run_uses_session_manager(tmp_path, monkeypatch, clear_ca
     class Runner:
         record = None
         id = "run-1"
+
+        def run(self, *, validate_inputs=None, on_submitted=None):
+            self.submit()
+            if on_submitted is not None:
+                on_submitted(self)
+            return self.wait()
 
         def submit(self):
             pass

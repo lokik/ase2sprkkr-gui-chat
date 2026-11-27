@@ -33,10 +33,10 @@ def register_runner(cancellation: Cancellation, runner: Run) -> None:
     raise ExecutionCancelled
 
 
-def wait_for_runner(cancellation: Cancellation, runner: Run) -> Any:
+def wait_for_runner(cancellation: Cancellation, runner: Run, operation=None) -> Any:
     """Wait for an interpreted result, reporting raw failures before adoption."""
     try:
-        result = runner.wait()
+        result = runner.wait() if operation is None else operation()
     except asyncio.CancelledError as exc:
         raise ExecutionCancelled from exc
     except Exception as exc:
