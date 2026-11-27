@@ -123,7 +123,7 @@ def test_attach_and_load_delegate_to_backend_api(monkeypatch, make_job_source):
     source = make_job_source(manager)
     source.attach(item.id)
     assert source.load_result(item.id) is result
-    assert calls == ["attach", ("load", {"allow_unparsed": True})]
+    assert calls == ["attach", ("load", {"allow_unparsed": True, "restore_missing": True})]
 
 def test_postprocessing_retry_requires_successful_execution():
     ready = PersistentJob.from_run_record(
@@ -273,8 +273,8 @@ def test_file_only_results_join_project_history_without_fake_run(tmp_path, monke
 
     expected_result = object()
     monkeypatch.setattr(
-        module, "load_result_file",
-        lambda path: SimpleNamespace(result=expected_result),
+        module.ResultLoader, "load_file",
+        lambda self, path: expected_result,
     )
     assert source.load_result(imported.id) is expected_result
 
@@ -413,3 +413,27 @@ def test_finalizing_run_can_be_observed_but_not_cancelled(state):
     assert job.attachable
     assert not job.cancelable
     assert "Execution has finished" in job.cancel_unavailable_reason
+
+
+def test_imported_output_changed_during_load_is_rejected(tmp_path, monkeypatch, make_job_source):
+    from kkrunner.files import FileVersion
+    from kkrunner.projects import ProjectRepository
+    from ase2sprkkr_gui.gui.application.imported_project_results import assign
+
+    projects = ProjectRepository(tmp_path / "projects")
+    project = projects.create("Project")
+    output = tmp_path / "historical.out"
+    output.write_text("original contents")
+    assign(projects, [SimpleNamespace(output_path=output,
+                                      output_version=FileVersion.capture(output))], project.id)
+    source = make_job_source(SimpleNamespace(store=Store(record(RunState.FINISHED))),
+                             projects=projects)
+    job = next(item for item in source.jobs() if item.imported_path is not None)
+
+    def load(path):
+        output.write_text("different contents while loading")
+        return object()
+
+    monkeypatch.setattr(module.ResultLoader, "load_file", lambda self, path: load(path))
+    with pytest.raises(RuntimeError, match="changed while loading"):
+        source.load_result(job.id)

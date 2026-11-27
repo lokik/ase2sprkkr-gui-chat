@@ -17,14 +17,14 @@ dependencies = [
   "ase",
   "platformdirs",
   "pyxtal",
-  "ase2sprkkr>=4.0.0b7,<5",
+  "ase2sprkkr>=4.0.0b8,<5",
 ]
 
 [project.optional-dependencies]
 # Core owns optional scientific packages; GUI extras expose the same features.
-plot = ["ase2sprkkr[plot]>=4.0.0b7,<5"]
-nexus = ["ase2sprkkr[nexus]>=4.0.0b7,<5"]
-mendeleev = ["ase2sprkkr[mendeleev]>=4.0.0b7,<5"]
+plot = ["ase2sprkkr[plot]>=4.0.0b8,<5"]
+nexus = ["ase2sprkkr[nexus]>=4.0.0b8,<5"]
+mendeleev = ["ase2sprkkr[mendeleev]>=4.0.0b8,<5"]
 
 [project.scripts]
 "ase2sprkkr-gui" = "ase2sprkkr_gui.main:main"

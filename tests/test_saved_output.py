@@ -56,7 +56,8 @@ def test_saved_output_rejects_overwritten_manifest(tmp_path, monkeypatch):
 def test_saved_output_bounds_tail_and_skips_partial_line(tmp_path):
     path = tmp_path / "big.out"
     path.write_text("discard this line\nkeep this line\nlast line\n")
-    replay = read_saved_output(SimpleNamespace(output_file=path), max_bytes=27)
+    result = TaskResult(None, None, tmp_path, output_file=path, task_name="DOS")
+    replay = read_saved_output(result, max_bytes=27)
 
     assert replay.warning is None
     assert replay.truncated
