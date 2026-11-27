@@ -243,8 +243,16 @@ class ProfileForm(QWidget):
         self.remote_command = QLineEdit(self.ssh_box)
         self.remote_command.setPlaceholderText("kkrunner remote")
         ssh_form.addRow("Remote command:", self.remote_command)
+        self.shared_filesystem = QCheckBox("Shared filesystem", self.ssh_box)
+        self.shared_filesystem.setToolTip(
+            "Local and remote roots refer to the same mounted files. "
+            "No input or output synchronization is performed."
+        )
+        ssh_form.addRow(self.shared_filesystem)
         self.input_sync = QComboBox(self.ssh_box)
         self.output_sync = QComboBox(self.ssh_box)
+        self.shared_filesystem.toggled.connect(self.input_sync.setDisabled)
+        self.shared_filesystem.toggled.connect(self.output_sync.setDisabled)
         for policy in SYNC_POLICIES:
             self.input_sync.addItem(policy)
             self.output_sync.addItem(policy)
@@ -325,7 +333,7 @@ class ProfileForm(QWidget):
         self._update_mpi_warning_visibility()
 
         self._set_row_visible(self._executable_form, self.executable_suffix, expert)
-        for field in (self.host, self.local_root, self.remote_root):
+        for field in (self.host, self.local_root, self.remote_root, self.shared_filesystem):
             self._set_row_visible(self._ssh_form, field, ssh)
         for field in (
             self.ssh_options,
@@ -360,6 +368,7 @@ class ProfileForm(QWidget):
         self.remote_command.setText(argv_text(values.get("remote_command")))
         self.input_sync.setCurrentText(str(values.get("input_sync") or "changed"))
         self.output_sync.setCurrentText(str(values.get("output_sync") or "changed"))
+        self.shared_filesystem.setChecked(bool(values.get("shared_filesystem", False)))
         self.psij_backend.setText(str(values.get("psij_backend") or ""))
         self.psij_url.setText(str(values.get("psij_url") or ""))
         self.form_widget.setEnabled(not draft.read_only)
@@ -406,6 +415,8 @@ class ProfileForm(QWidget):
                 values["ssh_options"] = ssh_options
             if remote_command:
                 values["remote_command"] = remote_command
+            if self.shared_filesystem.isChecked():
+                values["shared_filesystem"] = True
             values["input_sync"] = self.input_sync.currentText()
             values["output_sync"] = self.output_sync.currentText()
 

@@ -588,3 +588,20 @@ def test_cleanup_rejects_declared_kind_mismatch(tmp_path, make_job_source):
     assert plan.selectable_files == ()
     assert set(plan.unsafe) == {str(declared_file), str(declared_directory)}
     assert declared_file.is_dir() and declared_directory.is_file()
+
+
+def test_shared_mount_has_only_one_file_deletion_view(tmp_path, make_job_source):
+    from kkrunner.files import FileMapping
+
+    output = tmp_path / "result.out"
+    output.write_text("shared")
+    run = _record("run", tmp_path, FileManifest(
+        stdout=FileEntry(str(output), "/remote/directory/result.out"),
+        mapping=FileMapping(str(tmp_path), "/remote/directory", shared_filesystem=True),
+    ))
+    source, _store = _source(make_job_source, run)
+    plan = source.referenced_file_deletion(run.id)
+    assert plan.files == (str(output),)
+    assert plan.remote == ()
+    with pytest.raises(ValueError, match="no separate remote files"):
+        source.remote_file_review(run.id)
