@@ -2,14 +2,14 @@
 from types import SimpleNamespace
 import ase2sprkkr_gui.gui.application.persistent_jobs as module
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
-from kkrunner.runs import RunState, ExecutionMetadata, WorkingDirectory
+from kkrunner.runs import RunState, ExecutionMetadata, WorkingDirectory, RunRecord
 from kkrunner.files import FileManifest
 from kkrunner.transports import LocalTransport
 from kkrunner.backends import BackendConfig
 
 
 def test_source_has_no_implicit_recovery_on_construction_reload_or_refresh(monkeypatch, make_job_source):
-    record = SimpleNamespace(
+    record = RunRecord(
         id="run-1", state=RunState.POSTPROCESSING, store=None, project_id=None,
         created_at="2026-10-19T10:00:00+00:00",
         updated_at="2026-10-19T10:01:00+00:00",

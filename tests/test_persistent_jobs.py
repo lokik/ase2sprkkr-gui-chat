@@ -16,7 +16,7 @@ from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, Persis
 
 
 def record(state=RunState.RUNNING, *, backend_id="pid-42", failure_phase=None, return_code=None):
-    return SimpleNamespace(
+    return RunRecord(
         id="run-1", state=state, store=None, project_id=None,
         created_at="2026-10-19T10:00:00+00:00",
         updated_at="2026-10-19T11:00:00+00:00", finished_at=None,
@@ -70,7 +70,7 @@ def test_persistent_job_projects_validated_run_record(tmp_path):
     )
     job = PersistentJob.from_run_record(item)
     assert job.state == "failed"
-    assert job.result_files_state == "current"
+    assert job.result_files_state is None
     assert job.failure_phase == "download"
     assert job.target == "SSH · cluster · PSI/J slurm"
     assert job.can_retry_download
@@ -137,8 +137,7 @@ def test_postprocessing_retry_requires_successful_execution():
 
 
 def test_history_excludes_records_from_other_applications(make_job_source):
-    foreign = record(RunState.FINISHED)
-    foreign.metadata = {"other_application": {"task": "DOS"}}
+    foreign = replace(record(RunState.FINISHED), metadata={"other_application": {"task": "DOS"}})
     source = make_job_source(SimpleNamespace(store=Store(foreign)))
     assert source.jobs() == ()
     assert source.job_changed(foreign.id) is None
@@ -163,19 +162,19 @@ def test_explicit_postprocessing_retry_delegates_to_application(monkeypatch, mak
 
 def test_unknown_supervised_ssh_run_can_be_reattached_after_restart():
     item = record(RunState.UNKNOWN)
-    item.execution = replace(item.execution, backend=BackendConfig("kkrunner"))
+    item = replace(item, execution=replace(item.execution, backend=BackendConfig("kkrunner")))
     restored = PersistentJob.from_run_record(item)
     assert restored.attachable
     assert restored.reattach_unavailable_reason is None
     assert not restored.is_final
 
 
-def test_unknown_direct_ssh_run_explains_why_it_cannot_be_reattached():
+def test_unknown_direct_ssh_run_without_saved_output_can_be_observed():
     item = record(RunState.UNKNOWN)
-    item.execution = replace(item.execution, backend=BackendConfig("direct"))
+    item = replace(item, execution=replace(item.execution, backend=BackendConfig("direct")))
     restored = PersistentJob.from_run_record(item)
-    assert not restored.attachable
-    assert "no saved output" in restored.reattach_unavailable_reason.lower()
+    assert restored.attachable
+    assert restored.reattach_unavailable_reason is None
     assert not restored.cancelable
     assert "verified PID" in restored.cancel_unavailable_reason
 
@@ -190,22 +189,22 @@ def test_submitting_run_explains_missing_backend_identity():
 
 def test_profile_comes_from_ase2sprkkr_metadata():
     item = record()
-    item.metadata["ase2sprkkr"]["profile"] = "deleted-cluster"
-    assert PersistentJob.from_run_record(item).profile == "deleted-cluster"
+    assert PersistentJob.from_run_record(
+        replace(item, metadata={"ase2sprkkr": {"task": "DOS", "profile": "deleted-cluster"}})
+    ).profile == "deleted-cluster"
 
-    # Explicitly unnamed profiles and legacy records have the same representation.
-    item.metadata["ase2sprkkr"]["profile"] = None
-    assert PersistentJob.from_run_record(item).profile is None
-    item.metadata["ase2sprkkr"].pop("profile")
+    assert PersistentJob.from_run_record(
+        replace(item, metadata={"ase2sprkkr": {"task": "DOS", "profile": None}})
+    ).profile is None
     assert PersistentJob.from_run_record(item).profile is None
 
 
 def test_direct_run_with_saved_output_can_monitor_and_safely_cancel():
     item = record(RunState.UNKNOWN, backend_id="direct:42:137:00000000-0000-0000-0000-000000000000")
-    item.execution = replace(item.execution, backend=BackendConfig("direct"))
-    item.files = FileManifest(stdout=FileEntry(
+    item = replace(item, execution=replace(item.execution, backend=BackendConfig("direct")))
+    item = replace(item, files=FileManifest(stdout=FileEntry(
         local_path="/tmp/calc/stdout.txt", remote_path="/remote/calc/stdout.txt",
-    ))
+    )))
     job = PersistentJob.from_run_record(item)
     assert job.attachable
     assert job.cancelable

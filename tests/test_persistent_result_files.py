@@ -1,7 +1,8 @@
 """Result-file freshness checks for persistent calculation history."""
 from __future__ import annotations
 
-from kkrunner.runs import ExecutionMetadata, WorkingDirectory
+from kkrunner.runs import ExecutionMetadata, WorkingDirectory, RunRecord, RunState
+from kkrunner.files import FileEntry, FileManifest, FileVersion
 from kkrunner.transports import LocalTransport
 from types import SimpleNamespace
 
@@ -9,9 +10,9 @@ from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, Persis
 
 
 def _record(*, result_files=None):
-    return SimpleNamespace(
+    return RunRecord(
         id="1234567890abcdef", store=None, project_id=None,
-        state="finished",
+        state=RunState.FINISHED,
         created_at="2026-10-13T06:00:00+00:00",
         updated_at="2026-10-13T06:30:00+00:00",
         finished_at="2026-10-13T06:20:00+00:00",
@@ -20,19 +21,31 @@ def _record(*, result_files=None):
         failure_phase=None,
         return_code=0,
         message=None,
-        files=result_files,
+        files=FileManifest() if result_files is None else result_files,
     )
 
 
-def test_result_file_state_is_exposed():
-    record = _record(
-        result_files=SimpleNamespace(state=SimpleNamespace(value="overwritten")),
-    )
-
+def test_metadata_projection_does_not_check_file_contents(tmp_path, monkeypatch):
+    output = tmp_path / "result.out"
+    output.write_text("before")
+    record = _record(result_files=FileManifest(
+        stdout=FileEntry(str(output)),
+        output_versions=(FileVersion.capture(output),),
+        captured_at="2026-10-22T12:00:00+00:00",
+    ))
+    output.write_text("after")
+    original = FileVersion.state
+    def forbidden(self):
+        raise AssertionError("Metadata projection checked file contents")
+    monkeypatch.setattr(FileVersion, "state", forbidden)
     job = PersistentJob.from_run_record(record)
-
-    assert job.result_files_state == "overwritten"
+    assert job.result_files_state is None
     assert not job.result_files_verified
+
+    monkeypatch.setattr(FileVersion, "state", original)
+    checked = PersistentJob.from_run_record(record, result_files_verified=True)
+    assert checked.result_files_state == "overwritten"
+    assert checked.result_files_verified
 
 
 def test_gui_adoption_preserves_historical_auxiliary_file_identity(tmp_path):
@@ -80,65 +93,16 @@ def test_unavailable_execution_keeps_local_history_visible(tmp_path):
     from kkrunner.transports import transport_from_dict
 
     record = _record()
-    record.execution = replace(
+    record = replace(record, state=RunState.RUNNING, execution=replace(
         record.execution, backend=BackendConfig("unknown-backend"),
         transport=transport_from_dict({"kind": "unknown-connection", "host": "old-host"}),
         backend_id="saved-id",
-    )
-    record.state = "running"
+    ))
     job = PersistentJob.from_run_record(record)
     assert not job.attachable
     assert not job.cancelable
     assert "unavailable" in job.target
 
-
-def test_explicit_result_file_check_marks_state_as_verified(make_job_source):
-    stored = _record(
-        result_files=SimpleNamespace(state=SimpleNamespace(value="current")),
-    )
-    checked = _record(
-        result_files=SimpleNamespace(state=SimpleNamespace(value="overwritten")),
-    )
-
-    class Store:
-        @staticmethod
-        def runs(*, on_error=None):
-            return (stored,)
-
-        @staticmethod
-        def get(run_id):
-            assert run_id == stored.id
-            return checked
-
-    source = make_job_source(SimpleNamespace(store=Store()))
-
-    listed = source.jobs()[0]
-    verified = source.check_result_files(stored.id)
-
-    assert listed.result_files_state == "current"
-    assert not listed.result_files_verified
-    assert verified.result_files_state == "overwritten"
-    assert verified.result_files_verified
-
-
-def test_result_file_check_uses_persisted_store(make_job_source):
-    record = _record(
-        result_files=SimpleNamespace(state=SimpleNamespace(value="current")),
-    )
-
-    class Store:
-        @staticmethod
-        def runs(*, on_error=None):
-            return (record,)
-
-        @staticmethod
-        def get(run_id):
-            assert run_id == record.id
-            return record
-
-    source = make_job_source(SimpleNamespace(store=Store()))
-
-    assert source.check_result_files(record.id).result_files_verified
 
 def test_result_file_check_detects_changed_historical_output(tmp_path, make_job_source):
     from kkrunner.files import FileEntry, FileManifest, FileVersion
@@ -160,6 +124,9 @@ def test_result_file_check_detects_changed_historical_output(tmp_path, make_job_
             return record
 
     source = make_job_source(SimpleNamespace(store=Store()))
+    listed = source.job(record.id)
+    assert listed.result_files_state is None
+    assert not listed.result_files_verified
     output.write_text("after")
     checked = source.check_result_files(record.id)
     assert checked.result_files_state == "overwritten"

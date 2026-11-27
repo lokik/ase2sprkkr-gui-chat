@@ -1,6 +1,8 @@
 """File cleanup must be opt-in, scoped, and independent of run metadata deletion."""
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +10,8 @@ from kkrunner.backends import BackendConfig
 from kkrunner.transports import SshTransport
 from kkrunner.files import CacheEntry, FileEntry, FileManifest
 from kkrunner.projects import ProjectRepository
-from kkrunner.runs import ExecutionMetadata, RunState, WorkingDirectory
+from kkrunner.runs import ExecutionMetadata, RunState, WorkingDirectory, RunRecord
+from kkrunner import RunManager, RunStore
 
 from ase2sprkkr_gui.gui.application.imported_project_results import assign
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
@@ -17,20 +20,9 @@ from ase2sprkkr_gui.gui.application.run_file_deletion import (
 )
 
 
-class Store:
-    def __init__(self, *records):
-        self.records = {record.id: record for record in records}
-
-    def runs(self, *, on_error=None):
-        return tuple(self.records.values())
-
-    def get(self, ref):
-        return self.records[ref]
-
-
 def _record(ref, directory, files, state=RunState.FINISHED):
-    return SimpleNamespace(
-        id=ref, store=None, project_id=None, key=(None, ref),
+    return RunRecord(
+        id=ref, project_id=None,
         state=state,
         created_at="2026-11-01T00:00:00+00:00",
         updated_at="2026-11-01T01:00:00+00:00",
@@ -49,12 +41,16 @@ def _record(ref, directory, files, state=RunState.FINISHED):
 
 
 def _source(make_job_source, *records, projects=None):
-    store = Store(*records)
-    def forget(ref, *, force=False):
-        return store.records.pop(ref)
-    return make_job_source(
-        SimpleNamespace(store=store, forget=forget, conflict_stores=()), projects=projects,
-    ), store
+    directory = (Path(records[0].execution.directory.local) if records
+                 else projects.directory.parent)
+    store = RunStore(directory / "run-history")
+    for record in records:
+        store.save(record)
+    return make_job_source(RunManager(store), projects=projects), store
+
+
+def _ids(store):
+    return {record.id for record in store.runs()}
 
 
 def test_plan_covers_inputs_outputs_caches_and_streams(tmp_path):
@@ -127,7 +123,7 @@ def test_run_cleanup_keeps_files_referenced_by_other_runs(tmp_path, make_job_sou
     )
     assert not own.exists()
     assert shared.exists()
-    assert "first" not in store.records
+    assert "first" not in _ids(store)
     assert source.job("first") is None
 
 
@@ -152,7 +148,7 @@ def test_failed_local_file_removal_preserves_history_for_retry(tmp_path, monkeyp
         )
 
     assert output.exists()
-    assert run.id in store.records
+    assert run.id in _ids(store)
     assert source.job(run.id) is not None
 
 
@@ -168,16 +164,16 @@ def test_cleanup_requires_confirmed_current_preview(tmp_path, make_job_source):
         source.forget(first.id, delete_files=True)
     assert output.exists()
 
-    store.records["second"] = _record(
+    store.save(_record(
         "second", tmp_path, FileManifest(inputs=(FileEntry(local_path=str(output)),)),
-    )
+    ))
     with pytest.raises(RuntimeError, match="changed since confirmation"):
         source.forget(
             first.id, delete_files=True, expected_files=plan.files,
             expected_file_snapshots=plan.snapshots,
         )
     assert output.exists()
-    assert "first" in store.records
+    assert "first" in _ids(store)
 
 
 def test_run_record_only_keeps_referenced_files(tmp_path, make_job_source):
@@ -189,7 +185,7 @@ def test_run_record_only_keeps_referenced_files(tmp_path, make_job_source):
     source, store = _source(make_job_source, first)
     source.forget(first.id)
     assert output.exists()
-    assert "first" not in store.records
+    assert "first" not in _ids(store)
 
 
 def test_imported_result_can_delete_its_file_but_not_other_references(tmp_path, make_job_source):
@@ -239,13 +235,13 @@ def test_file_changed_since_confirmation_cannot_be_deleted(tmp_path, make_job_so
     source, store = _source(make_job_source, first)
     old_plan = source.referenced_file_deletion(first.id)
     output.write_text("contents replaced after dialog opened")
-    with pytest.raises(RuntimeError, match="last-modified times"):
+    with pytest.raises(OSError, match="changed since confirmation"):
         source.forget(
             first.id, delete_files=True, expected_files=old_plan.files,
             expected_file_snapshots=old_plan.snapshots,
         )
     assert output.read_text() == "contents replaced after dialog opened"
-    assert "run" in store.records
+    assert "run" in _ids(store)
 
 
 
@@ -273,7 +269,7 @@ def test_partial_selection_removes_only_checked_files(tmp_path, make_job_source)
     )
     assert not one.exists()
     assert two.exists()
-    assert "run" not in store.records
+    assert "run" not in _ids(store)
 
 
 def test_shared_file_requires_explicit_override_and_matching_references(tmp_path, make_job_source):
@@ -297,7 +293,7 @@ def test_shared_file_requires_explicit_override_and_matching_references(tmp_path
             expected_file_snapshots=plan.shared_snapshots,
             expected_shared_files=(str(shared),),
         )
-    assert shared.exists() and "first" in store.records
+    assert shared.exists() and "first" in _ids(store)
 
     source.forget(
         first.id, delete_files=True, expected_files=(str(shared),),
@@ -305,8 +301,8 @@ def test_shared_file_requires_explicit_override_and_matching_references(tmp_path
         expected_shared_files=(str(shared),), allow_shared_files=True,
     )
     assert not shared.exists()
-    assert "first" not in store.records
-    assert "second" in store.records
+    assert "first" not in _ids(store)
+    assert "second" in _ids(store)
 
 
 def test_new_other_run_reference_after_preview_forces_review(tmp_path, make_job_source):
@@ -317,17 +313,17 @@ def test_new_other_run_reference_after_preview_forces_review(tmp_path, make_job_
     )
     source, store = _source(make_job_source, first)
     plan = source.referenced_file_deletion(first.id)
-    store.records["another"] = _record(
+    store.save(_record(
         "another", tmp_path,
         FileManifest(inputs=(FileEntry(local_path=str(file)),)),
-    )
+    ))
     with pytest.raises(RuntimeError, match="Shared file references changed"):
         source.forget(
             first.id, delete_files=True, expected_files=plan.files,
             expected_file_snapshots=plan.snapshots,
             allow_shared_files=True,
         )
-    assert file.exists() and "first" in store.records
+    assert file.exists() and "first" in _ids(store)
 
 
 def test_symlink_cannot_be_selected_even_when_other_run_references_it(tmp_path):
@@ -362,7 +358,7 @@ def test_ssh_preview_uses_manifest_and_detects_shared_remote_references(tmp_path
         "second", tmp_path,
         FileManifest(inputs=(FileEntry(remote_path=path),), mapping=mapping),
     )
-    second.execution = replace(second.execution, transport=SshTransport(other_host))
+    second = replace(second, execution=replace(second.execution, transport=SshTransport(other_host)))
     source, _store = _source(make_job_source, first, second)
 
     class Client:
@@ -411,7 +407,7 @@ def test_ssh_cleanup_failure_does_not_prevent_local_or_history_deletion(tmp_path
         expected_file_snapshots=plan.snapshots,
     )
     assert not local.exists()
-    assert run.id not in store.records
+    assert run.id not in _ids(store)
 
     replies = source.cleanup_remote_files(record, review, (remote,))
     assert replies[0]["status"] == "skipped"
@@ -448,10 +444,10 @@ def test_ssh_cleanup_skips_newly_shared_file_without_affecting_other_files(tmp_p
     source._manager.client_for = lambda _record: Client()
     review = source.remote_file_review(run.id)
     record = source.capture_remote_cleanup(run.id)
-    store.records["later"] = _record(
+    store.save(_record(
         "later", tmp_path,
         FileManifest(inputs=(FileEntry(remote_path=first_path),)),
-    )
+    ))
     source.forget(run.id)
     results = source.cleanup_remote_files(
         record, review, (first_path, second_path),
@@ -481,7 +477,7 @@ def test_declared_local_directory_is_deleted_recursively(tmp_path, make_job_sour
         expected_file_snapshots=plan.directory_snapshots,
     )
     assert not taudir.exists() and outside.exists()
-    assert "run" not in store.records
+    assert "run" not in _ids(store)
 
 
 def test_declared_directory_becomes_shared_when_other_run_uses_descendant(tmp_path, make_job_source):
@@ -509,7 +505,7 @@ def test_declared_directory_becomes_shared_when_other_run_uses_descendant(tmp_pa
             expected_file_snapshots=plan.shared_directory_snapshots,
             expected_shared_files=(str(taudir),),
         )
-    assert taudir.exists() and "first" in store.records
+    assert taudir.exists() and "first" in _ids(store)
 
 
 def test_directory_changed_after_confirmation_is_not_deleted(tmp_path, make_job_source):
@@ -523,14 +519,14 @@ def test_directory_changed_after_confirmation_is_not_deleted(tmp_path, make_job_
     source, store = _source(make_job_source, run)
     plan = source.referenced_file_deletion("run")
     (taudir / "unexpected.tau").write_text("new file")
-    with pytest.raises(RuntimeError, match="last-modified times"):
+    with pytest.raises(OSError, match="changed since confirmation"):
         source.forget(
             "run", delete_files=True,
             expected_files=plan.directories,
             expected_file_snapshots=plan.directory_snapshots,
         )
     assert (taudir / "unexpected.tau").exists()
-    assert "run" in store.records
+    assert "run" in _ids(store)
 
 
 def test_remote_directory_review_and_recursive_delete_identity(tmp_path, make_job_source):
@@ -588,3 +584,112 @@ def test_cleanup_rejects_declared_kind_mismatch(tmp_path, make_job_source):
     assert plan.selectable_files == ()
     assert set(plan.unsafe) == {str(declared_file), str(declared_directory)}
     assert declared_file.is_dir() and declared_directory.is_file()
+
+
+def test_active_reference_cannot_be_deleted_even_with_shared_confirmation(tmp_path, make_job_source):
+    output = tmp_path / "shared.out"
+    output.write_text("data")
+    old = _record("old", tmp_path, FileManifest(stdout=FileEntry(local_path=str(output))))
+    active = _record("active", tmp_path,
+                     FileManifest(inputs=(FileEntry(local_path=str(output)),)),
+                     state=RunState.RUNNING)
+    source, store = _source(make_job_source, old, active)
+    plan = source.referenced_file_deletion(old.id)
+    assert plan.shared == (str(output),)
+    with pytest.raises(OSError, match="active run"):
+        source.forget(
+            old.id, delete_files=True, expected_files=plan.shared,
+            expected_file_snapshots=plan.shared_snapshots,
+            expected_shared_files=plan.shared, allow_shared_files=True,
+        )
+    assert output.exists()
+    assert _ids(store) == {"old", "active"}
+
+
+def test_remote_cleanup_skips_active_reference_but_deletes_unrelated_file(tmp_path, make_job_source):
+    shared = "/remote/directory/shared.out"
+    other = "/remote/directory/other.out"
+    old = _record("old", tmp_path, FileManifest(outputs=(
+        FileEntry(remote_path=shared), FileEntry(remote_path=other),
+    )))
+    active = _record("active", tmp_path, FileManifest(inputs=(
+        FileEntry(remote_path=shared),
+    )), state=RunState.RUNNING)
+    source, store = _source(make_job_source, old, active)
+    calls = []
+
+    class Client:
+        def inspect_remote_files(self, record, paths):
+            return tuple({"path": path, "status": "ok", "mtime_ns": 5,
+                          "size": 12, "device": 1, "inode": 8} for path in paths)
+
+        def delete_remote_files(self, record, expected):
+            calls.extend(expected)
+            return tuple({"path": path, "status": "deleted"} for path in expected)
+
+    source._manager.client_for = lambda _record: Client()
+    review = source.remote_file_review(old.id)
+    assert review.shared == (shared,)
+    captured = source.capture_remote_cleanup(old.id)
+    source.forget(old.id)
+    results = source.cleanup_remote_files(captured, review, (shared, other))
+    assert calls == [other]
+    assert {item["path"]: item["status"] for item in results} == {
+        shared: "skipped", other: "deleted",
+    }
+    assert _ids(store) == {"active"}
+
+
+
+def test_remote_cleanup_does_not_block_unrelated_submission(tmp_path, make_job_source):
+    from concurrent.futures import ThreadPoolExecutor
+    output = "/remote/directory/old.out"
+    old = _record("old", tmp_path, FileManifest(stdout=FileEntry(remote_path=output)))
+    source, _store = _source(make_job_source, old)
+    manager = source._manager
+    unrelated = manager.new_record(
+        directory=tmp_path, files=FileManifest(stdout=FileEntry(str(tmp_path / "new.out"))),
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        class Client:
+            def inspect_remote_files(self, record, paths):
+                return tuple({"path": path, "status": "ok", "mtime_ns": 5,
+                              "size": 12, "device": 1, "inode": 8} for path in paths)
+
+            def delete_remote_files(self, record, expected):
+                assert pool.submit(manager.reserve, unrelated).result(timeout=2).state is RunState.SUBMITTING
+                return tuple({"path": path, "status": "deleted"} for path in expected)
+
+        manager.client_for = lambda _: Client()
+        review = source.remote_file_review(old.id)
+        captured = source.capture_remote_cleanup(old.id)
+        source.forget(old.id)
+        assert source.cleanup_remote_files(captured, review, (output,))[0]["status"] == "deleted"
+
+
+def test_selected_file_cleanup_does_not_reinspect_unselected_directory(tmp_path, monkeypatch, make_job_source):
+    from ase2sprkkr_gui.gui.application import run_file_deletion
+    output = tmp_path / "run.out"
+    output.write_text("result")
+    taudir = tmp_path / "tau"
+    taudir.mkdir()
+    (taudir / "large.tau").write_text("cache")
+    record = _record("run", tmp_path, FileManifest(
+        stdout=FileEntry(str(output)),
+        outputs=(FileEntry(str(taudir), kind="directory"),),
+    ))
+    source, store = _source(make_job_source, record)
+    preview = source.referenced_file_deletion(record.id)
+    inspect = run_file_deletion.remote_file_cleanup
+
+    def selected_only(paths, *args, **kwargs):
+        assert tuple(paths) == (str(output),)
+        return inspect(paths, *args, **kwargs)
+
+    monkeypatch.setattr(run_file_deletion, "remote_file_cleanup", selected_only)
+    source.forget(record.id, delete_files=True, expected_files=(str(output),),
+                  expected_file_snapshots=preview.snapshots)
+    assert not output.exists()
+    assert (taudir / "large.tau").exists()
+    assert not _ids(store)

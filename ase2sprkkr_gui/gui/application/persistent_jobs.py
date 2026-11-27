@@ -9,7 +9,6 @@ from threading import Lock, RLock
 from typing import Any, Callable
 
 from kkrunner import MemoryRunStore
-from kkrunner.backends.contracts import BackendCapability
 from kkrunner.files.versions import file_digest
 from kkrunner.projects import ProjectRepository, ProjectRunManager
 from kkrunner.runs.manager import RunManager
@@ -79,61 +78,6 @@ def _execution_target(record: RunRecord) -> str:
     return label
 
 
-def _attachment_availability(record: RunRecord, state: str) -> tuple[bool, str | None]:
-    """Explain whether a persisted execution can be observed after a GUI restart."""
-    if state in _FINAL_STATES:
-        return False, None
-    if not record.execution.available:
-        return False, "The saved backend or connection is unavailable; local result files can still be viewed."
-    if record.execution.backend_id is None:
-        return (
-            False,
-            "No backend identity has been saved for this calculation yet. "
-            "Refresh statuses to attempt submission recovery.",
-        )
-    backend = record.execution.backend.create()
-    if BackendCapability.REATTACH not in backend.supports:
-        return False, f"The {backend.name} backend does not support reattachment."
-    if backend.name == "direct":
-        local = record.execution.transport.is_local
-        streams = (record.files.stdout, record.files.stderr)
-        if not any(
-            stream is not None and (
-                stream.local_path if local else stream.remote_path
-            )
-            for stream in streams
-        ):
-            return (
-                False,
-                "Direct execution has no saved output or error file to monitor. "
-                "Refresh statuses to check whether its process still exists.",
-            )
-    return True, None
-
-
-def _cancellation_availability(record: RunRecord, state: str) -> tuple[bool, str | None]:
-    """Offer cancellation only while a native calculation can still be stopped."""
-    if state in _FINAL_STATES:
-        return False, None
-    if state in ("downloading", "postprocessing"):
-        return False, "Execution has finished; result finalization cannot be cancelled as a native job."
-    if not record.execution.available:
-        return False, "The saved backend or connection is unavailable."
-    token = record.execution.backend_id
-    if token is None:
-        return False, "This calculation has no saved process reference to cancel."
-    backend = record.execution.backend.create()
-    if BackendCapability.CANCEL not in backend.supports:
-        return False, f"The {backend.name} backend cannot cancel persisted processes."
-    if backend.name == "direct" and not token.startswith("direct:"):
-        return (
-            False,
-            "This older direct run has no verified PID/start-time identity. "
-            "It cannot be safely killed; you can remove its history record instead.",
-        )
-    return True, None
-
-
 @dataclass(frozen=True)
 class PersistentJob:
     """Stable presentation model for one tracked ASE2SPRKKR run."""
@@ -191,11 +135,13 @@ class PersistentJob:
         result_files_verified: bool = False,
     ) -> "PersistentJob":
         state = record.state.value
-        result_files_state = record.files.state.value
+        result_files_state = record.files.state.value if result_files_verified else None
         finished_at = record.finished_at
         metadata = record.metadata.get("ase2sprkkr", {})
-        attachable, reattach_unavailable_reason = _attachment_availability(record, state)
-        cancelable, cancel_unavailable_reason = _cancellation_availability(record, state)
+        reattach_unavailable_reason = record.reattachment_unavailable_reason()
+        cancel_unavailable_reason = record.cancellation_unavailable_reason()
+        attachable = reattach_unavailable_reason is None
+        cancelable = cancel_unavailable_reason is None
         return cls(
             id=job_id_for_record(record),
             state=state,
@@ -210,13 +156,13 @@ class PersistentJob:
             result_files_state=result_files_state,
             finished_at=None if finished_at is None else str(finished_at),
             attachable=attachable,
-            reattach_unavailable_reason=reattach_unavailable_reason,
+            reattach_unavailable_reason=None if record.state.is_terminal else reattach_unavailable_reason,
             result_files_verified=result_files_verified,
             failure_phase=(None if record.failure_phase is None else record.failure_phase.value),
             project_id=record.project_id,
             profile=metadata.get("profile"),
             cancelable=cancelable,
-            cancel_unavailable_reason=cancel_unavailable_reason,
+            cancel_unavailable_reason=None if record.state.is_terminal else cancel_unavailable_reason,
         )
 
     @classmethod

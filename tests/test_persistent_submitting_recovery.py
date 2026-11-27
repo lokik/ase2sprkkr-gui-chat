@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from kkrunner.runs import ExecutionMetadata, WorkingDirectory
+from dataclasses import replace
+from kkrunner.runs import ExecutionMetadata, WorkingDirectory, RunRecord, RunState
 from kkrunner.transports import LocalTransport
 from kkrunner.backends import BackendConfig
 from kkrunner.files import FileManifest
@@ -10,16 +10,15 @@ from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJobSource
 
 
 def _record(state: str):
-    return SimpleNamespace(
+    return RunRecord(
         id="run-id", store=None, project_id=None,
-        state=SimpleNamespace(value=state),
+        state=RunState(state),
         created_at="2026-10-17T08:00:00+00:00",
         updated_at="2026-10-17T08:00:00+00:00",
         finished_at=None,
         metadata={"ase2sprkkr": {"task": "SCF"}},
         execution=ExecutionMetadata(LocalTransport(), WorkingDirectory("/tmp/calc"), backend=BackendConfig("kkrunner")),
         files=FileManifest(), failure_phase=None,
-        dataset=None,
 
         return_code=None,
         message=None,
@@ -52,11 +51,10 @@ def test_refresh_delegates_submission_recovery_to_manager(make_job_source):
         def refresh(self, *, on_error=None):
             calls.append("refresh")
             recovered = _record("running")
-            recovered.execution = ExecutionMetadata(
+            self.store.record = replace(recovered, execution=ExecutionMetadata(
                 LocalTransport(), WorkingDirectory("/tmp/calc"), "pid-42",
                 backend=BackendConfig("kkrunner"),
-            )
-            self.store.record = recovered
+            ))
 
     source = make_job_source(Manager())
     jobs = source.refresh()
