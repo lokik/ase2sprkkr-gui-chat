@@ -55,7 +55,10 @@ jobs:
         with:
           repository: lokik/ase2sprkkr-chat
           ref: >-
-            ${{ (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
+            ${{ (github.head_ref || github.ref_name) == 'feature/preprocessing-session-integration' && 'calculation-preprocessing-plan'
+                || (github.head_ref || github.ref_name) == 'adopt-kkrunner-execution-api' && 'adopt-kkrunner-execution-api'
+                || (github.head_ref || github.ref_name) == 'shared-filesystem-profiles' && 'shared-filesystem-profiles'
+                || (github.base_ref == 'cluster' || github.base_ref == 'embedding-host-scf' || github.base_ref == 'editor'
                 || github.head_ref == 'cluster' || github.head_ref == 'embedding-host-scf'
                 || github.head_ref == 'guided-structure-type' || github.head_ref == 'editor'
                 || github.head_ref == 'editor-native-identifiers'
