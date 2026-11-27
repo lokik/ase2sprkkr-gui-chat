@@ -62,7 +62,7 @@ def referenced_file_deletion(manager: RunManager, projects: Any, job_id: str, jo
         candidate_kinds = declared_local_kinds(record.files, directory)
         remote = (
             referenced_remote_paths(record.files)
-            if not record.execution.transport.is_local else ()
+            if not record.execution.target.is_local else ()
         )
         ignored_key = None
         ignored_run_key = record.key
@@ -103,7 +103,7 @@ def _remote_reference_details(manager: RunManager, record: RunRecord) -> dict[st
     for other in _run_records(manager):
         if (
             other.key == record.key
-            or other.execution.transport.is_local
+            or other.execution.target.is_local
             or filesystem_namespace(other) != filesystem_namespace(record)
         ):
             continue
@@ -122,7 +122,7 @@ def remote_file_review(manager: RunManager, job_id: str, job: Any) -> RemoteFile
     if job is None or job.imported_path is not None or not job.is_final:
         raise ValueError("Remote deletion is available only for finished tracked SSH runs")
     record = manager.store.get(str(job_id))
-    if record.execution.transport.is_local or not record.execution.available:
+    if record.execution.target.is_local or not record.execution.available:
         raise ValueError("This run has no remote files")
     candidates = referenced_remote_paths(record.files)
     referrers = _remote_reference_details(manager, record)
@@ -150,7 +150,7 @@ def remote_file_review(manager: RunManager, job_id: str, job: Any) -> RemoteFile
     )
     shared = tuple(sorted(path for path, _labels in details))
     return RemoteFileReview(
-        record.execution.transport.host, tuple(snapshots),
+        record.execution.target.host, tuple(snapshots),
         shared, details, tuple(unavailable),
     )
 
@@ -160,7 +160,7 @@ def capture_remote_cleanup(manager: RunManager, job_id: str, job: Any) -> Any:
     if job is None or not job.is_final or job.imported_path is not None:
         raise ValueError("Remote cleanup requires a finished persisted run")
     record = manager.store.get(str(job_id))
-    if record.execution.transport.is_local or not record.execution.available:
+    if record.execution.target.is_local or not record.execution.available:
         raise ValueError("The selected run has no SSH connection")
     return record
 

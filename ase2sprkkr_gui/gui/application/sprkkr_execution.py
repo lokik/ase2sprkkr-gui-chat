@@ -225,8 +225,8 @@ class SprkkrExecution:
         runner = self._submit(self._calculator())
 
         record = runner.record
-        if record is not None and not record.execution.transport.is_local:
-            transport = record.execution.transport
+        if record is not None and not record.execution.target.is_local:
+            transport = record.execution.target
             self._status(f"Running on {transport.host}…")
         else:
             self._status("Running…")

@@ -65,7 +65,7 @@ def project_run_manager(projects: ProjectRepository) -> ProjectRunManager:
 
 def _execution_target(record: RunRecord) -> str:
     """Describe transport and native backend separately."""
-    transport = record.execution.transport
+    transport = record.execution.target
     backend = record.execution.backend
     label = "Local" if transport.is_local else f"{transport.kind.upper()} · {transport.host}"
     if not record.execution.available:
@@ -95,7 +95,7 @@ def _attachment_availability(record: RunRecord, state: str) -> tuple[bool, str |
     if BackendCapability.REATTACH not in backend.supports:
         return False, f"The {backend.name} backend does not support reattachment."
     if backend.name == "direct":
-        local = record.execution.transport.is_local
+        local = record.execution.target.is_local
         streams = (record.files.stdout, record.files.stderr)
         if not any(
             stream is not None and (

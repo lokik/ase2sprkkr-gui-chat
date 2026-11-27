@@ -5,7 +5,7 @@ from ase2sprkkr import InputParameters, TaskResult
 from ase2sprkkr.outputs.reader_registry import reader_registry
 from ase2sprkkr.outputs.task_result import KkrOutputReader
 from kkrunner.backends import BackendConfig
-from kkrunner.transports import LocalTransport
+from kkrunner.targets import LocalTarget
 from kkrunner.files import FileEntry, FileManifest, FileVersion
 from kkrunner.projects import ProjectRepository, ProjectRunManager
 from kkrunner.runs import RunState, RunStore
@@ -38,7 +38,7 @@ def test_persistent_task_identity_round_trip_drives_recompute_editor(
     manager = ProjectRunManager(store=RunStore(tmp_path / "runs"), project_repository=projects, project=project)
     run = manager.new_record(
         directory=tmp_path,
-        transport=LocalTransport(),
+        target=LocalTarget(),
         backend=BackendConfig("kkrunner"),
         metadata={"ase2sprkkr": {
             "task": "SPLEED",

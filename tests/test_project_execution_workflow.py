@@ -4,7 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from kkrunner.runs import ExecutionMetadata, WorkingDirectory, RunState, FailurePhase
 from kkrunner.files import FileManifest
-from kkrunner.transports import SshTransport
+from kkrunner.targets import SshTarget
 from kkrunner.backends import BackendConfig
 from ase2sprkkr_gui.gui.application.persistent_jobs import PersistentJob, PersistentJobSource
 from ase2sprkkr_gui.gui.application import persistent_jobs as jobs_module
@@ -17,7 +17,7 @@ def record(state=RunState.RUNNING, *, phase=None, code=None, backend_id="backend
         metadata={"ase2sprkkr": {"task": "DOS"}}, return_code=code, message=None,
         failure_phase=phase, files=FileManifest(),
         execution=ExecutionMetadata(
-            SshTransport(host="cluster.example"),
+            SshTarget(host="cluster.example"),
             WorkingDirectory("/tmp/project", "/scratch/run"),
             backend_id=backend_id, backend=BackendConfig("kkrunner"),
         ),

@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from kkrunner.backends import BackendConfig
-from kkrunner.transports import LocalTransport, SshTransport
+from kkrunner.targets import LocalTarget, SshTarget
 from kkrunner.projects import ProjectRepository, ProjectRunManager
 from kkrunner.runs import RunState
 
@@ -27,7 +27,7 @@ def test_project_manager_uses_explicit_repository_and_shared_store(tmp_path):
             "dataset": "Fe",
             "input_definition": "SCF",
         }},
-        transport=LocalTransport(),
+        target=LocalTarget(),
         backend=BackendConfig("kkrunner"),
     )
     assert record.project_id == project.id
@@ -48,7 +48,7 @@ def test_direct_runs_are_not_reported_as_reattachable(tmp_path):
     manager = project_run_manager(projects).for_project(project)
     record = manager.new_record(
         directory=tmp_path,
-        transport=SshTransport(host="cluster.example"),
+        target=SshTarget(host="cluster.example"),
         backend=BackendConfig("direct"),
         metadata={"ase2sprkkr": {"task": "DOS"}},
     )

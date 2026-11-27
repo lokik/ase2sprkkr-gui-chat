@@ -8,7 +8,7 @@ from ase.build import bulk
 from ase2sprkkr import InputParameters
 from kkrunner import ExecutionSpec, Run
 from kkrunner.backends import DirectBackend
-from kkrunner.client import EndpointClient
+from kkrunner.client import ExecutionClient
 from kkrunner.execution import MpiSpec
 from PyQt6.QtCore import QEventLoop, QTimer
 from PyQt6.QtWidgets import QMessageBox, QWidget
@@ -56,7 +56,7 @@ def test_missing_executable_shows_error_then_reopens_same_run_setup(monkeypatch,
                 mpi=MpiSpec(required=True, launcher=(sys.executable,)) if use_mpi else MpiSpec(),
                 directory=str(tmp_path), output_file=str(tmp_path / "output.txt"),
             )
-            runner = Run.untracked(EndpointClient(DirectBackend), spec)
+            runner = ExecutionClient(DirectBackend).create_run(spec, tracked=False)
             launched.append(runner)
             return runner
 
