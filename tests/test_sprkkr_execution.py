@@ -8,7 +8,8 @@ from ase import Atoms
 from ase2sprkkr import InputParameters
 from types import SimpleNamespace
 import pytest
-from kkrunner import ExecutionOutcome, ExecutionSpec
+from kkrunner import ExecutionOutcome
+from kkrunner.files import FileEntry, FileManifest
 
 from ase2sprkkr_gui.gui.application import sprkkr_execution as execution_module
 from ase2sprkkr_gui.gui.application.execution_cancellation import ExecutionCancelled
@@ -578,11 +579,7 @@ def test_submission_acknowledgement_precedes_completion_and_ignores_rejected_lau
 
     class Runner:
         record = None
-        spec = ExecutionSpec(
-            argv=("unused-test-executable",),
-            directory=str(tmp_path),
-            input_file=str(tmp_path / "Fe_SCF.inp"),
-        )
+        files = FileManifest(inputs=(FileEntry(str(tmp_path / "Fe_SCF.inp")),))
 
         def submit(self):
             events.append("submit")
@@ -682,3 +679,35 @@ def test_execution_notifies_with_authoritative_run_record(tmp_path):
     execution._notify_persistent_job_changed(SimpleNamespace(id=record.id, record=record))
     assert changes == [record]
     assert changes[0].store is manager.store
+
+
+def test_save_only_uses_ordinary_execution_manager(tmp_path, monkeypatch):
+    from kkrunner import RunManager, RunStore
+
+    manager = RunManager(RunStore(tmp_path / "history"))
+    execution = SprkkrExecution(
+        _request(tmp_path), _Cancellation(), execution_manager=manager,
+    )
+    captured = {}
+
+    class Calculator:
+        def save_input(self, **kwargs):
+            captured.update(kwargs)
+            return "parameters", "input.inp", "host.pot", None
+
+    monkeypatch.setattr(execution, "_calculator", lambda: Calculator())
+    execution.prepare_files()
+    assert captured["run_manager"] is manager
+
+
+@pytest.mark.parametrize("clear_cache", [False, True])
+def test_unassigned_run_rejects_disk_manager(tmp_path, clear_cache):
+    from kkrunner import RunManager, RunStore
+
+    manager = RunManager(RunStore(tmp_path / "history"))
+    execution = SprkkrExecution(
+        _request(tmp_path, clear_cache=clear_cache), _Cancellation(),
+        execution_manager=manager,
+    )
+    with pytest.raises(ValueError, match="session memory manager"):
+        execution.run()

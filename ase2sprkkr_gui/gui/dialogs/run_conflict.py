@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from kkrunner import RunState
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -37,7 +38,8 @@ class SubmissionConflictDialog(QDialog):
         introduction = QLabel(
             "Other recorded calculations reserve files needed by this run. "
             "Select jobs to stop, mark failed or delete their records. "
-            "The window stays open until you choose Cancel or Calculate.",
+            "If a calculation is preparing files, cancel it in its own run window "
+            "or refresh after preprocessing finishes.",
             self,
         )
         introduction.setWordWrap(True)
@@ -188,8 +190,16 @@ class SubmissionConflictDialog(QDialog):
             self.status_label.setText("Checking or updating existing jobs…")
         self._update_buttons()
 
+    def _actionable_selection(self):
+        selected = self.selected_keys()
+        # PREPROCESSING has no native job to stop.
+        if any(record.key in selected and record.state == RunState.PREPROCESSING
+               for record in self.conflicting_records):
+            return ()
+        return selected
+
     def _update_buttons(self, *_args) -> None:
-        selected = bool(self.selected_keys())
+        selected = bool(self._actionable_selection())
         for button in (self.stop_button, self.failed_button, self.delete_button):
             button.setEnabled(not self._busy and selected)
         self.refresh_button.setEnabled(not self._busy)
@@ -201,7 +211,7 @@ class SubmissionConflictDialog(QDialog):
     def _request(self, action: str) -> None:
         if self._busy:
             return
-        selected = () if action == "refresh" else self.selected_keys()
+        selected = () if action == "refresh" else self._actionable_selection()
         if action != "refresh" and not selected:
             return
         if action in ("fail", "delete"):
