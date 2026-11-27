@@ -56,7 +56,7 @@ def test_missing_executable_shows_error_then_reopens_same_run_setup(monkeypatch,
                 mpi=MpiSpec(required=True, launcher=(sys.executable,)) if use_mpi else MpiSpec(),
                 directory=str(tmp_path), output_file=str(tmp_path / "output.txt"),
             )
-            runner = ExecutionClient(DirectBackend).create_run(spec, persistent=False)
+            runner = ExecutionClient(DirectBackend).create_run(spec, tracked=False)
             launched.append(runner)
             return runner
 
